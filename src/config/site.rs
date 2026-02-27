@@ -1,4 +1,3 @@
-// src/config/site.rs
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use schemars::JsonSchema;
@@ -14,11 +13,29 @@ pub struct SiteConfig {
     #[serde(default)]
     pub domains: Vec<String>,
 
-    /// Optional TLS certificate override for this site
-    pub tls: Option<TlsOverride>,
+    /// List of listeners (each can have its own port and optional TLS)
+    #[serde(default)]
+    pub listeners: Vec<Listener>,
 
     /// List of routing rules
+    #[serde(default)]
     pub routes: Vec<Route>,
+}
+
+/// A network listener for this site (port + optional TLS)
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct Listener {
+    /// TCP port to listen on (default: 443)
+    #[serde(default = "default_port")]
+    pub port: u16,
+
+    /// Optional TLS certificate/key for this listener
+    #[serde(default)]
+    pub tls: Option<TlsOverride>,
+}
+
+fn default_port() -> u16 {
+    80
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
