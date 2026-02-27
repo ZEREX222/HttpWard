@@ -3,22 +3,22 @@
 use schemars::schema_for;
 use serde_json;
 
-use http_ward::config::AppConfig;
+use httpward::config::AppConfig;
 
 fn main() -> std::io::Result<()> {
     let schema = schema_for!(AppConfig);
 
     let json = serde_json::to_string_pretty(&schema)
-        .expect("Не удалось сериализовать схему");
+        .expect("Failed to serialize schema");
 
-    // 1. Создаем папку docs, если её нет
-    // Параметр recursive: true создаст всю цепочку папок
+    // 1. Create the docs directory if it does not exist
+    // The recursive flag ensures the full directory path is created
     std::fs::create_dir_all("docs")?;
 
-    // 2. Теперь записываем файл
+    // 2. Write the schema file
     std::fs::write("docs/config.schema.json", json)?;
 
-    println!("Схема успешно сохранена → docs/config.schema.json");
+    println!("Schema successfully written to → docs/config.schema.json");
 
     Ok(())
 }
