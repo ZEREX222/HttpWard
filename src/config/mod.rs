@@ -7,4 +7,4 @@ mod loader;
 
 pub use global::{GlobalConfig, TlsDefault, LogConfig};
 pub use site::{SiteConfig, TlsOverride, Route, Match, Redirect};
-pub use loader::{AppConfig};
+pub use loader::{AppConfig, load};

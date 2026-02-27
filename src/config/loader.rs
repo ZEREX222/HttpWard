@@ -13,7 +13,7 @@ pub struct AppConfig {
     pub sites: Vec<SiteConfig>,
 }
 
-/*pub fn load(config_path: impl AsRef<Path>) -> Result<AppConfig> {
+pub fn load(config_path: impl AsRef<Path>) -> Result<AppConfig> {
     // 1. Load global config
     let global_content = fs::read_to_string(&config_path)
         .context("Cannot read global config file")?;
@@ -53,4 +53,4 @@ pub struct AppConfig {
     }
 
     Ok(AppConfig { global, sites })
-}*/
+}

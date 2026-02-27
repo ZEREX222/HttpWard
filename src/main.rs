@@ -1,10 +1,11 @@
 mod config;
-// use config::load;
+use config::load;
+use anyhow::Context;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("HttpWard starting...");
 
-    /*let config = load("httpward.yaml")
+    let config = load("httpward.yaml")
         .context("Failed to load configuration")?;
 
     println!("\nGlobal:");
@@ -20,5 +21,5 @@ fn main() {
 
     // Дальше будет сервер...
 
-    Ok(())*/
+    Ok(())
 }
