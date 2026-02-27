@@ -60,7 +60,7 @@ pub fn load(config_path: impl AsRef<Path>) -> Result<AppConfig> {
 
 fn validate_site_config(site: &SiteConfig, file_name: &str) -> Result<()> {
     if site.domain.is_empty() && site.domains.is_empty() {
-        panic!("Error in config: `{}`, must have at least `domain` or one entry in `domains`", file_name);
+        panic!("Error in the config: `{}`, must have at least `domain` or one entry in `domains`", file_name);
     }
     Ok(())
 }
