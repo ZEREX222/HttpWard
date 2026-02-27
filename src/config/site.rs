@@ -8,6 +8,7 @@ use crate::config::global::{Listener, Route, Tls};
 #[serde(default, deny_unknown_fields)]
 pub struct SiteConfig {
     /// Primary domain name (used for SNI matching & logging)
+    #[serde(default)]
     pub domain: String,
 
     /// Additional domain names / aliases

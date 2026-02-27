@@ -2,9 +2,9 @@
 use anyhow::{Context, Result};
 use glob::glob;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 use schemars::JsonSchema;
-use tracing::{info, warn};
+use tracing::{error, info};
 use super::{GlobalConfig, SiteConfig};
 
 /// Combined configuration in memory: global + all loaded sites
@@ -19,7 +19,7 @@ pub fn load(config_path: impl AsRef<Path>) -> Result<AppConfig> {
     let global_content = fs::read_to_string(&config_path)
         .context("Cannot read httpward.yaml config file")?;
 
-    let mut global: GlobalConfig = serde_yaml::from_str(&global_content)
+    let global: GlobalConfig = serde_yaml::from_str(&global_content)
         .context("Cannot parse httpward.yaml config (YAML error)")?;
 
     // 2. Load per-site configs
@@ -42,11 +42,25 @@ pub fn load(config_path: impl AsRef<Path>) -> Result<AppConfig> {
                 let site: SiteConfig = serde_yaml::from_str(&content)
                     .context(format!("Cannot parse site config {:?}: YAML error", path))?;
 
-                info!("Loaded site config: {}", site.domain);
+                let file_name = path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("<unknown>");
+
+                validate_site_config(&site, file_name)
+                    .context(format!("Invalid site config {:?}: no domain specified", path))?;
+
+                info!("Loaded site config: {}", file_name);
                 sites.push(site);
             }
         }
     }
 
     Ok(AppConfig { global, sites })
+}
+
+fn validate_site_config(site: &SiteConfig, file_name: &str) -> Result<()> {
+    if site.domain.is_empty() && site.domains.is_empty() {
+        panic!("Error in config: `{}`, must have at least `domain` or one entry in `domains`", file_name);
+    }
+    Ok(())
 }

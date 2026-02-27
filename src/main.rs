@@ -1,8 +1,7 @@
 mod config;
 use config::load;
-use anyhow::Context;
 
-use tracing::{info, warn, error, debug};
+use tracing::{info, debug};
 use tracing_subscriber::{EnvFilter};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
