@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "httpward-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "glob",
@@ -71,7 +71,7 @@ dependencies = [
 
 [[package]]
 name = "httpward-docs"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "httpward-core",
  "schemars",

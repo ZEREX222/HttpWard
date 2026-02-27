@@ -1,3 +1,7 @@
+[lib]
+name = "httpward_core"
+# crate-type = ["cdylib"]
+
 [package]
 name = "httpward-core"
 version = "0.0.1"
