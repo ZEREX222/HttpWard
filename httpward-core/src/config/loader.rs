@@ -4,7 +4,7 @@ use glob::glob;
 use std::fs;
 use std::path::{Path};
 use schemars::JsonSchema;
-use tracing::{error, info};
+use tracing::{info};
 use super::{GlobalConfig, SiteConfig};
 
 /// Combined configuration in memory: global + all loaded sites

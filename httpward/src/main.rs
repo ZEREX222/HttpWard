@@ -1,5 +1,4 @@
-mod config;
-use config::load;
+use httpward_core::config::load;
 
 use tracing::{info, debug};
 use tracing_subscriber::{EnvFilter};
