@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
-use crate::config::global::{Listener, Route, Tls};
+use crate::config::global::{Listener, Route};
 
 /// Configuration for one virtual host / site
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
@@ -14,10 +14,6 @@ pub struct SiteConfig {
     /// Additional domain names / aliases
     #[serde(default)]
     pub domains: Vec<String>,
-
-    /// Optional TLS override for this site (SNI-level override)
-    #[serde(default)]
-    pub tls: Option<Tls>,
 
     /// Optional site-specific listeners (overrides global listeners)
     #[serde(default)]

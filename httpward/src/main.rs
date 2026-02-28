@@ -1,7 +1,13 @@
+mod runtime;
+
 use httpward_core::config::load;
 
 use tracing::{info, debug};
 use tracing_subscriber::{EnvFilter};
+
+
+use runtime::server_plan::build_server_plan;
+
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = load("httpward.yaml")?;
@@ -22,6 +28,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug!("Loaded {} sites:", config.sites.len());
     for site in &config.sites {
         debug!("  • {} ({} routes)", site.domain, site.routes.len());
+    }
+
+    let servers = build_server_plan(&config);
+
+    for server in &servers {
+        debug!(
+            "Will start server on {}:{} ({} sites attached)",
+            server.bind.host,
+            server.bind.port,
+            server.sites.len()
+        );
     }
 
     debug!("Hello from HttpWard!");

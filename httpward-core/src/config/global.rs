@@ -30,16 +30,12 @@ pub struct Listener {
     pub host: String,
 
     /// TCP port
-    #[serde(default = "default_port")]
+    #[serde(default)]
     pub port: u16,
 
     /// Optional TLS configuration
     #[serde(default)]
     pub tls: Option<Tls>,
-}
-
-fn default_port() -> u16 {
-    80
 }
 
 fn default_host() -> String {
