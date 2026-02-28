@@ -1,15 +1,17 @@
 mod runtime;
+mod server;
 
 use httpward_core::config::load;
 
 use tracing::{info, debug};
 use tracing_subscriber::{EnvFilter};
-
-
+use httpward_core::middleware::{LoggerMiddleware, Middleware};
 use runtime::server_plan::build_server_plan;
+use server::http_server::HttpServer;
+use crate::server::manager::ServerManager;
 
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let config = load("httpward.yaml")?;
 
     let filter = EnvFilter::try_from_default_env()
@@ -30,16 +32,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         debug!("  • {} ({} routes)", site.domain, site.routes.len());
     }
 
-    let servers = build_server_plan(&config);
+    let server_plans = build_server_plan(&config);
 
-    for server in &servers {
+    for server in &server_plans {
         debug!(
             "Will start server on {}:{} ({} sites attached)",
             server.bind.host,
             server.bind.port,
             server.sites.len()
-        );
+            )
     }
+
+    let mut instances = vec![];
+
+    for plan in server_plans {
+        // 2. Define Middlewares for this specific server instance
+        let mut pipeline: Vec<Box<dyn Middleware>> = vec![];
+        pipeline.push(Box::new(LoggerMiddleware));
+        // pipeline.push(Box::new(AuthMiddleware::new()));
+
+        // 3. Create the HttpServer
+        let server = HttpServer::new(
+            &plan.bind.host,
+            plan.bind.port,
+            pipeline
+        );
+
+        instances.push(server);
+    }
+
+    // 4. Run all servers concurrently
+    ServerManager::start_all(instances).await?;
 
     debug!("Hello from HttpWard!");
 
