@@ -13,9 +13,9 @@ hyper = { workspace = true }
 hyper-util = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+http-body-util = { workspace = true }
 tracing-subscriber = { workspace = true }
 httpward-core = { path = "../httpward-core" }
-http-body-util = "0.1"
 
 [dev-dependencies]
 

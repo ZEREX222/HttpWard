@@ -224,6 +224,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "glob",
+ "http-body-util",
  "hyper",
  "hyper-util",
  "schemars",
