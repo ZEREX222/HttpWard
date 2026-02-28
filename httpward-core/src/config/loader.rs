@@ -26,9 +26,7 @@ pub fn load(config_path: impl AsRef<Path>) -> Result<AppConfig> {
     let sites_dir = &global.sites_enabled;
     let mut sites = Vec::new();
 
-    if !sites_dir.exists() {
-        info!("Warning: sites_enabled directory not found: {:?}", sites_dir);
-    } else {
+    if sites_dir.exists() {
         for pattern in ["*.yaml", "*.yml"] {
             let full_pattern = sites_dir.join(pattern);
             for entry in glob(full_pattern.to_str().unwrap_or_default())

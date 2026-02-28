@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AppConfig",
+  "description": "Combined configuration in memory: global + all loaded sites",
+  "type": "object",
+  "properties": {
+    "global": {
+      "$ref": "#/$defs/GlobalConfig"
+    },
+    "sites": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SiteConfig"
+      }
+    }
+  },
+  "required": [
+    "global",
+    "sites"
+  ],
+  "$defs": {
+    "GlobalConfig": {
+      "description": "Global application configuration (loaded from httpward.yaml)",
+      "type": "object",
+      "properties": {
+        "listeners": {
+          "description": "Network listeners (bind address + port + optional TLS)",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Listener"
+          },
+          "default": []
+        },
+        "routes": {
+          "description": "Global routing rules (executed before site-level routes)",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Route"
+          },
+          "default": []
+        },
+        "log": {
+          "description": "Logging configuration",
+          "$ref": "#/$defs/LogConfig",
+          "default": {
+            "level": ""
+          }
+        },
+        "sites_enabled": {
+          "description": "Path to directory with per-site .yaml / .yml files",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "Listener": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "description": "Bind address (default: 0.0.0.0)",
+          "type": "string",
+          "default": "0.0.0.0"
+        },
+        "port": {
+          "description": "TCP port",
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 80
+        },
+        "tls": {
+          "description": "Optional TLS configuration",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tls"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      }
+    },
+    "Tls": {
+      "type": "object",
+      "properties": {
+        "cert": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cert",
+        "key"
+      ]
+    },
+    "Route": {
+      "description": "Single routing rule — proxy / static / redirect",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "match": {
+              "$ref": "#/$defs/Match"
+            },
+            "backend": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "match",
+            "backend"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "match": {
+              "$ref": "#/$defs/Match"
+            },
+            "static_dir": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "match",
+            "static_dir"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "match": {
+              "$ref": "#/$defs/Match"
+            },
+            "redirect": {
+              "$ref": "#/$defs/Redirect"
+            }
+          },
+          "required": [
+            "match",
+            "redirect"
+          ]
+        }
+      ]
+    },
+    "Match": {
+      "type": "object",
+      "properties": {
+        "path_prefix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "path_regex": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "Redirect": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string"
+        },
+        "code": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535,
+          "default": 301
+        }
+      },
+      "required": [
+        "to"
+      ]
+    },
+    "LogConfig": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "description": "Logging level (\"trace\" | \"debug\" | \"info\" | \"warn\" | \"error\")",
+          "type": "string",
+          "default": "warn"
+        }
+      }
+    },
+    "SiteConfig": {
+      "description": "Configuration for one virtual host / site",
+      "type": "object",
+      "properties": {
+        "domain": {
+          "description": "Primary domain name (used for SNI matching & logging)",
+          "type": "string",
+          "default": ""
+        },
+        "domains": {
+          "description": "Additional domain names / aliases",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "tls": {
+          "description": "Optional TLS override for this site (SNI-level override)",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tls"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "listeners": {
+          "description": "Optional site-specific listeners (overrides global listeners)",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Listener"
+          },
+          "default": []
+        },
+        "routes": {
+          "description": "Site-level routing rules",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Route"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
