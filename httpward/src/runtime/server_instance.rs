@@ -9,18 +9,21 @@ pub struct TlsPaths {
     pub key: PathBuf,
 }
 
-/// A site paired with its resolved TLS credentials
-#[derive(Debug)]
-pub struct SitePlan {
-    pub config: SiteConfig,
-    pub tls_paths: Option<TlsPaths>,
+/// A mapping between a set of domains and their specific certificate files.
+/// Used for SNI (Server Name Indication) lookup during the TLS handshake.
+#[derive(Debug, Clone)]
+pub struct TlsMapping {
+    pub domains: Vec<String>,
+    pub paths: TlsPaths,
 }
 
 /// Runtime server instance description.
 #[derive(Debug)]
 pub struct ServerInstance {
     pub bind: ListenerKey,
-    /// Now holds SitePlan instead of raw SiteConfig
-    pub sites: Vec<SitePlan>,
+    /// List of raw site configurations assigned to this listener.
+    pub sites: Vec<SiteConfig>,
+    /// Resolved TLS mappings (domain -> cert/key) for this specific listener.
+    pub tls_registry: Vec<TlsMapping>,
     pub global: GlobalConfig,
 }

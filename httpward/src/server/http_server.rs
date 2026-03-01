@@ -1,44 +1,28 @@
-use tokio::net::TcpListener;
-use std::sync::Arc;
-use std::fs::File;
-use std::io::BufReader;
-use std::collections::HashMap;
+use http_body_util::{Either, Full};
+use hyper::body::Bytes;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use http_body_util::{Full, Either};
-use hyper::body::Bytes;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::Arc;
+use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
+use crate::server::tls_resolver::SniResolver;
+
 // TLS & SNI imports
+use tokio_rustls::TlsAcceptor;
 use tokio_rustls::rustls::{
     ServerConfig,
     pki_types::{CertificateDer, PrivateKeyDer},
-    server::{ResolvesServerCert, ClientHello},
+    server::{ClientHello, ResolvesServerCert},
     sign::CertifiedKey,
 };
-use tokio_rustls::TlsAcceptor;
 
-use httpward_core::middleware::{Middleware, MiddlewareFuture, RequestContext};
 use crate::runtime::server_instance::ServerInstance;
-
-/// Custom resolver using SitePlan mapping for SNI
-#[derive(Debug)]
-struct SniResolver {
-    cert_map: HashMap<String, Arc<CertifiedKey>>,
-}
-
-impl ResolvesServerCert for SniResolver {
-    fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
-        if let Some(name) = client_hello.server_name() {
-            if let Some(cert) = self.cert_map.get(name) {
-                return Some(Arc::clone(cert));
-            }
-        }
-        // Fallback to the first available certificate in the map
-        self.cert_map.values().next().cloned()
-    }
-}
+use httpward_core::middleware::{Middleware, MiddlewareFuture, RequestContext};
 
 pub struct HttpServer {
     pub instance: ServerInstance,
@@ -53,59 +37,78 @@ impl HttpServer {
         }
     }
 
-    /// Attempts to build the TLS configuration. Returns Err if no valid certs are found.
+    /// Attempts to build the TLS configuration using the pre-resolved tls_registry.
+    /// Returns Err if no valid certs are found or if key loading fails.
     fn create_sni_config(&self) -> Result<ServerConfig, Box<dyn std::error::Error + Send + Sync>> {
         let mut cert_map = HashMap::new();
         let provider = tokio_rustls::rustls::crypto::ring::default_provider();
 
-        for site_plan in &self.instance.sites {
-            if let Some(tls) = &site_plan.tls_paths {
-                let certs = self.load_certs(&tls.cert)?;
-                let key_der = self.load_private_key(&tls.key)?;
+        let mut default_cert = None;
+        // Now we iterate directly over the pre-filtered registry
+        for mapping in &self.instance.tls_registry {
+            let certs = self.load_certs(&mapping.paths.cert)?;
+            let key_der = self.load_private_key(&mapping.paths.key)?;
 
-                let key_payload = provider.key_provider.load_private_key(key_der)
-                    .map_err(|_| format!("Unsupported key format for domain: {}", site_plan.config.domain))?;
+            // Load the private key using the specific provider (Ring)
+            let key_payload = provider
+                .key_provider
+                .load_private_key(key_der)
+                .map_err(|_| {
+                    format!(
+                        "Unsupported or invalid key format for domains: {:?}",
+                        mapping.domains
+                    )
+                })?;
 
-                let certified_key = Arc::new(CertifiedKey::new(certs, key_payload));
+            let certified_key = Arc::new(CertifiedKey::new(certs, key_payload));
 
-                // Register primary domain
-                if !site_plan.config.domain.is_empty() {
-                    cert_map.insert(site_plan.config.domain.clone(), Arc::clone(&certified_key));
-                }
+            if (default_cert.is_none()) {
+                default_cert = Some(Arc::clone(&certified_key));
+            }
 
-                // Register alias domains
-                for alias in &site_plan.config.domains {
-                    if !alias.is_empty() {
-                        cert_map.insert(alias.clone(), Arc::clone(&certified_key));
-                    }
+            // Map every domain associated with this certificate into the SNI resolver
+            for domain in &mapping.domains {
+                if !domain.is_empty() {
+                    cert_map.insert(domain.clone(), Arc::clone(&certified_key));
                 }
             }
         }
 
         if cert_map.is_empty() {
-            return Err("No sites with valid TLS paths found".into());
+            return Err("No valid TLS mappings found in registry".into());
         }
 
-        let resolver = SniResolver { cert_map };
+        let resolver = SniResolver {
+            cert_map,
+            default_cert,
+        };
 
+        // Build the final rustls ServerConfig
         let mut config = ServerConfig::builder_with_provider(Arc::new(provider))
             .with_safe_default_protocol_versions()?
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(resolver));
 
+        // Basic ALPN setup (HTTP/1.1 is standard, add b"h2" if you support HTTP/2)
         config.alpn_protocols = vec![b"http/1.1".to_vec()];
 
         Ok(config)
     }
 
-    fn load_certs(&self, path: &std::path::Path) -> Result<Vec<CertificateDer<'static>>, Box<dyn std::error::Error + Send + Sync>> {
+    fn load_certs(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<Vec<CertificateDer<'static>>, Box<dyn std::error::Error + Send + Sync>> {
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
         let certs = rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?;
         Ok(certs)
     }
 
-    fn load_private_key(&self, path: &std::path::Path) -> Result<PrivateKeyDer<'static>, Box<dyn std::error::Error + Send + Sync>> {
+    fn load_private_key(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<PrivateKeyDer<'static>, Box<dyn std::error::Error + Send + Sync>> {
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
         let key = rustls_pemfile::private_key(&mut reader)?
@@ -123,11 +126,17 @@ impl HttpServer {
         // Try to initialize TLS. If it fails, we fall back to plain HTTP.
         let tls_acceptor = match self.create_sni_config() {
             Ok(config) => {
-                info!("TLS/SNI initialized. Server listening on https://{}", display_addr);
+                info!(
+                    "TLS/SNI initialized. Server listening on https://{}",
+                    display_addr
+                );
                 Some(TlsAcceptor::from(Arc::new(config)))
             }
             Err(e) => {
-                warn!("TLS initialization skipped: {}. Falling back to plain HTTP.", e);
+                warn!(
+                    "TLS initialization skipped: {}. Falling back to plain HTTP.",
+                    e
+                );
                 info!("Server listening on http://{}", display_addr);
                 None
             }
@@ -164,17 +173,14 @@ impl HttpServer {
 async fn serve_connection<I>(
     io: I,
     client_addr: std::net::SocketAddr,
-    pipeline: Arc<Vec<Box<dyn Middleware>>>
-)
-where
-    I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static
+    pipeline: Arc<Vec<Box<dyn Middleware>>>,
+) where
+    I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
 {
     let service = service_fn(move |req| {
         let mut ctx = RequestContext::new(client_addr);
         let pipe = Arc::clone(&pipeline);
-        async move {
-            execute_pipeline(0, pipe, req, &mut ctx).await
-        }
+        async move { execute_pipeline(0, pipe, req, &mut ctx).await }
     });
 
     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
@@ -201,7 +207,9 @@ fn execute_pipeline<'a>(
             // Default response if no middleware handles the request
             Ok(hyper::Response::builder()
                 .status(200)
-                .body(Either::Left(Full::new(Bytes::from("Backend Reached (Multi-protocol)"))))
+                .body(Either::Left(Full::new(Bytes::from(
+                    "Backend Reached (Multi-protocol)",
+                ))))
                 .unwrap())
         }
     })

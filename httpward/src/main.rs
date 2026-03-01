@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             server.bind.host,
             server.bind.port,
             server.sites.len(),
-            server.sites.iter().map(|s| s.tls_paths.is_some()).count()
+            server.tls_registry.len()
             )
     }
 
