@@ -44,7 +44,11 @@ fn default_host() -> String {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Tls {
+    #[serde(default)]
+    pub self_signed: bool,
+    #[serde(default)]
     pub cert: PathBuf,
+    #[serde(default)]
     pub key: PathBuf,
 }
 

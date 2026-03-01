@@ -1,13 +1,26 @@
-use httpward_core::config::SiteConfig;
+// server/server_instance.rs
+use std::path::PathBuf;
+use httpward_core::config::{SiteConfig, GlobalConfig};
 use super::listener::ListenerKey;
 
-/// Runtime server instance description.
-/// Represents one real TCP server that must be started.
-#[derive(Debug)]
-pub struct ServerInstance<'a> {
-    /// Socket bind information
-    pub bind: ListenerKey,
+#[derive(Debug, Clone)]
+pub struct TlsPaths {
+    pub cert: PathBuf,
+    pub key: PathBuf,
+}
 
-    /// Sites attached to this server (virtual hosts)
-    pub sites: Vec<&'a SiteConfig>,
+/// A site paired with its resolved TLS credentials
+#[derive(Debug)]
+pub struct SitePlan {
+    pub config: SiteConfig,
+    pub tls_paths: Option<TlsPaths>,
+}
+
+/// Runtime server instance description.
+#[derive(Debug)]
+pub struct ServerInstance {
+    pub bind: ListenerKey,
+    /// Now holds SitePlan instead of raw SiteConfig
+    pub sites: Vec<SitePlan>,
+    pub global: GlobalConfig,
 }

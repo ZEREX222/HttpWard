@@ -16,6 +16,10 @@ tracing = { workspace = true }
 http-body-util = { workspace = true }
 tracing-subscriber = { workspace = true }
 httpward-core = { path = "../httpward-core" }
+rustls = { version = "0.23", features = ["ring"] }
+tokio-rustls = "0.26"
+rustls-pemfile = "2.2"
+rcgen = "0.13"
 
 [dev-dependencies]
 

@@ -36,10 +36,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     for server in &server_plans {
         debug!(
-            "Will start server on {}:{} ({} sites attached)",
+            "Will start server on {}:{} ({} sites attached / {} TLS attached)",
             server.bind.host,
             server.bind.port,
-            server.sites.len()
+            server.sites.len(),
+            server.sites.iter().map(|s| s.tls_paths.is_some()).count()
             )
     }
 
@@ -53,8 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // 3. Create the HttpServer
         let server = HttpServer::new(
-            &plan.bind.host,
-            plan.bind.port,
+            plan,
             pipeline
         );
 

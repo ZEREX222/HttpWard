@@ -8,7 +8,7 @@ use std::path::Path;
 use tracing::info;
 
 /// Combined configuration in memory: global + all loaded sites
-#[derive(Debug, JsonSchema)]
+#[derive(Debug, Clone, JsonSchema)]
 pub struct AppConfig {
     pub global: GlobalConfig,
     pub sites: Vec<SiteConfig>,
