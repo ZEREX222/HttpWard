@@ -1,9 +1,8 @@
-use std::fs;
-use std::path::PathBuf;
-use std::env;
-use rcgen::generate_simple_self_signed;
-use tracing::{info, debug};
 use crate::runtime::server_instance::TlsPaths;
+use rcgen::generate_simple_self_signed;
+use std::env;
+use std::fs;
+use tracing::{debug, info};
 
 /// Provisions a self-signed certificate for a list of domains in the temp directory.
 /// The first domain in the list is used as the primary directory name.
@@ -50,7 +49,7 @@ pub fn provision_self_signed(domains: &[String]) -> Result<TlsPaths, Box<dyn std
 
     // 5. Write PEM files
     fs::write(&cert_path, cert.cert.pem())?;
-    fs::write(&key_path, cert.key_pair.serialize_pem())?;
+    fs::write(&key_path, cert.signing_key.serialize_pem())?;
 
     Ok(TlsPaths {
         cert: cert_path,

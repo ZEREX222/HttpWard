@@ -1,26 +1,24 @@
 use http_body_util::{Either, Full};
 use hyper::body::Bytes;
-use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
+use hyper_util::server::conn::auto;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
-use hyper_util::server::conn::auto;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
 use crate::server::tls_resolver::SniResolver;
 
+use tokio_rustls::rustls::{
+    pki_types::{CertificateDer, PrivateKeyDer},
+    sign::CertifiedKey,
+    ServerConfig,
+};
 // TLS & SNI imports
 use tokio_rustls::TlsAcceptor;
-use tokio_rustls::rustls::{
-    ServerConfig,
-    pki_types::{CertificateDer, PrivateKeyDer},
-    server::{ClientHello, ResolvesServerCert},
-    sign::CertifiedKey,
-};
 
 use crate::runtime::server_instance::ServerInstance;
 use httpward_core::middleware::{Middleware, MiddlewareFuture, RequestContext};
@@ -63,7 +61,7 @@ impl HttpServer {
 
             let certified_key = Arc::new(CertifiedKey::new(certs, key_payload));
 
-            if (default_cert.is_none()) {
+            if default_cert.is_none() {
                 default_cert = Some(Arc::clone(&certified_key));
             }
 
