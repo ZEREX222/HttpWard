@@ -1,7 +1,7 @@
 // server/tls_resolver.rs
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio_rustls::rustls::server::{ResolvesServerCert, ClientHello};
+use tokio_rustls::rustls::server::{ClientHello, ResolvesServerCert};
 use tokio_rustls::rustls::sign::CertifiedKey;
 
 #[derive(Debug)]
@@ -11,6 +11,7 @@ pub struct SniResolver {
     pub default_cert: Option<Arc<CertifiedKey>>,
 }
 
+// In your SniResolver implementation
 impl ResolvesServerCert for SniResolver {
     fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
         // 1. Attempt to find a certificate by the SNI hostname
@@ -19,9 +20,6 @@ impl ResolvesServerCert for SniResolver {
                 return Some(Arc::clone(cert));
             }
         }
-
-        // 2. Fallback to the default certificate if SNI match failed or SNI is absent.
-        // If default_cert is also None, rustls will terminate the connection.
         self.default_cert.as_ref().map(Arc::clone)
     }
 }

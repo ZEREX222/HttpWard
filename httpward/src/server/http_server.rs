@@ -12,6 +12,8 @@ use tracing::{error, info, warn};
 
 use crate::server::tls_resolver::SniResolver;
 
+use crate::runtime::server_instance::ServerInstance;
+use httpward_core::middleware::{Middleware, MiddlewareFuture, RequestContext};
 use tokio_rustls::rustls::{
     pki_types::{CertificateDer, PrivateKeyDer},
     sign::CertifiedKey,
@@ -19,9 +21,8 @@ use tokio_rustls::rustls::{
 };
 // TLS & SNI imports
 use tokio_rustls::TlsAcceptor;
-
-use crate::runtime::server_instance::ServerInstance;
-use httpward_core::middleware::{Middleware, MiddlewareFuture, RequestContext};
+use tracing::field::debug;
+use log::debug;
 
 pub struct HttpServer {
     pub instance: ServerInstance,
@@ -154,8 +155,30 @@ impl HttpServer {
                     // HTTPS Path
                     match tls_acceptor.accept(stream).await {
                         Ok(tls_stream) => {
+                            let (_, session) = tls_stream.get_ref();
+
+                            // 1. Get the Negotiated Protocol (e.g., TLS13)
+                            let protocol = format!("{:?}", session.protocol_version());
+
+                            // 2. Get the Chosen Cipher Suite
+                            let suite = session.negotiated_cipher_suite()
+                                .map(|s| format!("{:?}", s.suite()))
+                                .unwrap_or_else(|| "unknown".to_string());
+
+                            // 3. Get the SNI hostname used
+                            let sni = session.server_name().unwrap_or("no-sni").to_string();
+
+                            // 4. Generate a unique ID
+                            // Since peer_suites() is hard to reach after the handshake without custom state,
+                            // we use the Session ID or the unique memory pointer as the 'Fingerprint'
+                            // for this specific connection.
+                            let conn_id = format!("{:p}", session);
+
+                            // Combine into a string: "PROTOCOL | SUITE | SNI | CONN_ID"
+                            let tls_identity = format!("{}|{}|{}|{}", protocol, suite, sni, conn_id);
+
                             let io = TokioIo::new(tls_stream);
-                            serve_connection(io, client_addr, pipeline).await;
+                            serve_connection(io, client_addr, pipeline, Some(tls_identity)).await;
                         }
                         Err(e) => {
                             error!("[TLS Handshake Error] {}: {:?}", client_addr, e);
@@ -164,7 +187,7 @@ impl HttpServer {
                 } else {
                     // HTTP Path
                     let io = TokioIo::new(stream);
-                    serve_connection(io, client_addr, pipeline).await;
+                    serve_connection(io, client_addr, pipeline, None).await;
                 }
             });
         }
@@ -176,9 +199,11 @@ async fn serve_connection<I>(
     io: I,
     client_addr: std::net::SocketAddr,
     pipeline: Arc<Vec<Box<dyn Middleware>>>,
+    tls_session_id: Option<String>,
 ) where
     I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
 {
+    debug!("[TLS fingerprint] {}", tls_session_id.unwrap_or("no-tls".parse().unwrap()));
     let service = service_fn(move |req| {
         let mut ctx = RequestContext::new(client_addr);
         let pipe = Arc::clone(&pipeline);
