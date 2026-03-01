@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
+use hyper_util::server::conn::auto;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
@@ -90,7 +91,10 @@ impl HttpServer {
             .with_cert_resolver(Arc::new(resolver));
 
         // Basic ALPN setup (HTTP/1.1 is standard, add b"h2" if you support HTTP/2)
-        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        config.alpn_protocols = vec![
+            b"h2".to_vec(),
+            b"http/1.1".to_vec()
+        ];
 
         Ok(config)
     }
@@ -183,7 +187,10 @@ async fn serve_connection<I>(
         async move { execute_pipeline(0, pipe, req, &mut ctx).await }
     });
 
-    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+    // Use the auto builder to support both HTTP/1.1 and HTTP/2
+    let builder = auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+
+    if let Err(err) = builder.serve_connection(io, service).await {
         error!("[Hyper Error] {}: {:?}", client_addr, err);
     }
 }
