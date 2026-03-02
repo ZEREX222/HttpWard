@@ -9,7 +9,7 @@ use rama::tls::rustls::{
 };
 use rustls::{
     ServerConfig,
-    server::ResolvesServerCertUsingSni,
+    server::{ResolvesServerCert, ClientHello},
     pki_types::{CertificateDer, PrivateKeyDer},
     sign::CertifiedKey,
 };
@@ -31,7 +31,7 @@ impl TlsConfigBuilder {
         Self { mappings }
     }
 
-    /// Build TLS acceptor data with SNI support for multiple domains
+    /// Build TLS acceptor data with SNI support for multiple domains and fallback
     pub async fn build(self) -> Result<TlsAcceptorData, TlsError> {
         if self.mappings.is_empty() {
             return Err("No TLS mappings available".into());
@@ -42,31 +42,43 @@ impl TlsConfigBuilder {
             .install_default()
             .map_err(|_| "Failed to install ring crypto provider")?;
 
-        // Load certificates for all domains
-        let mut sni_resolver = ResolvesServerCertUsingSni::new();
+        // Load all certificates and build SNI resolver with fallback
+        let mut domain_to_cert: std::collections::HashMap<String, Arc<CertifiedKey>> = std::collections::HashMap::new();
+        let mut fallback_cert: Option<Arc<CertifiedKey>> = None;
 
         for mapping in &self.mappings {
             let cert_chain = load_cert_chain(&mapping.paths.cert).await?;
             let key = load_private_key(&mapping.paths.key).await?;
 
             // Create certified key
-            let certified_key = CertifiedKey::new(
+            let certified_key = Arc::new(CertifiedKey::new(
                 cert_chain,
                 rustls::crypto::ring::sign::any_supported_type(&key)?
-            );
+            ));
 
-            // Add to SNI resolver for each domain
+            // Set as fallback if it's the first certificate
+            if fallback_cert.is_none() {
+                fallback_cert = Some(certified_key.clone());
+                info!("Set fallback TLS certificate");
+            }
+
+            // Add to domain map for each domain
             for domain in &mapping.domains {
                 let domain_lower = domain.to_lowercase();
-                sni_resolver.add(domain_lower.as_str(), certified_key.clone())?;
+                domain_to_cert.insert(domain_lower.clone(), certified_key.clone());
                 info!("Added TLS certificate for domain: {}", domain);
             }
         }
 
-        // Build rustls server config with SNI resolver
+        let resolver = FallbackSniResolver {
+            domain_to_cert,
+            fallback_cert: fallback_cert.ok_or("No fallback certificate available")?,
+        };
+
+        // Build rustls server config with custom resolver
         let mut server_config = ServerConfig::builder()
             .with_no_client_auth()
-            .with_cert_resolver(Arc::new(sni_resolver));
+            .with_cert_resolver(Arc::new(resolver));
 
         // Set ALPN protocols for HTTP/1.1 and HTTP/2
         server_config.alpn_protocols = vec![
@@ -78,6 +90,31 @@ impl TlsConfigBuilder {
         let tls_data = TlsAcceptorDataBuilder::from(server_config).build();
 
         Ok(tls_data)
+    }
+}
+
+/// Custom SNI resolver with fallback to first certificate
+#[derive(Debug)]
+struct FallbackSniResolver {
+    domain_to_cert: std::collections::HashMap<String, Arc<CertifiedKey>>,
+    fallback_cert: Arc<CertifiedKey>,
+}
+
+impl ResolvesServerCert for FallbackSniResolver {
+    fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+        // Try to find certificate by SNI - server_name() returns &str directly
+        if let Some(server_name) = client_hello.server_name() {
+            let domain = server_name.to_lowercase();
+
+            if let Some(cert) = self.domain_to_cert.get(&domain) {
+                info!("Resolved TLS certificate for domain: {}", domain);
+                return Some(cert.clone());
+            }
+        }
+
+        // Return fallback certificate (first in registry) when no SNI match
+        info!("No SNI match, using fallback certificate");
+        Some(self.fallback_cert.clone())
     }
 }
 
