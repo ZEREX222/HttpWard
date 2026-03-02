@@ -8,10 +8,8 @@ version = "0.0.1"
 edition = "2024"
 
 [dependencies]
-hyper = { workspace = true }
-hyper-util = { workspace = true }
-http-body-util = { workspace = true }
 tracing = { workspace = true }
+rama = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 anyhow = "1.0"

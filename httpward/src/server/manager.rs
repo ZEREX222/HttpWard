@@ -1,24 +1,28 @@
 use tracing::{error, info};
-// server/manager.rs
-use crate::server::http_server::HttpServer;
+use rama::graceful::Shutdown;
+use crate::server::http_server::HttpWardServer;
 
 pub struct ServerManager;
 
 impl ServerManager {
     /// Spawns all servers into the Tokio runtime and waits for them
-    pub async fn start_all<'a>(servers: Vec<HttpServer>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn start_all(servers: Vec<HttpWardServer>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut handles = vec![];
 
         for server in servers {
-            let host = &server.instance.bind.host;
+            let host = server.instance.bind.host.clone();
             let port = server.instance.bind.port;
             let addr_str = format!("{}:{}", host, port);
             
-            info!("📡 Starting HttpServer on {}", addr_str);
+            info!("📡 Starting HttpWardServer on {}", addr_str);
 
+            // Create a shutdown channel for this server
+            let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+            let shutdown = Shutdown::new(shutdown_rx);
+            
             // We move the server into a spawned task
             let handle = tokio::spawn(async move {
-                if let Err(e) = server.run().await {
+                if let Err(e) = server.run(shutdown).await {
                     error!("🔥 Server at {} stopped with error: {}", addr_str, e);
                 }
             });

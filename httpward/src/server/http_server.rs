@@ -1,246 +1,95 @@
-use http_body_util::{Either, Full};
-use hyper::body::Bytes;
-use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
-use hyper_util::server::conn::auto;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
-use std::sync::Arc;
-use tokio::net::TcpListener;
+use rama::{
+    graceful::Shutdown,
+    http::{
+        Request, Response, StatusCode, Body,
+        server::HttpServer,
+    },
+    layer::Layer,
+    net::address::SocketAddress,
+    rt::Executor,
+    service::service_fn,
+    tcp::server::TcpListener,
+};
 use tracing::{error, info, warn};
 
-use crate::server::tls_resolver::SniResolver;
-
+use httpward_core::middleware::{LogLayer};
 use crate::runtime::server_instance::ServerInstance;
-use httpward_core::middleware::{Middleware, MiddlewareFuture, RequestContext};
-use tokio_rustls::rustls::{
-    pki_types::{CertificateDer, PrivateKeyDer},
-    sign::CertifiedKey,
-    ServerConfig,
-};
-// TLS & SNI imports
-use tokio_rustls::TlsAcceptor;
-use tracing::field::debug;
-use log::debug;
 
-pub struct HttpServer {
+pub struct HttpWardServer {
     pub instance: ServerInstance,
-    pub pipeline: Arc<Vec<Box<dyn Middleware>>>,
 }
 
-impl HttpServer {
-    pub fn new(instance: ServerInstance, pipeline: Vec<Box<dyn Middleware>>) -> Self {
-        Self {
-            instance,
-            pipeline: Arc::new(pipeline),
-        }
+impl HttpWardServer {
+    pub fn new(instance: ServerInstance) -> Self {
+        Self { instance }
     }
 
-    /// Attempts to build the TLS configuration using the pre-resolved tls_registry.
-    /// Returns Err if no valid certs are found or if key loading fails.
-    fn create_sni_config(&self) -> Result<ServerConfig, Box<dyn std::error::Error + Send + Sync>> {
-        let mut cert_map = HashMap::new();
-        let provider = tokio_rustls::rustls::crypto::ring::default_provider();
+    pub async fn run(&self, shutdown: Shutdown) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let host = self.instance.bind.host.clone();
+        let port = self.instance.bind.port;
+        let addr_str = format!("{}:{}", host, port);
 
-        let mut default_cert = None;
-        // Now we iterate directly over the pre-filtered registry
-        for mapping in &self.instance.tls_registry {
-            let certs = self.load_certs(&mapping.paths.cert)?;
-            let key_der = self.load_private_key(&mapping.paths.key)?;
-
-            // Load the private key using the specific provider (Ring)
-            let key_payload = provider
-                .key_provider
-                .load_private_key(key_der)
-                .map_err(|_| {
-                    format!(
-                        "Unsupported or invalid key format for domains: {:?}",
-                        mapping.domains
-                    )
-                })?;
-
-            let certified_key = Arc::new(CertifiedKey::new(certs, key_payload));
-
-            if default_cert.is_none() {
-                default_cert = Some(Arc::clone(&certified_key));
-            }
-
-            // Map every domain associated with this certificate into the SNI resolver
-            for domain in &mapping.domains {
-                if !domain.is_empty() {
-                    cert_map.insert(domain.clone(), Arc::clone(&certified_key));
+        // Parse the address
+        let addr: SocketAddress = match addr_str.parse() {
+            Ok(addr) => addr,
+            Err(_) => {
+                // If it's a hostname, try to bind to 0.0.0.0 with the port
+                match format!("0.0.0.0:{}", port).parse() {
+                    Ok(addr) => addr,
+                    Err(e) => return Err(format!("Invalid address: {}", e).into()),
                 }
             }
-        }
-
-        if cert_map.is_empty() {
-            return Err("No valid TLS mappings found in registry".into());
-        }
-
-        let resolver = SniResolver {
-            cert_map,
-            default_cert,
         };
-
-        // Build the final rustls ServerConfig
-        let mut config = ServerConfig::builder_with_provider(Arc::new(provider))
-            .with_safe_default_protocol_versions()?
-            .with_no_client_auth()
-            .with_cert_resolver(Arc::new(resolver));
-
-        // Basic ALPN setup (HTTP/1.1 is standard, add b"h2" if you support HTTP/2)
-        config.alpn_protocols = vec![
-            b"h2".to_vec(),
-            b"http/1.1".to_vec()
-        ];
-
-        Ok(config)
-    }
-
-    fn load_certs(
-        &self,
-        path: &std::path::Path,
-    ) -> Result<Vec<CertificateDer<'static>>, Box<dyn std::error::Error + Send + Sync>> {
-        let file = File::open(path)?;
-        let mut reader = BufReader::new(file);
-        let certs = rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?;
-        Ok(certs)
-    }
-
-    fn load_private_key(
-        &self,
-        path: &std::path::Path,
-    ) -> Result<PrivateKeyDer<'static>, Box<dyn std::error::Error + Send + Sync>> {
-        let file = File::open(path)?;
-        let mut reader = BufReader::new(file);
-        let key = rustls_pemfile::private_key(&mut reader)?
-            .ok_or_else(|| format!("Key not found in {:?}", path))?;
-        Ok(key)
-    }
-
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let addr_str = format!("{}:{}", self.instance.bind.host, self.instance.bind.port);
-        let addr: std::net::SocketAddr = addr_str.parse().expect("Invalid SocketAddr");
-        let listener = TcpListener::bind(addr).await?;
 
         let display_addr = addr_str.replace("0.0.0.0", "127.0.0.1");
+        info!("📡 Starting HttpServer on {}", display_addr);
 
-        // Try to initialize TLS. If it fails, we fall back to plain HTTP.
-        let tls_acceptor = match self.create_sni_config() {
-            Ok(config) => {
-                info!(
-                    "TLS/SNI initialized. Server listening on https://{}",
-                    display_addr
-                );
-                Some(TlsAcceptor::from(Arc::new(config)))
+        // Create executor with graceful shutdown guard
+        let exec = Executor::graceful(shutdown.guard());
+
+        // Build TLS configuration if TLS mappings exist
+        let tls_enabled = !self.instance.tls_registry.is_empty();
+
+        if tls_enabled {
+            info!("TLS enabled for server on https://{}", display_addr);
+        } else {
+            warn!("TLS not configured. Server running on http://{}", display_addr);
+        }
+
+        // Create the HTTP service with logging middleware
+        let http_svc = HttpServer::auto(exec.clone()).service(
+            LogLayer::new().layer(
+                service_fn(move |_req: Request<Body>| {
+                    async move {
+                        // Default handler - returns 200 OK
+                        let response = Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "text/plain")
+                            .body(Body::from("Backend Reached (Rama Server)"))
+                            .unwrap();
+
+                        Ok::<_, std::convert::Infallible>(response)
+                    }
+                })
+            )
+        );
+
+        // Bind TCP listener and serve
+        match TcpListener::bind(addr).await {
+            Ok(listener) => {
+                info!("Server listening on {}", display_addr);
+
+                // Serve connections
+                listener
+                    .serve(http_svc)
+                    .await;
+
+                Ok(())
             }
             Err(e) => {
-                warn!(
-                    "TLS initialization skipped: {}. Falling back to plain HTTP.",
-                    e
-                );
-                info!("Server listening on http://{}", display_addr);
-                None
+                error!("Failed to bind server on {}: {}", addr, e);
+                Err(format!("Bind error: {}", e).into())
             }
-        };
-
-        loop {
-            let (stream, client_addr) = listener.accept().await?;
-            let acceptor = tls_acceptor.clone();
-            let pipeline = Arc::clone(&self.pipeline);
-
-            tokio::task::spawn(async move {
-                if let Some(tls_acceptor) = acceptor {
-                    // HTTPS Path
-                    match tls_acceptor.accept(stream).await {
-                        Ok(tls_stream) => {
-                            let (_, session) = tls_stream.get_ref();
-
-                            // 1. Get the Negotiated Protocol (e.g., TLS13)
-                            let protocol = format!("{:?}", session.protocol_version());
-
-                            // 2. Get the Chosen Cipher Suite
-                            let suite = session.negotiated_cipher_suite()
-                                .map(|s| format!("{:?}", s.suite()))
-                                .unwrap_or_else(|| "unknown".to_string());
-
-                            // 3. Get the SNI hostname used
-                            let sni = session.server_name().unwrap_or("no-sni").to_string();
-
-                            // 4. Generate a unique ID
-                            // Since peer_suites() is hard to reach after the handshake without custom state,
-                            // we use the Session ID or the unique memory pointer as the 'Fingerprint'
-                            // for this specific connection.
-                            let conn_id = format!("{:p}", session);
-
-                            // Combine into a string: "PROTOCOL | SUITE | SNI | CONN_ID"
-                            let tls_identity = format!("{}|{}|{}|{}", protocol, suite, sni, conn_id);
-
-                            let io = TokioIo::new(tls_stream);
-                            serve_connection(io, client_addr, pipeline, Some(tls_identity)).await;
-                        }
-                        Err(e) => {
-                            error!("[TLS Handshake Error] {}: {:?}", client_addr, e);
-                        }
-                    }
-                } else {
-                    // HTTP Path
-                    let io = TokioIo::new(stream);
-                    serve_connection(io, client_addr, pipeline, None).await;
-                }
-            });
         }
     }
-}
-
-/// Helper function to serve the connection via Hyper
-async fn serve_connection<I>(
-    io: I,
-    client_addr: std::net::SocketAddr,
-    pipeline: Arc<Vec<Box<dyn Middleware>>>,
-    tls_session_id: Option<String>,
-) where
-    I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
-{
-    debug!("[TLS fingerprint] {}", tls_session_id.unwrap_or("no-tls".parse().unwrap()));
-    let service = service_fn(move |req| {
-        let mut ctx = RequestContext::new(client_addr);
-        let pipe = Arc::clone(&pipeline);
-        async move { execute_pipeline(0, pipe, req, &mut ctx).await }
-    });
-
-    // Use the auto builder to support both HTTP/1.1 and HTTP/2
-    let builder = auto::Builder::new(hyper_util::rt::TokioExecutor::new());
-
-    if let Err(err) = builder.serve_connection(io, service).await {
-        error!("[Hyper Error] {}: {:?}", client_addr, err);
-    }
-}
-
-fn execute_pipeline<'a>(
-    index: usize,
-    pipeline: Arc<Vec<Box<dyn Middleware>>>,
-    req: hyper::Request<hyper::body::Incoming>,
-    ctx: &'a mut RequestContext,
-) -> MiddlewareFuture<'a> {
-    Box::pin(async move {
-        if index < pipeline.len() {
-            let middleware = &pipeline[index];
-            let next_pipeline = Arc::clone(&pipeline);
-            let next = Box::new(move |next_req, next_ctx| {
-                execute_pipeline(index + 1, next_pipeline, next_req, next_ctx)
-            });
-
-            middleware.handle(req, ctx, next).await
-        } else {
-            // Default response if no middleware handles the request
-            Ok(hyper::Response::builder()
-                .status(200)
-                .body(Either::Left(Full::new(Bytes::from(
-                    "Backend Reached (Multi-protocol)",
-                ))))
-                .unwrap())
-        }
-    })
 }

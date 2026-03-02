@@ -5,9 +5,8 @@ use httpward_core::config::load;
 
 use tracing::{info, debug};
 use tracing_subscriber::{EnvFilter};
-use httpward_core::middleware::{LoggerMiddleware, Middleware};
 use runtime::server_plan::build_server_plan;
-use server::http_server::HttpServer;
+use server::http_server::HttpWardServer;
 use crate::server::manager::ServerManager;
 
 #[tokio::main]
@@ -47,17 +46,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut instances = vec![];
 
     for plan in server_plans {
-        // 2. Define Middlewares for this specific server instance
-        let mut pipeline: Vec<Box<dyn Middleware>> = vec![];
-        pipeline.push(Box::new(LoggerMiddleware));
-        // pipeline.push(Box::new(AuthMiddleware::new()));
-
-        // 3. Create the HttpServer
-        let server = HttpServer::new(
-            plan,
-            pipeline
-        );
-
+        // Create the HttpWardServer
+        let server = HttpWardServer::new(plan);
         instances.push(server);
     }
 
