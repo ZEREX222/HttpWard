@@ -1,20 +1,14 @@
-use rama::{
-    graceful::Shutdown,
-    http::{
-        Request, Response, StatusCode, Body,
-        server::HttpServer,
-    },
-    layer::Layer,
-    net::address::SocketAddress,
-    rt::Executor,
-    service::service_fn,
-    tcp::server::TcpListener,
-    tls::rustls::server::TlsAcceptorLayer,
-};
+use rama::{graceful::Shutdown, http::{
+    server::HttpServer, Body, Request, Response,
+    StatusCode,
+}, layer::Layer, net::address::SocketAddress, rt::Executor, service::service_fn, tcp::server::TcpListener, tls::rustls::server::TlsAcceptorLayer, Context};
+use rama::net::fingerprint::Ja4;
+use rama::net::tls::client::ClientHello;
+use rama::net::tls::{CompressionAlgorithm, ProtocolVersion, SecureTransport};
 use tracing::{info, warn};
 
-use httpward_core::middleware::LogLayer;
 use crate::runtime::server_instance::ServerInstance;
+use httpward_core::middleware::LogLayer;
 
 use super::tls::TlsConfigBuilder;
 
@@ -55,8 +49,29 @@ impl HttpWardServer {
         // Create HTTP service with logging middleware
         let http_svc = HttpServer::auto(exec.clone()).service(
             LogLayer::new().layer(
-                service_fn(move |_req: Request<Body>| {
+                service_fn(move |ctx: Context<()>, mut req: Request<Body>| {
                     async move {
+
+                        // Try to get SecureTransport from context
+                        if let Some(st) = ctx.get::<SecureTransport>() {
+                            // ClientHello is available only if with_store_client_hello(true) was enabled
+                            if let Some(client_hello) = st.client_hello() {
+                                // Try to compute JA4 fingerprint
+                                match Ja4::compute_from_client_hello(client_hello, Some(ProtocolVersion::TLSv1_2)) {
+                                    Ok(ja4) => {
+                                        let ja4_str = ja4.to_string();
+                                        info!("JA4 fingerprint: {}", ja4_str);
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to compute JA4 fingerprint: {}", e);
+                                    }
+                                }
+
+                                // You can also inspect cipher suites, TLS versions, etc.
+                                println!("ClientHello: {:?}", client_hello);
+                            }
+                        }
+
                         let response = Response::builder()
                             .status(StatusCode::OK)
                             .header("content-type", "text/plain")
@@ -85,7 +100,7 @@ impl HttpWardServer {
 
             // Serve connections with TLS
             listener
-                .serve(TlsAcceptorLayer::new(tls_data).into_layer(http_svc))
+                .serve(TlsAcceptorLayer::new(tls_data).with_store_client_hello(true).into_layer(http_svc))
                 .await;
         } else {
             warn!("TLS not configured. Server running on http://{}", display_addr);

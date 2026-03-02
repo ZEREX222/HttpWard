@@ -3,25 +3,19 @@ use std::io::BufReader;
 use std::path::Path;
 use std::sync::Arc;
 
-use rama::net::{
-    fingerprint::Ja4,
-    tls::{
-        client::{ClientHello as RamaClientHello, ClientHelloExtension},
-        CipherSuite, CompressionAlgorithm, ProtocolVersion, SignatureScheme,
-    },
+use rama::net::tls::{
+    client::{ClientHello as RamaClientHello, ClientHelloExtension},
+    CipherSuite, CompressionAlgorithm, ProtocolVersion, SignatureScheme,
 };
 use rama::tls::rustls::{
-    server::{TlsAcceptorDataBuilder, TlsAcceptorData},
     dep::pemfile,
+    server::{TlsAcceptorData, TlsAcceptorDataBuilder},
 };
-use rama_tls_rustls::{
-    dep::rustls::{
-        server::{ClientHello, ResolvesServerCert},
-        ServerConfig,
-        pki_types::{CertificateDer, PrivateKeyDer},
-        sign::CertifiedKey,
-    },
-    RamaFrom,
+use rama_tls_rustls::dep::rustls::{
+    pki_types::{CertificateDer, PrivateKeyDer},
+    server::{ClientHello, ResolvesServerCert},
+    sign::CertifiedKey,
+    ServerConfig,
 };
 use tracing::{info, warn};
 
@@ -115,47 +109,6 @@ impl ResolvesServerCert for FallbackSniResolver {
     fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
         // Extract SNI first before converting ClientHello (to avoid borrow issue)
         let server_name = client_hello.server_name().map(|s| s.to_lowercase());
-
-        // Compute JA4 fingerprint from ClientHello manually
-        // Extract data from rustls ClientHello and build Rama ClientHello
-        let cipher_suites: Vec<CipherSuite> = client_hello
-            .cipher_suites()
-            .iter()
-            .map(|cs| CipherSuite::try_from(u16::from(*cs)).unwrap_or(CipherSuite::Unknown(0)))
-            .collect();
-
-        let signature_schemes: Vec<SignatureScheme> = client_hello
-            .signature_schemes()
-            .iter()
-            .map(|ss| SignatureScheme::try_from(u16::from(*ss)).unwrap_or(SignatureScheme::Unknown(0)))
-            .collect();
-
-        // Build extensions (simplified - only signature algorithms)
-        let mut extensions: Vec<ClientHelloExtension> = Vec::new();
-        
-        // Add signature algorithms extension
-        if !signature_schemes.is_empty() {
-            extensions.push(ClientHelloExtension::SignatureAlgorithms(signature_schemes));
-        }
-
-        // Create ClientHello with TLS 1.2 version (commonly supported)
-        let rama_client_hello = RamaClientHello::new(
-            ProtocolVersion::TLSv1_2,
-            cipher_suites,
-            vec![CompressionAlgorithm::Null],
-            extensions,
-        );
-
-        // Try to compute JA4 fingerprint
-        match Ja4::compute_from_client_hello(&rama_client_hello, None) {
-            Ok(ja4) => {
-                let ja4_str = ja4.to_string();
-                info!("JA4 fingerprint: {}", ja4_str);
-            }
-            Err(e) => {
-                warn!("Failed to compute JA4 fingerprint: {}", e);
-            }
-        }
 
         // Try to find certificate by SNI
         if let Some(domain) = server_name {
