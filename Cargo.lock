@@ -968,6 +968,7 @@ version = "0.0.1"
 dependencies = [
  "httpward-core",
  "rama",
+ "rama-tls-rustls",
  "rcgen 0.14.7",
  "rustls",
  "rustls-pemfile",
