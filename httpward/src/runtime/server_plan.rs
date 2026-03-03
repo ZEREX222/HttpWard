@@ -8,7 +8,38 @@ use super::server_instance::{ServerInstance, TlsPaths, TlsMapping};
 pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
     let mut servers_map: HashMap<ListenerKey, (Vec<SiteConfig>, Vec<TlsMapping>)> = HashMap::new();
 
-    // 1. Process Sites (Inheriting from or overriding Global Listeners)
+    // 1. Process Global Config as a site first (if it has domains)
+    if config.global.has_domains() {
+        let global_site = config.global.to_site_config();
+        
+        // Only add global site if it has listeners or can inherit from global listeners
+        let effective_listeners = if global_site.listeners.is_empty() {
+            &config.global.listeners
+        } else {
+            &global_site.listeners
+        };
+
+        for listener in effective_listeners {
+            let key = ListenerKey {
+                host: listener.host.clone(),
+                port: listener.port,
+            };
+
+            let (sites_vec, tls_reg) = servers_map.entry(key).or_default();
+            
+            // Add global site to the sites list
+            sites_vec.push(global_site.clone());
+
+            if let Some(paths) = resolve_site_tls(&global_site, listener) {
+                tls_reg.push(TlsMapping {
+                    domains: global_site.get_all_domains(),
+                    paths,
+                });
+            }
+        }
+    }
+
+    // 2. Process Sites (Inheriting from or overriding Global Listeners)
     for site in &config.sites {
         let effective_listeners = if site.listeners.is_empty() {
             &config.global.listeners
@@ -27,14 +58,14 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
 
             if let Some(paths) = resolve_site_tls(site, listener) {
                 tls_reg.push(TlsMapping {
-                    domains: get_all_domains(site),
+                    domains: site.get_all_domains(),
                     paths,
                 });
             }
         }
     }
 
-    // 2. Process Global Listeners directly (for localhost/system access)
+    // 3. Process Global Listeners directly (for localhost/system access)
     for listener in &config.global.listeners {
         let key = ListenerKey {
             host: listener.host.clone(),
@@ -44,22 +75,21 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
         let (_, tls_reg) = servers_map.entry(key).or_default();
 
         // If a global listener has TLS but no sites are attached yet,
-        // we provision it for local access.
-        if let Some(paths) = resolve_global_listener_tls(listener) {
-            // Check if we already have a mapping for these local domains
-            let local_domains = vec!["localhost".to_string(), "127.0.0.1".to_string()];
-
+        // we provision it for local access or global domains if configured
+        if let Some(paths) = resolve_global_listener_tls(&config.global, listener) {
+            let domains = get_global_listener_domains(&config.global);
+            
             // Only add if not already present to avoid duplication
-            if !tls_reg.iter().any(|m| m.domains.contains(&"localhost".to_string())) {
+            if !tls_reg.iter().any(|m| m.domains.iter().any(|d| domains.contains(d))) {
                 tls_reg.push(TlsMapping {
-                    domains: local_domains,
+                    domains,
                     paths,
                 });
             }
         }
     }
 
-    // 3. Build final instances
+    // 4. Build final instances
     servers_map
         .into_iter()
         .map(|(key, (sites, tls_registry))| ServerInstance {
@@ -71,22 +101,24 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
         .collect()
 }
 
-fn get_all_domains(site: &SiteConfig) -> Vec<String> {
-    let mut domains = Vec::with_capacity(1 + site.domains.len());
-    if !site.domain.is_empty() {
-        domains.push(site.domain.clone());
+/// Get domains for a global listener - uses global domains if configured,
+/// otherwise falls back to localhost domains for local access
+fn get_global_listener_domains(global_config: &httpward_core::config::GlobalConfig) -> Vec<String> {
+    if global_config.has_domains() {
+        global_config.get_all_domains()
+    } else {
+        vec!["localhost".to_string(), "127.0.0.1".to_string()]
     }
-    domains.extend(site.domains.iter().cloned());
-    domains
 }
 
-/// Resolves TLS for a listener specifically used by a Global context (localhost)
-fn resolve_global_listener_tls(listener: &Listener) -> Option<TlsPaths> {
+/// Resolves TLS for a listener specifically used by a Global context
+/// Uses global domains if configured, otherwise defaults to localhost
+fn resolve_global_listener_tls(global_config: &httpward_core::config::GlobalConfig, listener: &Listener) -> Option<TlsPaths> {
     let tls_config = listener.tls.as_ref()?;
 
     if tls_config.self_signed {
-        let local_domains = vec!["localhost".to_string(), "127.0.0.1".to_string()];
-        tls_provisioner::provision_self_signed(&local_domains)
+        let domains = get_global_listener_domains(global_config);
+        tls_provisioner::provision_self_signed(&domains)
             .ok()
             .map(|p| TlsPaths { cert: p.cert, key: p.key })
     } else {
@@ -102,7 +134,7 @@ fn resolve_site_tls(site: &SiteConfig, listener: &Listener) -> Option<TlsPaths> 
     let tls_config = listener.tls.as_ref()?;
 
     if tls_config.self_signed {
-        let domains = get_all_domains(site);
+        let domains = site.get_all_domains();
         if domains.is_empty() { return None; }
 
         tls_provisioner::provision_self_signed(&domains)

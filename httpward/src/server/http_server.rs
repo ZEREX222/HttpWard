@@ -41,7 +41,6 @@ impl HttpWardServer {
         };
 
         let display_addr = addr.to_string().replace("0.0.0.0", "127.0.0.1");
-        info!("📡 Starting HttpServer on {}", display_addr);
 
         let exec = Executor::graceful(shutdown.guard());
         let tls_enabled = !self.instance.tls_registry.is_empty();
@@ -96,8 +95,6 @@ impl HttpWardServer {
         // Bind TCP listener and serve
         let listener = TcpListener::bind(addr).await
             .map_err(|e| format!("Failed to bind server on {}: {}", addr, e))?;
-
-        info!("Server listening on {}", display_addr);
 
         if tls_enabled {
             info!("TLS enabled for server on https://{}", display_addr);

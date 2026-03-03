@@ -2,6 +2,7 @@ mod runtime;
 mod server;
 
 use httpward_core::config::load;
+use httpward_core::config::Route;
 
 use tracing::{info, debug};
 use tracing_subscriber::{EnvFilter};
@@ -22,15 +23,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     info!("HttpWard starting...");
 
-    debug!("Global:");
-    debug!("  listeners: {:?}", config.global.listeners);
-    debug!("  sites_enabled: {:?}", config.global.sites_enabled);
-
-    debug!("Loaded {} sites:", config.sites.len());
-    for site in &config.sites {
-        debug!("  • {} ({} routes)", site.domain, site.routes.len());
-    }
-
     let server_plans = build_server_plan(&config);
 
     for server in &server_plans {
@@ -40,7 +32,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             server.bind.port,
             server.sites.len(),
             server.tls_registry.len()
-            )
+        );
+        
+        // Detailed server configuration
+        debug!("  Server details:");
+        debug!("    Bind: {}:{}", server.bind.host, server.bind.port);
+
+
+        // Sites details
+        debug!("    Sites attached:");
+        for (i, site) in server.sites.iter().enumerate() {
+            debug!("      Site {}: '{}'", i, site.domain);
+            debug!("        Domains: {:?}", site.get_all_domains());
+            debug!("        Listeners: {} listeners", site.listeners.len());
+            debug!("        Routes: {} routes", site.routes.len());
+        }
+
+        // TLS details
+        debug!("    TLS registry:");
+        for (i, tls_mapping) in server.tls_registry.iter().enumerate() {
+            debug!("      TLS {}: domains={:?}, cert={:?}, key={:?}", 
+                i, tls_mapping.domains, tls_mapping.paths.cert, tls_mapping.paths.key);
+        }
+        
+        debug!(""); // Empty line for readability
     }
 
     let mut instances = vec![];

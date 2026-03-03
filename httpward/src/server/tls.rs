@@ -1,7 +1,8 @@
 use std::fs;
 use std::io::BufReader;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rama::net::tls::{
     client::{ClientHello as RamaClientHello, ClientHelloExtension},
@@ -20,6 +21,10 @@ use rama_tls_rustls::dep::rustls::{
 use tracing::{info, warn};
 
 use crate::runtime::server_instance::TlsMapping;
+
+/// Global flag to ensure crypto provider is installed only once
+static CRYPTO_PROVIDER_INSTALLED: AtomicBool = AtomicBool::new(false);
+static CRYPTO_PROVIDER_INIT: Once = Once::new();
 
 
 /// Error type for TLS operations
@@ -42,10 +47,24 @@ impl TlsConfigBuilder {
             return Err("No TLS mappings available".into());
         }
 
-        // Install the ring crypto provider as default (required for rustls)
-        rustls::crypto::ring::default_provider()
-            .install_default()
-            .map_err(|_| "Failed to install ring crypto provider")?;
+        // Install the ring crypto provider as default (required for rustls) - only once!
+        CRYPTO_PROVIDER_INIT.call_once(|| {
+            match rustls::crypto::ring::default_provider()
+                .install_default() {
+                Ok(_) => {
+                    CRYPTO_PROVIDER_INSTALLED.store(true, Ordering::SeqCst);
+                    info!("Ring crypto provider installed successfully");
+                }
+                Err(e) => {
+                    warn!("Failed to install ring crypto provider: {:?}", e);
+                }
+            }
+        });
+
+        // Check if provider was installed successfully
+        if !CRYPTO_PROVIDER_INSTALLED.load(Ordering::SeqCst) {
+            return Err("Failed to install ring crypto provider".into());
+        }
 
         // Load all certificates and build SNI resolver with fallback
         let mut domain_to_cert: std::collections::HashMap<String, Arc<CertifiedKey>> = std::collections::HashMap::new();

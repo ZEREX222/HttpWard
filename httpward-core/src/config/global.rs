@@ -2,10 +2,21 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use schemars::JsonSchema;
 
+use crate::config::site::SiteConfig;
+
 /// Global application configuration (loaded from httpward.yaml)
+/// Inherits all fields from SiteConfig plus global-specific settings
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct GlobalConfig {
+    /// Primary domain name (used for SNI matching & logging)
+    #[serde(default)]
+    pub domain: String,
+
+    /// Additional domain names / aliases
+    #[serde(default)]
+    pub domains: Vec<String>,
+
     /// Network listeners (bind address + port + optional TLS)
     #[serde(default)]
     pub listeners: Vec<Listener>,
@@ -21,6 +32,33 @@ pub struct GlobalConfig {
     /// Path to directory with per-site .yaml / .yml files
     #[serde(default)]
     pub sites_enabled: PathBuf,
+}
+
+impl GlobalConfig {
+    /// Get all domains for this global config (primary + additional)
+    pub fn get_all_domains(&self) -> Vec<String> {
+        let mut domains = Vec::with_capacity(1 + self.domains.len());
+        if !self.domain.is_empty() {
+            domains.push(self.domain.clone());
+        }
+        domains.extend(self.domains.iter().cloned());
+        domains
+    }
+
+    /// Check if this global config has any domains configured
+    pub fn has_domains(&self) -> bool {
+        !self.domain.is_empty() || !self.domains.is_empty()
+    }
+
+    /// Convert global config to site config
+    pub fn to_site_config(&self) -> SiteConfig {
+        SiteConfig {
+            domain: self.domain.clone(),
+            domains: self.domains.clone(),
+            listeners: self.listeners.clone(),
+            routes: self.routes.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

@@ -5,6 +5,6 @@ mod global;
 mod loader;
 mod site;
 
-pub use global::{GlobalConfig, Listener};
+pub use global::{GlobalConfig, Listener, Route, Match, Redirect, Tls, LogConfig};
 pub use loader::{AppConfig, load};
 pub use site::SiteConfig;

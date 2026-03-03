@@ -23,3 +23,20 @@ pub struct SiteConfig {
     #[serde(default)]
     pub routes: Vec<Route>,
 }
+
+impl SiteConfig {
+    /// Get all domains for this site config (primary + additional)
+    pub fn get_all_domains(&self) -> Vec<String> {
+        let mut domains = Vec::with_capacity(1 + self.domains.len());
+        if !self.domain.is_empty() {
+            domains.push(self.domain.clone());
+        }
+        domains.extend(self.domains.iter().cloned());
+        domains
+    }
+
+    /// Check if this site config has any domains configured
+    pub fn has_domains(&self) -> bool {
+        !self.domain.is_empty() || !self.domains.is_empty()
+    }
+}
