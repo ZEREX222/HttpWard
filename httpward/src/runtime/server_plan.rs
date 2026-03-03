@@ -8,39 +8,15 @@ use super::server_instance::{ServerInstance, TlsPaths, TlsMapping};
 pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
     let mut servers_map: HashMap<ListenerKey, (Vec<SiteConfig>, Vec<TlsMapping>)> = HashMap::new();
 
-    // 1. Process Global Config as a site first (if it has domains)
+    // 1. Process Sites (including Global Config as a site if it has domains)
+    let mut all_sites = config.sites.clone();
+    
+    // Add global config as a site if it has domains
     if config.global.has_domains() {
-        let global_site = config.global.to_site_config();
-        
-        // Only add global site if it has listeners or can inherit from global listeners
-        let effective_listeners = if global_site.listeners.is_empty() {
-            &config.global.listeners
-        } else {
-            &global_site.listeners
-        };
-
-        for listener in effective_listeners {
-            let key = ListenerKey {
-                host: listener.host.clone(),
-                port: listener.port,
-            };
-
-            let (sites_vec, tls_reg) = servers_map.entry(key).or_default();
-            
-            // Add global site to the sites list
-            sites_vec.push(global_site.clone());
-
-            if let Some(paths) = resolve_site_tls(&global_site, listener) {
-                tls_reg.push(TlsMapping {
-                    domains: global_site.get_all_domains(),
-                    paths,
-                });
-            }
-        }
+        all_sites.push(config.global.to_site_config());
     }
 
-    // 2. Process Sites (Inheriting from or overriding Global Listeners)
-    for site in &config.sites {
+    for site in &all_sites {
         let effective_listeners = if site.listeners.is_empty() {
             &config.global.listeners
         } else {
@@ -57,30 +33,34 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
             sites_vec.push(site.clone());
 
             if let Some(paths) = resolve_site_tls(site, listener) {
-                tls_reg.push(TlsMapping {
-                    domains: site.get_all_domains(),
-                    paths,
-                });
+                let domains = site.get_all_domains();
+                
+                // Only add TLS mapping if not already present for these domains
+                if !tls_reg.iter().any(|m| m.domains.iter().any(|d| domains.contains(d))) {
+                    tls_reg.push(TlsMapping {
+                        domains,
+                        paths,
+                    });
+                }
             }
         }
     }
 
-    // 3. Process Global Listeners directly (for localhost/system access)
+    // 2. Process Global Listeners directly (for localhost/system access) 
+    // only if no sites are using them
     for listener in &config.global.listeners {
         let key = ListenerKey {
             host: listener.host.clone(),
             port: listener.port,
         };
 
-        let (_, tls_reg) = servers_map.entry(key).or_default();
+        let (sites_vec, tls_reg) = servers_map.entry(key).or_default();
 
-        // If a global listener has TLS but no sites are attached yet,
-        // we provision it for local access or global domains if configured
-        if let Some(paths) = resolve_global_listener_tls(&config.global, listener) {
-            let domains = get_global_listener_domains(&config.global);
-            
-            // Only add if not already present to avoid duplication
-            if !tls_reg.iter().any(|m| m.domains.iter().any(|d| domains.contains(d))) {
+        // Only add global listener TLS if no sites are attached and TLS is configured
+        if sites_vec.is_empty() {
+            if let Some(paths) = resolve_global_listener_tls(&config.global, listener) {
+                let domains = get_global_listener_domains(&config.global);
+                
                 tls_reg.push(TlsMapping {
                     domains,
                     paths,
@@ -89,7 +69,7 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
         }
     }
 
-    // 4. Build final instances
+    // 3. Build final instances
     servers_map
         .into_iter()
         .map(|(key, (sites, tls_registry))| ServerInstance {
