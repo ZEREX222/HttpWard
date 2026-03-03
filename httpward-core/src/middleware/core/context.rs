@@ -32,11 +32,11 @@ pub enum ContentType {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HttpWardContext {
     pub client_addr: SocketAddr,
     pub score: u32,
-    pub content_type: ContentType,
-    pub fingerprint: Option<String>,
+    pub content_type: ContentType
 }
 
 impl HttpWardContext {
@@ -44,8 +44,7 @@ impl HttpWardContext {
         Self {
             client_addr,
             score: 0,
-            content_type: ContentType::Unknown,
-            fingerprint: None,
+            content_type: ContentType::Unknown
         }
     }
 }

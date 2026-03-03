@@ -2,7 +2,6 @@ mod runtime;
 mod server;
 
 use httpward_core::config::load;
-use httpward_core::config::Route;
 
 use tracing::{info, debug};
 use tracing_subscriber::{EnvFilter};
