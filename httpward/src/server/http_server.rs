@@ -3,12 +3,11 @@ use rama::{graceful::Shutdown, http::{
     StatusCode,
 }, layer::Layer, net::address::SocketAddress, rt::Executor, service::service_fn, tcp::server::TcpListener, tls::rustls::server::TlsAcceptorLayer, Context};
 use rama::net::fingerprint::Ja4;
-use rama::net::tls::client::ClientHello;
-use rama::net::tls::{CompressionAlgorithm, ProtocolVersion, SecureTransport};
+use rama::net::tls::{ProtocolVersion, SecureTransport};
 use tracing::{error, info, warn};
 
 use crate::runtime::server_instance::ServerInstance;
-use httpward_core::middleware::{LogLayer, EnricherLayer, HttpWardContext, PrebuiltPipelines};
+use httpward_core::middleware::{LogLayer, EnricherLayer, HttpWardContext};
 
 use super::tls::TlsConfigBuilder;
 
@@ -45,7 +44,7 @@ impl HttpWardServer {
         let exec = Executor::graceful(shutdown.guard());
         let tls_enabled = !self.instance.tls_registry.is_empty();
 
-        // Create HTTP service with middleware pipeline using PrebuiltPipelines
+        // Create HTTP service with dynamic middleware layers using LayerStackBuilder
         let base_service = service_fn(move |ctx: Context<()>, mut req: Request<Body>| {
             async move {
 
@@ -90,8 +89,13 @@ impl HttpWardServer {
             }
         });
 
+        // Use LayerStackBuilder for dynamic middleware composition
         let http_svc = HttpServer::auto(exec.clone()).service(
-            PrebuiltPipelines::standard(base_service)
+            (
+                EnricherLayer::new(),
+                LogLayer::new(),
+            )
+                .into_layer(base_service)
         );
 
         // Bind TCP listener and serve
