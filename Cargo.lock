@@ -998,7 +998,6 @@ dependencies = [
  "rama-tls-rustls",
  "rcgen 0.14.7",
  "rustls",
- "rustls-pemfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

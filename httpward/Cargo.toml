@@ -17,7 +17,6 @@ rama-tls-rustls = { workspace = true }
 httpward-core = { path = "../httpward-core" }
 rcgen = "0.14"
 rustls = { version = "0.23", features = ["ring"] }
-rustls-pemfile = "2.0"
 notify = "7.0"
 
 [dev-dependencies]

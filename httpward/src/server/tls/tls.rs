@@ -78,14 +78,13 @@ impl TlsConfigBuilder {
             self.mappings.clone(), 
             resolver.clone(),
         ).with_debounce_delay(std::time::Duration::from_millis(1000));
-        
+
         tokio::spawn(async move {
             if let Err(e) = watcher.run().await {
                 error!("TLS file watcher error: {:?}", e);
             }
         });
 
-        
         // Build rustls server config with custom resolver
         let mut server_config = ServerConfig::builder()
             .with_no_client_auth()
