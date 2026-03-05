@@ -64,7 +64,7 @@ where
         // Access request context
         let client_addr = ctx.get::<HttpWardContext>().map(|rc| rc.client_addr);
         let content_type = ctx.get::<HttpWardContext>()
-            .map(|rc| rc.content_type)
+            .map(|rc| rc.request_content_type)
             .unwrap_or(ContentType::Unknown);
 
         trace!("incoming request");

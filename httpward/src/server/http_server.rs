@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 
 use crate::runtime::server_instance::ServerInstance;
-use httpward_core::middleware::{LogLayer, EnricherLayer, HttpWardContext};
+use httpward_core::middleware::{LogLayer, RequestEnricherLayer, ResponseEnricherLayer, HttpWardContext};
 use crate::server::tls::tls::TlsConfigBuilder;
 
 /// HttpWard HTTP/TLS server
@@ -49,7 +49,7 @@ impl HttpWardServer {
             async move {
 
                 if let Some(req_ctx) = ctx.get::<HttpWardContext>() {
-                     error!("CONTENT TYPE!: {:?}", req_ctx.content_type);
+                     error!("CONTENT TYPE!: {:?}", req_ctx.request_content_type);
                  }
 
                 // Try to get SecureTransport from context
@@ -101,8 +101,9 @@ impl HttpWardServer {
         
         let http_svc = HttpServer::auto(exec.clone()).service(
             (
-                EnricherLayer::new(sites_arc, global_arc),
+                RequestEnricherLayer::new(sites_arc, global_arc),
                 LogLayer::new(),
+                ResponseEnricherLayer::new(),
             )
                 .into_layer(base_service)
         );

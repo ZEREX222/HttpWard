@@ -46,8 +46,10 @@
 //! ```
 
 mod context;
+mod content_type;
 
 pub use context::{ContentType, HttpWardContext};
+pub use content_type::parse_content_type;
 pub use crate::middleware::log::{LogLayer, LogService};
 
 /// Re-export core Rama types for middleware development

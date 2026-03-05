@@ -38,9 +38,10 @@ pub enum ContentType {
 pub struct HttpWardContext {
     pub client_addr: SocketAddr,
     pub score: u32,
-    pub content_type: ContentType,
     pub site: Option<Arc<SiteConfig>>,
     pub global: Arc<GlobalConfig>,
+    pub request_content_type: ContentType,
+    pub response_content_type: ContentType,
 }
 
 impl HttpWardContext {
@@ -48,7 +49,8 @@ impl HttpWardContext {
         Self {
             client_addr,
             score: 0,
-            content_type: ContentType::Unknown,
+            request_content_type: ContentType::Unknown,
+            response_content_type: ContentType::Unknown,
             site: None,
             global,
         }
