@@ -7,7 +7,7 @@ use tracing::{info, debug};
 use tracing_subscriber::{EnvFilter};
 use runtime::server_plan::build_server_plan;
 use server::http_server::HttpWardServer;
-use crate::server::manager::ServerManager;
+use crate::server::manager::HttpWardServerManager;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -66,9 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     // 4. Run all servers concurrently
-    ServerManager::start_all(instances).await?;
-
-    debug!("Hello from HttpWard!");
+    HttpWardServerManager::start_all(instances).await?;
 
     Ok(())
 }

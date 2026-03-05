@@ -1,7 +1,7 @@
 use rama::{graceful::Shutdown, http::{
     server::HttpServer, Body, Request, Response,
     StatusCode,
-}, layer::Layer, net::address::SocketAddress, rt::Executor, service::service_fn, tcp::server::TcpListener, tls::rustls::server::TlsAcceptorLayer, Context};
+}, layer::Layer, net::address::SocketAddress, rt::Executor, service::service_fn, tcp::server::TcpListener, tls::rustls::server::TlsAcceptorLayer, Context, Service};
 use rama::net::fingerprint::Ja4;
 use rama::net::tls::{ProtocolVersion, SecureTransport};
 use tracing::{error, info, warn};
@@ -87,6 +87,8 @@ impl HttpWardServer {
                 Ok::<_, std::convert::Infallible>(response)
             }
         });
+
+        
 
         // Use LayerStackBuilder for dynamic middleware composition
         let http_svc = HttpServer::auto(exec.clone()).service(

@@ -2,9 +2,9 @@ use tracing::{error, info};
 use rama::graceful::Shutdown;
 use crate::server::http_server::HttpWardServer;
 
-pub struct ServerManager;
+pub struct HttpWardServerManager;
 
-impl ServerManager {
+impl HttpWardServerManager {
     /// Spawns all servers into the Tokio runtime and waits for them
     pub async fn start_all(servers: Vec<HttpWardServer>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut handles = vec![];
