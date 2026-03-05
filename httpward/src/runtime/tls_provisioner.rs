@@ -5,18 +5,22 @@ use std::fs;
 use tracing::{debug, info};
 
 /// Provisions a self-signed certificate for a list of domains in the temp directory.
-/// The first domain in the list is used as the primary directory name.
+/// The primary directory name is created by concatenating all domains with * and . replaced by _.
 pub fn provision_self_signed(domains: &[String]) -> Result<TlsPaths, Box<dyn std::error::Error + Send + Sync>> {
     if domains.is_empty() {
         return Err("No domains provided for self-signed certificate generation".into());
     }
 
-    // 1. Use the first domain as the folder identifier
-    let primary_domain = &domains[0];
+    // 1. Create primary domain by concatenating all domains with * and . replaced by _
+    let primary_domain = domains
+        .iter()
+        .map(|d| d.replace('*', "_").replace('.', "_"))
+        .collect::<Vec<_>>()
+        .join("_");
     let mut temp_dir = env::temp_dir();
     temp_dir.push("httpward");
     temp_dir.push("certs");
-    temp_dir.push(primary_domain);
+    temp_dir.push(&primary_domain);
 
     fs::create_dir_all(&temp_dir)?;
 
