@@ -1,8 +1,7 @@
 mod core;
-mod log;
-mod request_enricher;
-mod response_enricher;
+mod basic;
+pub mod route;
 
-pub use crate::middleware::core::{ContentType, HttpWardContext, LogLayer, LogService, utils, prelude};
-pub use crate::middleware::request_enricher::{RequestEnricherLayer, RequestEnricherService};
-pub use crate::middleware::response_enricher::{ResponseEnricherLayer, ResponseEnricherService};
+pub use crate::middleware::core::{ContentType, HttpWardContext};
+pub use crate::middleware::basic::{LogLayer, LogService, RequestEnricherLayer, RequestEnricherService, ResponseEnricherLayer, ResponseEnricherService};
+pub use crate::middleware::route::{RouteLayer, RouteService};

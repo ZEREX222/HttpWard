@@ -50,19 +50,3 @@ mod content_type;
 
 pub use context::{ContentType, HttpWardContext};
 pub use content_type::parse_content_type;
-pub use crate::middleware::log::{LogLayer, LogService};
-
-/// Re-export core Rama types for middleware development
-pub mod rama {
-    pub use rama::{ layer::Layer, service::Service, Context };
-}
-
-/// Utility functions for middleware development
-pub mod utils {
-}
-
-/// Prelude for easy imports in middleware modules
-pub mod prelude {
-    pub use super::{ContentType, HttpWardContext, LogLayer };
-    pub use super::rama::*;
-}

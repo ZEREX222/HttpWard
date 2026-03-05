@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 
 use crate::runtime::server_instance::ServerInstance;
-use httpward_core::middleware::{LogLayer, RequestEnricherLayer, ResponseEnricherLayer, HttpWardContext};
+use httpward_core::middleware::{LogLayer, RequestEnricherLayer, ResponseEnricherLayer, HttpWardContext, RouteLayer};
 use crate::server::tls::tls::TlsConfigBuilder;
 
 /// HttpWard HTTP/TLS server
@@ -104,8 +104,8 @@ impl HttpWardServer {
                 RequestEnricherLayer::new(sites_arc, global_arc),
                 LogLayer::new(),
                 ResponseEnricherLayer::new(),
-            )
-                .into_layer(base_service)
+                RouteLayer::new(),
+            ).into_layer(base_service)
         );
 
         // Bind TCP listener and serve
