@@ -185,19 +185,6 @@ impl FallbackSniResolver {
         info!("Updated TLS certificate for multiple domains: {:?}", domains);
     }
 
-    /// Get the current fallback domain (first available domain)
-    pub fn get_fallback_domain(&self) -> String {
-        let store = self.domain_store.read().unwrap();
-        
-        // Try to get first certificate and extract domain info
-        if let Some(cert) = store.first_cert() {
-            // Since we can't access private fields, return a default
-            // In a real implementation, you might want to store domain metadata
-            "fallback.domain".to_string()
-        } else {
-            "localhost".to_string()
-        }
-    }
 }
 
 impl ResolvesServerCert for FallbackSniResolver {
@@ -214,8 +201,8 @@ impl ResolvesServerCert for FallbackSniResolver {
         }
 
         // Return fallback certificate when no SNI match
-        if let Some(cert) = store.first_cert() {
-            info!("No SNI match, using fallback certificate for domain: {}", self.get_fallback_domain());
+        if let Some((domain, cert))   = store.first_cert_with_domain() {
+            info!("No SNI match, using fallback certificate for domain: {}", domain);
             Some(cert.certified_key.clone())
         } else {
             error!("No certificates available for TLS resolution");

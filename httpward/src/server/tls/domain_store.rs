@@ -95,7 +95,10 @@ impl DomainStore {
         None
     }
 
-    // NEW: get first certificate without specifying domain
+    /// Get the first available certificate (fallback)
+    /// 
+    /// Returns the first certificate found, prioritizing exact domains over wildcards.
+    /// Useful for getting a fallback certificate when no specific domain matches.
     pub fn first_cert(&self) -> Option<&Cert> {
         if let Some((_, certs)) = self.exact.iter().next() {
             if let Some(cert) = certs.first() {
@@ -106,6 +109,35 @@ impl DomainStore {
         for (_, certs) in &self.wildcards {
             if let Some(cert) = certs.first() {
                 return Some(cert);
+            }
+        }
+
+        None
+    }
+
+    /// Get the first available certificate with its associated domain
+    /// 
+    /// Returns both the domain/pattern and the certificate, prioritizing exact domains
+    /// over wildcards. Useful for logging and debugging when you need to know which
+    /// domain is being used as fallback.
+    /// 
+    /// # Returns
+    /// 
+    /// `Some((domain, cert))` - The domain/pattern and associated certificate
+    /// `None` - No certificates available
+    pub fn first_cert_with_domain(&self) -> Option<(String, &Cert)> {
+        // Check exact domains first
+        if let Some((domain, certs)) = self.exact.iter().next() {
+            if let Some(cert) = certs.first() {
+                return Some((domain.clone(), cert));
+            }
+        }
+
+        // Check wildcard patterns
+        for (pattern, certs) in &self.wildcards {
+            if let Some(cert) = certs.first() {
+                // Convert WildMatch to string representation
+                return Some((pattern.to_string(), cert));
             }
         }
 
