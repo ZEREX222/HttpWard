@@ -14,11 +14,12 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rama = { workspace = true }
 rama-tls-rustls = { workspace = true }
+wildmatch = { workspace = true }
 httpward-core = { path = "../httpward-core" }
 rcgen = "0.14"
 rustls = { version = "0.23", features = ["ring"] }
 notify = "7.0"
-wildmatch = "2.1"
+
 
 [dev-dependencies]
 

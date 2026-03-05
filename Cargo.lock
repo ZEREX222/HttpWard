@@ -1016,6 +1016,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tracing",
+ "wildmatch",
 ]
 
 [[package]]

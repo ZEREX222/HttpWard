@@ -1,9 +1,10 @@
 use rama::{graceful::Shutdown, http::{
     server::HttpServer, Body, Request, Response,
     StatusCode,
-}, layer::Layer, net::address::SocketAddress, rt::Executor, service::service_fn, tcp::server::TcpListener, tls::rustls::server::TlsAcceptorLayer, Context, Service};
+}, layer::Layer, net::address::SocketAddress, rt::Executor, service::service_fn, tcp::server::TcpListener, tls::rustls::server::TlsAcceptorLayer, Context};
 use rama::net::fingerprint::Ja4;
 use rama::net::tls::{ProtocolVersion, SecureTransport};
+use std::sync::Arc;
 use tracing::{error, info, warn};
 
 use crate::runtime::server_instance::ServerInstance;
@@ -44,7 +45,7 @@ impl HttpWardServer {
         let tls_enabled = !self.instance.tls_registry.is_empty();
 
         // Create HTTP service with dynamic middleware layers using LayerStackBuilder
-        let base_service = service_fn(move |ctx: Context<()>, mut req: Request<Body>| {
+        let base_service = service_fn(move |ctx: Context<()>, _req: Request<Body>| {
             async move {
 
                 if let Some(req_ctx) = ctx.get::<HttpWardContext>() {
@@ -91,9 +92,16 @@ impl HttpWardServer {
         
 
         // Use LayerStackBuilder for dynamic middleware composition
+        // Create Arc references for configs to avoid duplication
+        let sites_arc: Vec<Arc<httpward_core::config::SiteConfig>> = self.instance.sites
+            .iter()
+            .map(|site| Arc::new(site.clone()))
+            .collect();
+        let global_arc = Arc::new(self.instance.global.clone());
+        
         let http_svc = HttpServer::auto(exec.clone()).service(
             (
-                EnricherLayer::new(),
+                EnricherLayer::new(sites_arc, global_arc),
                 LogLayer::new(),
             )
                 .into_layer(base_service)

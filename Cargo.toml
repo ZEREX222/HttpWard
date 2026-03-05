@@ -15,5 +15,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 http-body-util = "0.1.3"
 rama = { version = "0.2", features = ["http-full", "rustls"] }
 rama-tls-rustls = "0.2"
+wildmatch = "2.1"
 
 resolver = "0.1.3"

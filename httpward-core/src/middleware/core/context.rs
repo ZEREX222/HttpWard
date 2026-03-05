@@ -1,4 +1,6 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
+use crate::config::{SiteConfig, GlobalConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentType {
@@ -32,19 +34,23 @@ pub enum ContentType {
     Unknown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct HttpWardContext {
     pub client_addr: SocketAddr,
     pub score: u32,
-    pub content_type: ContentType
+    pub content_type: ContentType,
+    pub site: Option<Arc<SiteConfig>>,
+    pub global: Arc<GlobalConfig>,
 }
 
 impl HttpWardContext {
-    pub fn new(client_addr: SocketAddr) -> Self {
+    pub fn new(client_addr: SocketAddr, global: Arc<GlobalConfig>) -> Self {
         Self {
             client_addr,
             score: 0,
-            content_type: ContentType::Unknown
+            content_type: ContentType::Unknown,
+            site: None,
+            global,
         }
     }
 }

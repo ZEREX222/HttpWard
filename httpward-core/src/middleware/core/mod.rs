@@ -57,12 +57,6 @@ pub mod rama {
 
 /// Utility functions for middleware development
 pub mod utils {
-    use super::HttpWardContext;
-
-    /// Create a RequestContext from socket address
-    pub fn request_context(client_addr: std::net::SocketAddr) -> HttpWardContext {
-        HttpWardContext::new(client_addr)
-    }
 }
 
 /// Prelude for easy imports in middleware modules

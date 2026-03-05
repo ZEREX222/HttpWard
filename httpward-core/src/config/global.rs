@@ -113,12 +113,11 @@ pub enum Route {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 pub struct Match {
-    #[serde(default)]
-    pub path_prefix: Option<String>,
-
+    /// Using matchit library https://github.com/ibraheemdev/matchit
     #[serde(default)]
     pub path: Option<String>,
 
+    /// Using basic regexp. Please use path if it's possible.
     #[serde(default)]
     pub path_regex: Option<String>,
 }
