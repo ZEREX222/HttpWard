@@ -8,8 +8,7 @@ use tracing::{error, info, warn};
 
 use crate::runtime::server_instance::ServerInstance;
 use httpward_core::middleware::{LogLayer, EnricherLayer, HttpWardContext};
-
-use super::tls::TlsConfigBuilder;
+use crate::server::tls::tls::TlsConfigBuilder;
 
 /// HttpWard HTTP/TLS server
 pub struct HttpWardServer {
