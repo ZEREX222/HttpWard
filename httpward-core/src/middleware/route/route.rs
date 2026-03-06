@@ -123,16 +123,18 @@ where
             }
         };
 
-        let path = request.uri().path();
+        let path = request.uri().path().to_string();
         
         // Try to match route
-        match matcher.match_route(path) {
+        match matcher.match_route(&path) {
             Ok(matched_route) => {
                 // Handle different route types
                 match matched_route.route {
                     Route::Proxy { ref backend, .. } => {
                         // Check if WebSocket upgrade
-                        if ProxyHandler::is_websocket_upgrade(&request) {
+                        let is_websocket = ProxyHandler::is_websocket_upgrade(&request);
+                        
+                        if is_websocket {
                             match WebSocketHandler::http_to_ws_url(&backend) {
                                 Ok(ws_url) => {
                                     match self.websocket_handler.proxy_websocket(request, &ws_url).await {
@@ -154,21 +156,16 @@ where
                                         .unwrap());
                                 }
                             }
-                        }
-                        
-                        // Regular HTTP proxy
-                        let matched_path_prefix = match &matched_route.route {
-                            Route::Proxy { r#match, .. } => r#match.path.as_deref().unwrap_or(""),
-                            _ => "",
-                        };
-                        match self.proxy_handler.proxy_request(request, &backend, matched_path_prefix).await {
-                            Ok(response) => return Ok(response),
-                            Err(e) => {
-                                tracing::error!("Proxy error: {}", e);
-                                return Ok(RamaResponse::builder()
-                                    .status(StatusCode::BAD_GATEWAY)
-                                    .body(RamaBody::from("Proxy error"))
-                                    .unwrap());
+                        } else {
+                            match self.proxy_handler.proxy_request(request, &backend, &matched_route.params).await {
+                                Ok(response) => return Ok(response),
+                                Err(e) => {
+                                    tracing::error!("Proxy error: {}", e);
+                                    return Ok(RamaResponse::builder()
+                                        .status(StatusCode::BAD_GATEWAY)
+                                        .body(RamaBody::from("Proxy error"))
+                                        .unwrap());
+                                }
                             }
                         }
                     }

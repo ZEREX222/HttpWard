@@ -148,6 +148,27 @@ mod tests {
     }
     
     #[test]
+    fn test_wildcard_in_middle_with_regex() {
+        // Wildcard parameters can only be at the end with matchit, so use regex for middle wildcards
+        let routes = vec![
+            Route::Proxy {
+                r#match: Match {
+                    path: None,
+                    path_regex: Some(r"^/([^/]+)/final$".to_string()),
+                },
+                backend: "http://zerex222.ru:8080/{1}".to_string(),
+            },
+        ];
+        
+        let matcher = RouteMatcher::new(routes).unwrap();
+        let matched = matcher.match_route("/my/final").unwrap();
+        
+        assert!(matches!(matched.route, Route::Proxy { .. }));
+        assert_eq!(matched.params.get("1"), Some(&"my".to_string()));
+        assert_eq!(matched.matcher_type, MatcherType::Regex);
+    }
+    
+    #[test]
     fn test_regex_matching() {
         let routes = vec![
             Route::Proxy {

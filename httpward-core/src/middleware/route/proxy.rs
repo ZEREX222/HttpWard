@@ -6,6 +6,7 @@ use rama::{
 use http::Uri;
 use thiserror::Error;
 use url::Url;
+use std::collections::HashMap;
 
 #[derive(Error, Debug)]
 pub enum ProxyError {
@@ -28,16 +29,40 @@ impl ProxyHandler {
         let client = EasyHttpWebClient::new();
         Self { client }
     }
+
+    /// Process backend URL with matcher parameters
+    /// Replaces placeholders like {param}, {*any}, and {1}, {2} (regex groups) with actual values from params
+    fn process_backend_url_with_params(
+        backend: &str,
+        params: &HashMap<String, String>,
+    ) -> Result<String, ProxyError> {
+        let mut result = backend.to_string();
+        
+        // Replace named parameters like {param} and {*any}
+        for (key, value) in params {
+            let placeholder = format!("{{{}}}", key);
+            result = result.replace(&placeholder, value);
+            
+            // Also handle wildcard parameters {*any}
+            let wildcard_placeholder = format!("{{*{}}}", key);
+            result = result.replace(&wildcard_placeholder, value);
+        }
+        
+        Ok(result)
+    }
     
     /// Proxy HTTP request to upstream
     pub async fn proxy_request(
         &self,
         mut req: RamaRequest<RamaBody>,
-        upstream_base: &str,
-        matched_path_prefix: &str,
+        backend: &str,
+        params: &HashMap<String, String>,
     ) -> Result<RamaResponse<RamaBody>, ProxyError> {
+        // Process backend URL with matcher parameters
+        let processed_backend = Self::process_backend_url_with_params(backend, params)?;
+        
         // Build upstream URL
-        let new_uri = Self::build_upstream_url(upstream_base, req.uri(), matched_path_prefix)?;
+        let new_uri = Self::build_upstream_url(&processed_backend, req.uri())?;
         *req.uri_mut() = new_uri;
 
         // Ensure Host header for upstream
@@ -63,23 +88,23 @@ impl ProxyHandler {
         Ok(resp)
     }
     
-    /// Build upstream URI by combining base and original request path+query
-    fn build_upstream_url(base: &str, orig: &Uri, _matched_path_prefix: &str) -> Result<Uri, ProxyError> {
-        let base_url = Url::parse(base)
-            .map_err(|e| ProxyError::InvalidUrl(format!("bad base url: {}", e)))?;
-            
-        // Use the full original path and query
-        let path_and_query = if let Some(q) = orig.query() {
-            format!("{}?{}", orig.path(), q)
-        } else {
-            orig.path().to_string()
-        };
-        
-        let joined = base_url.join(&path_and_query)
-            .map_err(|e| ProxyError::InvalidUrl(format!("join error: {}", e)))?;
-            
-        Ok(joined.as_str().parse()
-            .map_err(|e| ProxyError::InvalidUrl(format!("uri parse: {}", e)))?)
+    /// Build upstream URI by combining processed backend URL with original request
+    fn build_upstream_url(
+        backend: &str,
+        orig: &Uri,
+    ) -> Result<Uri, ProxyError> {
+        let backend_url = Url::parse(backend)
+            .map_err(|e| ProxyError::InvalidUrl(format!("invalid backend URL: {}", e)))?;
+
+        // Preserve original query string if present
+        let mut final_url = backend_url;
+        if let Some(query) = orig.query() {
+            final_url.set_query(Some(query));
+        }
+
+        // Convert back to http::Uri
+        final_url.as_str().parse()
+            .map_err(|e| ProxyError::InvalidUrl(format!("failed to parse final URI: {}", e)))
     }
     
     /// Check if request is for WebSocket upgrade
@@ -127,26 +152,52 @@ mod tests {
     use rama::http::{Method, Uri};
     
     #[test]
+    fn test_process_backend_url_with_params() {
+        let mut params = HashMap::new();
+        params.insert("id".to_string(), "123".to_string());
+        params.insert("any".to_string(), "users/123".to_string());
+        
+        // Test basic parameter replacement
+        let backend = "http://backend:8080/api/users/{id}";
+        let result = ProxyHandler::process_backend_url_with_params(backend, &params).unwrap();
+        assert_eq!(result, "http://backend:8080/api/users/123");
+        
+        // Test wildcard parameter replacement
+        let backend2 = "http://zerex222.ru:8080/{*any}";
+        let result2 = ProxyHandler::process_backend_url_with_params(backend2, &params).unwrap();
+        assert_eq!(result2, "http://zerex222.ru:8080/users/123");
+        
+        // Test regex group parameters (like {1}, {2})
+        let mut regex_params = HashMap::new();
+        regex_params.insert("1".to_string(), "my".to_string());
+        
+        let backend3 = "http://zerex222.ru:8080/{1}";
+        let result3 = ProxyHandler::process_backend_url_with_params(backend3, &regex_params).unwrap();
+        assert_eq!(result3, "http://zerex222.ru:8080/my");
+    }
+    
+    #[test]
     fn test_build_upstream_url() {
-        let base = "http://backend:8080/api";
+        let backend = "http://backend:8080/api/users/123";
         let orig_uri = "/api/users/123?active=true".parse::<Uri>().unwrap();
         
-        let result = ProxyHandler::build_upstream_url(base, &orig_uri, "/api").unwrap();
+        let result = ProxyHandler::build_upstream_url(backend, &orig_uri).unwrap();
         assert_eq!(result.to_string(), "http://backend:8080/api/users/123?active=true");
     }
     
     #[test]
     fn test_build_upstream_url_user_case() {
         // Test case from user: path "/ip" should proxy to "http://zerex222.ru:8080/ip"
-        let base = "http://zerex222.ru:8080/ip";
+        let backend = "http://zerex222.ru:8080/ip";
         let orig_uri = "/ip".parse::<Uri>().unwrap();
         
-        let result = ProxyHandler::build_upstream_url(base, &orig_uri, "/ip").unwrap();
+        let result = ProxyHandler::build_upstream_url(backend, &orig_uri).unwrap();
         assert_eq!(result.to_string(), "http://zerex222.ru:8080/ip");
         
-        // Test case: path "/ip/ololo" should proxy to "http://zerex222.ru:8080/ip/ololo"
+        // Test case: backend already contains full path
+        let backend2 = "http://zerex222.ru:8080/ip/ololo";
         let orig_uri2 = "/ip/ololo".parse::<Uri>().unwrap();
-        let result2 = ProxyHandler::build_upstream_url(base, &orig_uri2, "/ip").unwrap();
+        let result2 = ProxyHandler::build_upstream_url(backend2, &orig_uri2).unwrap();
         assert_eq!(result2.to_string(), "http://zerex222.ru:8080/ip/ololo");
     }
     
@@ -184,5 +235,25 @@ mod tests {
             .unwrap();
             
         assert!(ProxyHandler::is_grpc(&req));
+    }
+    
+    #[test]
+    fn test_full_matcher_functionality() {
+        // Test the example from user: "/my/{*any}" -> "http://zerex222.ru:8080/{*any}"
+        let mut params = HashMap::new();
+        params.insert("any".to_string(), "test/path".to_string());
+        
+        let backend = "http://zerex222.ru:8080/{*any}";
+        let result = ProxyHandler::process_backend_url_with_params(backend, &params).unwrap();
+        assert_eq!(result, "http://zerex222.ru:8080/test/path");
+        
+        // Test multiple parameters
+        let mut params2 = HashMap::new();
+        params2.insert("user".to_string(), "john".to_string());
+        params2.insert("id".to_string(), "123".to_string());
+        
+        let backend2 = "http://backend:8080/users/{user}/posts/{id}";
+        let result2 = ProxyHandler::process_backend_url_with_params(backend2, &params2).unwrap();
+        assert_eq!(result2, "http://backend:8080/users/john/posts/123");
     }
 }
