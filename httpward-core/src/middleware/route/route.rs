@@ -14,6 +14,7 @@ use super::{
     matcher::{RouteMatcher, MatcherError},
     proxy::{ProxyHandler, ProxyError},
     websocket::{WebSocketHandler, WebSocketError},
+    static_files,
 };
 
 #[derive(Error, Debug)]
@@ -124,10 +125,13 @@ where
         };
 
         let path = request.uri().path().to_string();
+        tracing::debug!("Trying to match route for path: {}", path);
+        tracing::debug!("Available routes: {:?}", matcher.routes());
         
         // Try to match route
         match matcher.match_route(&path) {
             Ok(matched_route) => {
+                tracing::debug!("Route matched: {:?}", matched_route.route);
                 // Handle different route types
                 match matched_route.route {
                     Route::Proxy { ref backend, .. } => {
@@ -169,8 +173,8 @@ where
                             }
                         }
                     }
-                    Route::Static { static_dir, .. } => {
-                        match self.handle_static(request, &static_dir).await {
+                    Route::Static { ref static_dir, .. } => {
+                        match static_files::handle_static(&request, static_dir, &matched_route).await {
                             Ok(response) => return Ok(response),
                             Err(e) => {
                                 tracing::error!("Static file error: {}", e);
@@ -196,6 +200,7 @@ where
                 }
             }
             Err(MatcherError::NoMatch) => {
+                tracing::debug!("No route matched for path: {}", path);
                 // No route matched, pass to inner service
                 return self.inner.serve(ctx, request).await;
             }
@@ -211,71 +216,6 @@ where
 }
 
 impl<S> RouteService<S> {
-    /// Handle static file serving
-    async fn handle_static(
-        &self,
-        request: RamaRequest<RamaBody>,
-        static_dir: &std::path::PathBuf,
-    ) -> Result<RamaResponse<RamaBody>, RouteError> {
-        use tokio::fs;
-        
-        let path = request.uri().path();
-        let path = path.trim_start_matches('/');
-        
-        // Prevent directory traversal
-        if path.contains("..") {
-            return Ok(RamaResponse::builder()
-                .status(StatusCode::FORBIDDEN)
-                .body(RamaBody::from("Forbidden"))
-                .unwrap());
-        }
-        
-        let file_path = static_dir.join(path);
-        
-        // Check if file exists and is within static_dir
-        match fs::metadata(&file_path).await {
-            Ok(metadata) => {
-                if !metadata.is_file() {
-                    return Ok(RamaResponse::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(RamaBody::from("Not Found"))
-                        .unwrap());
-                }
-                
-                // Try to determine content type
-                let content_type = self.guess_content_type(&file_path);
-                
-                match fs::read(&file_path).await {
-                    Ok(contents) => {
-                        let mut response = RamaResponse::builder()
-                            .status(StatusCode::OK);
-                            
-                        if let Some(ct) = content_type {
-                            response = response.header("Content-Type", ct);
-                        }
-                        
-                        Ok(response
-                            .body(RamaBody::from(contents))
-                            .unwrap())
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to read static file: {}", e);
-                        Ok(RamaResponse::builder()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .body(RamaBody::from("Internal Server Error"))
-                            .unwrap())
-                    }
-                }
-            }
-            Err(_) => {
-                Ok(RamaResponse::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(RamaBody::from("Not Found"))
-                    .unwrap())
-            }
-        }
-    }
-    
     /// Handle redirects
     async fn handle_redirect(
         &self,
@@ -290,24 +230,57 @@ impl<S> RouteService<S> {
             .body(RamaBody::empty())
             .unwrap())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Match, Route};
+    use crate::middleware::route::matcher::{RouteMatcher, MatchedRoute, MatcherType};
+    use std::path::PathBuf;
+    use rama::http::{Method, StatusCode};
     
-    /// Guess content type based on file extension
-    fn guess_content_type(&self, path: &std::path::Path) -> Option<&'static str> {
-        let extension = path.extension()?.to_str()?;
+    #[tokio::test]
+    async fn test_static_route_matching() {
+        // Create routes with static route
+        let routes = vec![
+            Route::Static {
+                r#match: Match {
+                    path: Some("/site".to_string()),
+                    path_regex: None,
+                },
+                static_dir: PathBuf::from("C:/test/html"),
+            },
+            // For subpaths, we need wildcard route
+            Route::Static {
+                r#match: Match {
+                    path: Some("/site/{*path}".to_string()),
+                    path_regex: None,
+                },
+                static_dir: PathBuf::from("C:/test/html"),
+            },
+        ];
         
-        match extension.to_lowercase().as_str() {
-            "html" => Some("text/html"),
-            "css" => Some("text/css"),
-            "js" => Some("application/javascript"),
-            "json" => Some("application/json"),
-            "xml" => Some("application/xml"),
-            "png" => Some("image/png"),
-            "jpg" | "jpeg" => Some("image/jpeg"),
-            "gif" => Some("image/gif"),
-            "svg" => Some("image/svg+xml"),
-            "pdf" => Some("application/pdf"),
-            "txt" => Some("text/plain"),
-            _ => None,
-        }
+        // Create matcher
+        let matcher = RouteMatcher::new(routes).unwrap();
+        
+        // Test matching exact route
+        let result = matcher.match_route("/site");
+        assert!(result.is_ok(), "Failed to match /site route");
+        
+        let matched_route = result.unwrap();
+        assert!(matches!(matched_route.route, Route::Static { .. }));
+        
+        // Test with subpath (should match wildcard route)
+        let result2 = matcher.match_route("/site/style.css");
+        assert!(result2.is_ok(), "Failed to match /site/style.css route");
+        
+        let matched_route2 = result2.unwrap();
+        assert!(matches!(matched_route2.route, Route::Static { .. }));
+        assert_eq!(matched_route2.params.get("path"), Some(&"style.css".to_string()));
+        
+        // Test non-matching path
+        let result3 = matcher.match_route("/other");
+        assert!(result3.is_err(), "Should not match /other path");
     }
 }
