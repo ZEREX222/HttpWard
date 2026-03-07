@@ -48,37 +48,6 @@ impl HttpWardServer {
         let base_service = service_fn(move |ctx: Context<()>, _req: Request<Body>| {
             async move {
 
-                if let Some(req_ctx) = ctx.get::<HttpWardContext>() {
-                     error!("CONTENT TYPE!: {:?}", req_ctx.request_content_type);
-                 }
-
-                // Try to get SecureTransport from context
-                if let Some(st) = ctx.get::<SecureTransport>() {
-
-                    // ClientHello is available only if with_store_client_hello(true) was enabled
-                    if let Some(client_hello) = st.client_hello() {
-
-                        let pv = client_hello.protocol_version();
-
-                        let effective_version = match pv {
-                            ProtocolVersion::Unknown(_) => ProtocolVersion::TLSv1_2,
-                            other => other,
-                        };
-
-                        // Try to compute JA4 fingerprint
-                        match Ja4::compute_from_client_hello(client_hello, Some(effective_version)) {
-                            Ok(ja4) => {
-                                let ja4_str = ja4.to_string();
-                                info!("JA4 fingerprint: {}", ja4_str);
-                            }
-                            Err(e) => {
-                                warn!("Failed to compute JA4 fingerprint: {}", e);
-                            }
-                        }
-
-                    }
-                }
-
                 let response = Response::builder()
                     .status(StatusCode::OK)
                     .header("content-type", "text/plain")

@@ -61,7 +61,7 @@ where
         request: Request,
     ) -> Result<Self::Response, Self::Error> {
         // Access request context
-        let client_addr = ctx.get::<HttpWardContext>().map(|rc| rc.client_addr);
+        let client_ip = ctx.get::<HttpWardContext>().map(|rc| rc.client_ip);
         let content_type = ctx.get::<HttpWardContext>()
             .map(|rc| rc.request_content_type)
             .unwrap_or(ContentType::Unknown);
@@ -69,7 +69,7 @@ where
         trace!("incoming request");
         info!(
             "[{}] {:?} Request: {:?}",
-            client_addr.map_or("unknown".to_string(), |a| a.to_string()),
+            client_ip.map_or("unknown".to_string(), |ip| ip.to_string()),
             content_type,
             request
         );
