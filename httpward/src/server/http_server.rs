@@ -7,7 +7,8 @@ use rama::net::tls::{ProtocolVersion, SecureTransport};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use httpward_core::core::HttpWardContext;
-use crate::core::middleware::{LogLayer, RequestEnricherLayer, ResponseEnricherLayer, RouteLayer};
+use crate::core::middleware::{LogLayer, RequestEnricherLayer, ResponseEnricherLayer, RouteLayer, ErrorHandlerLayer};
+use crate::core::error::ErrorHandler;
 use crate::runtime::server_instance::ServerInstance;
 use crate::server::tls::tls::TlsConfigBuilder;
 
@@ -45,14 +46,16 @@ impl HttpWardServer {
         let tls_enabled = !self.instance.tls_registry.is_empty();
 
         // Create HTTP service with dynamic middleware layers using LayerStackBuilder
+        let error_handler = ErrorHandler::default();
         let base_service = service_fn(move |ctx: Context<()>, _req: Request<Body>| {
+            let error_handler = error_handler.clone();
             async move {
-
-                let response = Response::builder()
-                    .status(StatusCode::OK)
-                    .header("content-type", "text/plain")
-                    .body(Body::from("Backend Reached (Rama Server)"))
-                    .unwrap();
+                let response = error_handler.create_error_response_with_code(StatusCode::NOT_FOUND)
+                    .unwrap_or_else(|_| Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header("content-type", "text/plain")
+                        .body(Body::from("Error template failed"))
+                        .unwrap());
 
                 Ok::<_, std::convert::Infallible>(response)
             }
@@ -72,6 +75,7 @@ impl HttpWardServer {
             (
                 RequestEnricherLayer::new(sites_arc, global_arc),
                 LogLayer::new(),
+                ErrorHandlerLayer::new(),
                 ResponseEnricherLayer::new(),
                 RouteLayer::new(),
             ).into_layer(base_service)
