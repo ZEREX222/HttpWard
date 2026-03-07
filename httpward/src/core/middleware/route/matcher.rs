@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use crate::config::Route;
 use matchit::Router;
 use regex::Regex;
 use thiserror::Error;
+use httpward_core::config::Route;
 
 #[derive(Error, Debug)]
 pub enum MatcherError {
@@ -124,9 +124,8 @@ pub enum MatcherType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Match, Redirect};
-    use std::path::PathBuf;
-    
+    use httpward_core::config::{Match, Route};
+
     #[test]
     fn test_path_matching() {
         let routes = vec![

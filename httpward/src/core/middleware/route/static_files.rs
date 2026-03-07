@@ -3,8 +3,8 @@ use std::path::Path;
 use rama::http::{Request as RamaRequest, Response as RamaResponse, Body as RamaBody, StatusCode};
 use tokio::fs;
 use tracing::debug;
-use crate::middleware::route::RouteError;
-use crate::middleware::route::matcher::MatchedRoute;
+use httpward_core::config::Route;
+use crate::core::middleware::route::{MatchedRoute, RouteError};
 
 /// Process static directory path with matcher parameters
 /// Replaces placeholders like {param}, {*any}, and {1}, {2} (regex groups) with actual values from params
@@ -55,7 +55,7 @@ pub async fn handle_static(
     
     // Get the matched path from the route
     let matched_path = match &matched_route.route {
-        crate::config::Route::Static { r#match, .. } => {
+        Route::Static { r#match, .. } => {
             r#match.path.as_deref().unwrap_or("")
         }
         _ => "",
@@ -184,11 +184,11 @@ fn guess_content_type(path: &std::path::Path) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Match, Route};
-    use crate::middleware::route::matcher::MatcherType;
     use std::path::PathBuf;
     use rama::http::{Method};
-    
+    use httpward_core::config::Match;
+    use crate::core::middleware::route::MatcherType;
+
     #[test]
     fn test_process_static_dir_with_params() {
         let mut params = HashMap::new();

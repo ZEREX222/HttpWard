@@ -9,9 +9,11 @@ use std::sync::Arc;
 use tracing::trace;
 use wildmatch::WildMatch;
 
-use crate::middleware::core::{ContentType, HttpWardContext, parse_content_type};
-use crate::config::{SiteConfig, GlobalConfig};
+
+
 use rama::http::Body;
+use httpward_core::config::{GlobalConfig, SiteConfig};
+use httpward_core::core::{parse_content_type, ContentType, HttpWardContext};
 
 /// Extract content type from request headers
 fn extract_content_type_from_request(request: &Request<Body>) -> ContentType {

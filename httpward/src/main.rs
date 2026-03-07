@@ -1,5 +1,6 @@
 mod runtime;
 mod server;
+mod core;
 
 use httpward_core::config::load;
 

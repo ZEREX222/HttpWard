@@ -5,8 +5,7 @@ use rama::{
 };
 use std::fmt::Debug;
 use tracing::{info, trace};
-
-use crate::middleware::core::{ContentType, HttpWardContext};
+use httpward_core::core::{ContentType, HttpWardContext};
 
 /// Layer that adds request logging with custom context
 #[derive(Clone, Debug)]

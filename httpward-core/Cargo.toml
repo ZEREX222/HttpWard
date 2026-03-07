@@ -9,21 +9,12 @@ edition = "2024"
 
 
 [dependencies]
-tokio = { workspace = true }
 tracing = { workspace = true }
-rama = { workspace = true }
-wildmatch = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 anyhow = "1.0"
 glob = "0.3"
 serde_json = "1.0"
 schemars = { version = "1.2.1", features = ["preserve_order"] }
-url = "2.2"
-thiserror = "1.0"
-matchit = "0.8"
-regex = "1.0"
-base64 = "0.21"
-sha1 = "0.10"
-http = "1.0"
+
 

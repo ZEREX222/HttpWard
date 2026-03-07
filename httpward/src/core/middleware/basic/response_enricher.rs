@@ -6,8 +6,9 @@ use rama::{
 };
 use std::fmt::Debug;
 
-use crate::middleware::core::{ContentType, HttpWardContext, parse_content_type};
+
 use rama::http::Body;
+use httpward_core::core::{parse_content_type, ContentType, HttpWardContext};
 
 /// Extract content type from response headers (generic version)
 fn extract_content_type_from_response_generic<T>(response: &T) -> ContentType 

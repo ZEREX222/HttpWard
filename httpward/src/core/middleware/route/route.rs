@@ -7,9 +7,9 @@ use rama::{
 use std::fmt::Debug;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::debug;
-use crate::middleware::core::HttpWardContext;
-use crate::config::Route;
+use tracing::{debug, error};
+use httpward_core::config::{GlobalConfig, Redirect, Route};
+use httpward_core::core::HttpWardContext;
 use super::{
     matcher::{RouteMatcher, MatcherError},
     proxy::{ProxyHandler, ProxyError},
@@ -96,7 +96,7 @@ where
                 // Fallback context if not present
                 HttpWardContext::new(
                     std::net::SocketAddr::from(([127, 0, 0, 1], 8080)),
-                    Arc::new(crate::config::GlobalConfig::default()),
+                    Arc::new(GlobalConfig::default()),
                 )
             });
 
@@ -177,7 +177,7 @@ where
                         match static_files::handle_static(&request, static_dir, &matched_route).await {
                             Ok(response) => return Ok(response),
                             Err(e) => {
-                                tracing::error!("Static file error: {}", e);
+                                error!("Static file error: {}", e);
                                 return Ok(RamaResponse::builder()
                                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                                     .body(RamaBody::from("Static file error"))
@@ -189,7 +189,7 @@ where
                         match self.handle_redirect(request, &redirect).await {
                             Ok(response) => return Ok(response),
                             Err(e) => {
-                                tracing::error!("Redirect error: {}", e);
+                                error!("Redirect error: {}", e);
                                 return Ok(RamaResponse::builder()
                                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                                     .body(RamaBody::from("Redirect error"))
@@ -200,12 +200,12 @@ where
                 }
             }
             Err(MatcherError::NoMatch) => {
-                tracing::debug!("No route matched for path: {}", path);
+                debug!("No route matched for path: {}", path);
                 // No route matched, pass to inner service
                 return self.inner.serve(ctx, request).await;
             }
             Err(e) => {
-                tracing::error!("Route matching error: {}", e);
+                error!("Route matching error: {}", e);
                 return Ok(RamaResponse::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .body(RamaBody::from("Routing error"))
@@ -220,7 +220,7 @@ impl<S> RouteService<S> {
     async fn handle_redirect(
         &self,
         _request: RamaRequest<RamaBody>,
-        redirect: &crate::config::Redirect,
+        redirect: &Redirect,
     ) -> Result<RamaResponse<RamaBody>, RouteError> {
         let location = redirect.to.clone();
         
@@ -235,11 +235,10 @@ impl<S> RouteService<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Match, Route};
-    use crate::middleware::route::matcher::{RouteMatcher, MatchedRoute, MatcherType};
+
     use std::path::PathBuf;
-    use rama::http::{Method, StatusCode};
-    
+    use httpward_core::config::Match;
+
     #[tokio::test]
     async fn test_static_route_matching() {
         // Create routes with static route

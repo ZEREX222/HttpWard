@@ -1,4 +1,4 @@
-use crate::middleware::core::ContentType;
+use crate::core::ContentType;
 
 /// Parse content type string into ContentType enum
 pub fn parse_content_type(content_type_str: &str) -> ContentType {

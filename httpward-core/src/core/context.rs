@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use crate::config::{SiteConfig, GlobalConfig};
+use crate::config::{GlobalConfig, SiteConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContentType {

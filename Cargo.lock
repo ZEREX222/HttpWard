@@ -998,15 +998,22 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 name = "httpward"
 version = "0.0.1"
 dependencies = [
+ "base64 0.21.7",
+ "http",
  "httpward-core",
+ "matchit",
  "notify",
  "rama",
  "rama-tls-rustls",
  "rcgen 0.14.7",
+ "regex",
  "rustls",
+ "sha1",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "wildmatch",
 ]
 
@@ -1015,22 +1022,12 @@ name = "httpward-core"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "base64 0.21.7",
  "glob",
- "http",
- "matchit",
- "rama",
- "regex",
  "schemars",
  "serde",
  "serde_json",
  "serde_yaml",
- "sha1",
- "thiserror 1.0.69",
- "tokio",
  "tracing",
- "url",
- "wildmatch",
 ]
 
 [[package]]
