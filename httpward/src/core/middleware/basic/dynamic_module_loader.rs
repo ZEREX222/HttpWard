@@ -10,6 +10,7 @@ use rama::{
 };
 use std::fmt::Debug;
 use httpward_core::httpward_middleware::layers::log::HttpWardLogLayer;
+use httpward_core::httpward_middleware::pipe::HttpWardMiddlewarePipeBuilder;
 
 /// Layer that dynamically loads and applies HttpWard middleware modules
 /// This layer integrates the abstract middleware pipe with Rama's layer system
@@ -21,10 +22,10 @@ pub struct DynamicModuleLoaderLayer {
 impl DynamicModuleLoaderLayer {
     pub fn new() -> Self {
         // Start with empty pipe - layers will be added manually
-        let pipe = HttpWardMiddlewarePipe::new()
+        let pipe = HttpWardMiddlewarePipeBuilder::new()
             .add_layer(HttpWardLogLayer::new().with_tag("dynamic"))
             .add_layer(HttpWardLogLayer::new().with_tag("dynamic1"))
-            .add_layer(HttpWardLogLayer::new().with_tag("dynamic2"));
+            .add_layer(HttpWardLogLayer::new().with_tag("dynamic2")).build();
 
         Self {
             middleware_pipe: pipe,
