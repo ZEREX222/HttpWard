@@ -12,3 +12,4 @@ mod tests;
 pub use middleware_trait::HttpWardMiddleware;
 pub use pipe::HttpWardMiddlewarePipe;
 pub use types::BoxError;
+pub use crate::core::errors::{HttpWardError, HttpWardMiddlewareError, IsHttpWardError};

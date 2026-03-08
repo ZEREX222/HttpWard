@@ -6,6 +6,7 @@ use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use crate::httpward_middleware::types::BoxError;
 use rama::http::{Body, Request, Response};
 use rama::Context;
+use crate::httpward_middleware::HttpWardError;
 use crate::httpward_middleware::next::Next;
 
 /// Simple logging middleware used as an example.
@@ -33,6 +34,7 @@ impl HttpWardMiddleware for HttpWardLogLayer {
         req: Request<Body>,
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError> {
+        //return Err(Box::new(HttpWardError::auth_failed("Invalid token")));
         tracing::debug!(target: "httpward_log", "HttpWardLogLayer.handle called");
         
         // Log incoming request line

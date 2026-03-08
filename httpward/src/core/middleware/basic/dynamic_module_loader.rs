@@ -11,6 +11,7 @@ use rama::{
 use std::fmt::Debug;
 use httpward_core::httpward_middleware::layers::log::HttpWardLogLayer;
 use httpward_core::httpward_middleware::pipe::HttpWardMiddlewarePipeBuilder;
+use httpward_core::core::errors::HttpWardError;
 
 /// Layer that dynamically loads and applies HttpWard middleware modules
 /// This layer integrates the abstract middleware pipe with Rama's layer system
@@ -128,7 +129,7 @@ where
     S::Response: Debug + Send + Sync + 'static,
 {
     type Response = Response<Body>;
-    type Error = std::convert::Infallible;
+    type Error = Box<dyn std::error::Error + Send + Sync>;
 
     async fn serve(
         &self,
@@ -139,21 +140,6 @@ where
         
         // Execute all middleware in the pipe automatically
         // The pipe handles all the nested middleware logic
-        match self.middleware_pipe.execute_middleware(self.inner.clone(), ctx, request).await {
-            Ok(response) => {
-                tracing::debug!(target: "dynamic_module_loader", "Middleware chain completed successfully");
-                Ok(response)
-            },
-            Err(e) => {
-                // Log the error and convert to Infallible
-                tracing::error!(target: "dynamic_module_loader", "Middleware error: {:?}", e);
-                // For now, we'll return a 500 Internal Server Error response
-                // instead of trying to convert to Infallible
-                Ok(Response::builder()
-                    .status(500)
-                    .body("Internal Server Error".into())
-                    .unwrap())
-            }
-        }
+        self.middleware_pipe.execute_middleware(self.inner.clone(), ctx, request).await
     }
 }
