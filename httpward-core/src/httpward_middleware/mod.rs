@@ -1,11 +1,14 @@
-//! HttpWard Middleware Framework
-//!
-//! This module provides the abstract middleware system for HttpWard,
-//! including the HttpWardLayer trait and HttpWardMiddlewarePipe.
-
-pub mod layer;
+// File: httpward-core/src/httpward_middleware/mod.rs
+pub mod types;
+pub mod middleware_trait;
+pub mod next;
 pub mod pipe;
+pub mod adapter;
+pub mod layers;
 
-pub use layer::HttpWardLayer;
+#[cfg(test)]
+mod tests;
+
+pub use middleware_trait::HttpWardMiddleware;
 pub use pipe::HttpWardMiddlewarePipe;
-pub use layer::HttpWardLogLayer;
+pub use types::BoxError;

@@ -1,6 +1,5 @@
 use std::error::Error;
 use httpward_core::httpward_middleware::{
-    HttpWardLogLayer,
     HttpWardMiddlewarePipe
 };
 use rama::{
@@ -10,6 +9,7 @@ use rama::{
     Context,
 };
 use std::fmt::Debug;
+use httpward_core::httpward_middleware::layers::log::HttpWardLogLayer;
 
 /// Layer that dynamically loads and applies HttpWard middleware modules
 /// This layer integrates the abstract middleware pipe with Rama's layer system
@@ -21,8 +21,11 @@ pub struct DynamicModuleLoaderLayer {
 impl DynamicModuleLoaderLayer {
     pub fn new() -> Self {
         // Start with empty pipe - layers will be added manually
-        let pipe = HttpWardMiddlewarePipe::new();
-            
+        let pipe = HttpWardMiddlewarePipe::new()
+            .add_layer(HttpWardLogLayer::new().with_tag("dynamic"))
+            .add_layer(HttpWardLogLayer::new().with_tag("dynamic1"))
+            .add_layer(HttpWardLogLayer::new().with_tag("dynamic2"));
+
         Self {
             middleware_pipe: pipe,
         }
@@ -34,24 +37,12 @@ impl DynamicModuleLoaderLayer {
             middleware_pipe: pipe,
         }
     }
-    
-    /// Manually build a pipe with layers
-    pub fn build() -> Self {
-        // Build pipe with HttpWardLogLayer as the first layer to test custom middleware mechanism
-        let pipe = HttpWardMiddlewarePipe::new()
-            .add_layer(HttpWardLogLayer::new())
-            .add_layer(HttpWardLogLayer::new())
-            .add_layer(HttpWardLogLayer::new());
-            
-        Self {
-            middleware_pipe: pipe,
-        }
-    }
+
     
     /// Dynamically add any layer type to the pipe
     pub fn add_layer<T>(mut self, layer: T) -> Self 
     where
-        T: std::any::Any + Send + Sync + Clone + Debug + 'static + httpward_core::httpward_middleware::HttpWardLayer,
+        T: httpward_core::httpward_middleware::HttpWardMiddleware + 'static,
     {
         self.middleware_pipe = self.middleware_pipe.add_layer(layer);
         self
@@ -73,8 +64,8 @@ impl DynamicModuleLoaderLayer {
     }
     
     /// Get a specific layer by name
-    pub fn get_layer_by_name(&self, name: &str) -> Option<&dyn httpward_core::httpward_middleware::HttpWardLayer> {
-        self.middleware_pipe.get_layer_by_name(name)
+    pub fn get_layer_by_name(&self, name: &str) -> Option<std::sync::Arc<dyn httpward_core::httpward_middleware::HttpWardMiddleware>> {
+        self.middleware_pipe.get_layer_by_name(name).cloned()
     }
 }
 
@@ -124,27 +115,44 @@ where
     }
     
     /// Get a specific layer by name
-    pub fn get_layer_by_name(&self, name: &str) -> Option<&dyn httpward_core::httpward_middleware::HttpWardLayer> {
-        self.middleware_pipe.get_layer_by_name(name)
+    pub fn get_layer_by_name(&self, name: &str) -> Option<std::sync::Arc<dyn httpward_core::httpward_middleware::HttpWardMiddleware>> {
+        self.middleware_pipe.get_layer_by_name(name).cloned()
     }
 }
 
 impl<S> Service<(), Request<Body>> for DynamicModuleLoaderService<S>
 where
     S: Service<(), Request<Body>, Response = Response<Body>> + Clone + Send + Sync + 'static,
-    S::Error: Debug + Send + Sync + 'static,
+    S::Error: Debug + Send + Sync + std::error::Error + 'static,
     S::Response: Debug + Send + Sync + 'static,
 {
     type Response = Response<Body>;
-    type Error = S::Error;
+    type Error = std::convert::Infallible;
 
     async fn serve(
         &self,
         ctx: Context<()>,
         request: Request<Body>,
     ) -> Result<Self::Response, Self::Error> {
+        tracing::debug!(target: "dynamic_module_loader", "DynamicModuleLoaderService.serve called");
+        
         // Execute all middleware in the pipe automatically
         // The pipe handles all the nested middleware logic
-        self.middleware_pipe.execute_middleware(self.inner.clone(), ctx, request).await
+        match self.middleware_pipe.execute_middleware(self.inner.clone(), ctx, request).await {
+            Ok(response) => {
+                tracing::debug!(target: "dynamic_module_loader", "Middleware chain completed successfully");
+                Ok(response)
+            },
+            Err(e) => {
+                // Log the error and convert to Infallible
+                tracing::error!(target: "dynamic_module_loader", "Middleware error: {:?}", e);
+                // For now, we'll return a 500 Internal Server Error response
+                // instead of trying to convert to Infallible
+                Ok(Response::builder()
+                    .status(500)
+                    .body("Internal Server Error".into())
+                    .unwrap())
+            }
+        }
     }
 }

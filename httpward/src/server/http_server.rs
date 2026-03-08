@@ -7,7 +7,7 @@ use rama::net::tls::{ProtocolVersion, SecureTransport};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use httpward_core::core::HttpWardContext;
-use crate::core::middleware::{LogLayer, RequestEnricherLayer, ResponseEnricherLayer, RouteLayer, ErrorHandlerLayer};
+use crate::core::middleware::{LogLayer, RequestEnricherLayer, ResponseEnricherLayer, RouteLayer, ErrorHandlerLayer, DynamicModuleLoaderLayer};
 use crate::core::error::ErrorHandler;
 use crate::runtime::server_instance::ServerInstance;
 use crate::server::tls::tls::TlsConfigBuilder;
@@ -73,9 +73,10 @@ impl HttpWardServer {
         
         let http_svc = HttpServer::auto(exec.clone()).service(
             (
+                ErrorHandlerLayer::new(),
                 RequestEnricherLayer::new(sites_arc, global_arc),
                 LogLayer::new(),
-                ErrorHandlerLayer::new(),
+                DynamicModuleLoaderLayer::new(),
                 ResponseEnricherLayer::new(),
                 RouteLayer::new(),
             ).into_layer(base_service)

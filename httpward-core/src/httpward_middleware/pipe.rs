@@ -1,84 +1,88 @@
-//! HttpWard Middleware Pipe
-//!
-//! Provides a unified pipeline for executing multiple middleware layers.
+// File: httpward-core/src/httpward_middleware/pipe.rs
 
-use std::fmt::Debug;
-use rama::{
-    http::{Body, Request, Response},
-    service::Service,
-    Context,
-};
-use super::layer::HttpWardLayer;
+use std::sync::Arc;
+use crate::httpward_middleware::middleware_trait::DynMiddleware;
+use crate::httpward_middleware::next::Next;
+use crate::httpward_middleware::types::BoxError;
+use rama::http::{Body, Request, Response};
+use rama::Context;
+use crate::httpward_middleware::adapter::box_service_from;
+use rama::service::Service;
 
-/// A pipeline for managing and executing HttpWard middleware layers
-#[derive(Debug, Clone)]
+/// Runtime middleware pipe: holds Vec<Arc<dyn HttpWardMiddleware>> and executes them.
+#[derive(Clone, Default)]
 pub struct HttpWardMiddlewarePipe {
-    layers: Vec<Box<dyn HttpWardLayer>>,
+    middlewares: Vec<DynMiddleware>,
+}
+
+impl std::fmt::Debug for HttpWardMiddlewarePipe {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpWardMiddlewarePipe")
+            .field("middleware_count", &self.middlewares.len())
+            .finish()
+    }
 }
 
 impl HttpWardMiddlewarePipe {
-    /// Create a new empty middleware pipe
     pub fn new() -> Self {
         Self {
-            layers: Vec::new(),
+            middlewares: Vec::new(),
         }
     }
-    
-    /// Add a layer to the pipe
-    pub fn add_layer<T>(mut self, layer: T) -> Self 
+
+    /// Add a middleware to the end of the chain.
+    pub fn add_layer<M>(mut self, mw: M) -> Self
     where
-        T: HttpWardLayer + 'static,
+        M: crate::httpward_middleware::middleware_trait::HttpWardMiddleware + 'static,
     {
-        self.layers.push(Box::new(layer));
+        self.middlewares.push(Arc::new(mw));
         self
     }
-    
-    /// Get the number of layers in the pipe
+
+    /// Add middleware by Arc (useful for prebuilt components / plugins)
+    pub fn push_arc(&mut self, mw: DynMiddleware) {
+        self.middlewares.push(mw);
+    }
+
     pub fn len(&self) -> usize {
-        self.layers.len()
+        self.middlewares.len()
     }
-    
-    /// Check if the pipe is empty
+
     pub fn is_empty(&self) -> bool {
-        self.layers.is_empty()
+        self.middlewares.is_empty()
     }
-    
-    /// Get a layer by name
-    pub fn get_layer_by_name(&self, name: &str) -> Option<&dyn HttpWardLayer> {
-        self.layers.iter().find(|layer| layer.name() == name).map(|layer| layer.as_ref())
+
+    /// Find layer by name (middleware may return a name via `name()`).
+    pub fn get_layer_by_name(&self, name: &str) -> Option<&DynMiddleware> {
+        self.middlewares.iter().find(|m| m.name().map_or(false, |n| n == name))
     }
-    
-    /// Execute middleware pipeline
-    /// 
-    /// This method executes all layers in the pipe in sequence.
-    /// Currently implements basic execution with the first layer.
+
+    /// Execute the middleware chain for a concrete inner service `S`.
+    ///
+    /// NOTE: The returned error type is BoxError. To integrate with your existing
+    /// DynamicModuleLoaderService you can change its `Error` to BoxError or map it.
     pub async fn execute_middleware<S>(
         &self,
-        service: S,
+        inner: S,
         ctx: Context<()>,
-        request: Request<Body>,
-    ) -> Result<Response<Body>, S::Error>
+        req: Request<Body>,
+    ) -> Result<Response<Body>, BoxError>
     where
         S: Service<(), Request<Body>, Response = Response<Body>> + Clone + Send + Sync + 'static,
-        S::Error: Debug + Send + Sync + 'static,
+        S::Error: std::error::Error + Send + Sync + 'static,
     {
-        if let Some(layer) = self.layers.first() {
-            // For now, just execute with the first layer
-            // In a full implementation, this would chain through all layers
-            if let Some(log_layer) = layer.as_any().downcast_ref::<super::layer::HttpWardLogLayer>() {
-                // Use the log layer directly
-                let log_service = super::layer::HttpWardLogService::new(service.clone(), log_layer.name().to_string());
-                return log_service.serve(ctx, request).await;
-            }
-        }
+        tracing::debug!(target: "httpward_middleware", "execute_middleware called with {} middlewares", self.middlewares.len());
         
-        // Fallback: just call the service directly
-        service.serve(ctx, request).await
-    }
-}
+        // Convert concrete service to BoxService
+        let boxed = box_service_from(inner);
 
-impl Default for HttpWardMiddlewarePipe {
-    fn default() -> Self {
-        Self::new()
+        // Build Next and run
+        let next = Next::new(&self.middlewares, &boxed);
+        let result = next.run(ctx, req).await;
+        
+        tracing::debug!(target: "httpward_middleware", "execute_middleware completed with result: {:?}", 
+            result.as_ref().map(|r| r.status().as_u16()));
+        
+        result
     }
 }
