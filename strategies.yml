@@ -1,0 +1,18 @@
+# HttpWard Strategies Configuration
+# This file defines reusable middleware strategies that can be applied at different levels
+
+# Default strategy applied globally
+default:
+  - rate_limit:
+      requests: 1000
+      window: "1m"
+  - logging:
+      level: info
+
+# For super safe mode
+super-safe:
+  - rate_limit:
+      requests: 10
+      window: "1m"
+  - logging:
+      level: info

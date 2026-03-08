@@ -1,10 +1,10 @@
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::config::global::{Listener, Route};
+use crate::config::strategy::{Strategy, StrategyCollection};
 
 /// Configuration for one virtual host / site
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct SiteConfig {
     /// Primary domain name (used for SNI matching & logging)
@@ -22,6 +22,14 @@ pub struct SiteConfig {
     /// Site-level routing rules
     #[serde(default)]
     pub routes: Vec<Route>,
+
+    /// Site-specific strategy (overrides global default)
+    #[serde(default)]
+    pub strategy: Option<String>,
+
+    /// Site-specific strategy definitions
+    #[serde(default)]
+    pub strategies: StrategyCollection,
 }
 
 impl SiteConfig {
@@ -39,4 +47,18 @@ impl SiteConfig {
     pub fn has_domains(&self) -> bool {
         !self.domain.is_empty() || !self.domains.is_empty()
     }
+
+    /// Get the site strategy name
+    pub fn get_strategy(&self) -> Option<&String> {
+        self.strategy.as_ref()
+    }
+
+    /// Get a strategy from the site's strategy collection
+    pub fn get_site_strategy(&self, name: &str) -> Option<Strategy> {
+        self.strategies.get(name).map(|middleware| Strategy {
+            name: name.to_string(),
+            middleware: middleware.clone(),
+        })
+    }
+
 }
