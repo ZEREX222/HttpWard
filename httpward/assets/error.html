@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ошибка {{e_num}}</title>
+    <title>Error {{e_num}}</title>
     <style>
         :root {
             --bg: #0a0a0b;
@@ -24,7 +24,7 @@
             align-items: center;
             justify-content: center;
             background-color: var(--bg);
-            /* Мягкое свечение в центре для глубины */
+            /* Soft glow in the center to create depth */
             background: radial-gradient(circle at center, #111112 0%, #0a0a0b 100%);
             color: var(--text-main);
             font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
@@ -32,19 +32,19 @@
         }
 
         .container {
-            text-align: left; /* Смена на лево для более "дизайнерского" вида */
+            text-align: left; /* Switched to left alignment for a more "designer-like" look */
             max-width: 600px;
             padding: 40px;
         }
 
         .code {
-            font-size: clamp(8rem, 20vw, 12rem); /* Огромный шрифт, адаптивный */
+            font-size: clamp(8rem, 20vw, 12rem); /* Huge adaptive font size */
             font-weight: 800;
             line-height: 0.8;
             letter-spacing: -0.05em;
             margin-bottom: 20px;
             opacity: 0.9;
-            /* Эффект контурного текста для стиля */
+            /* Outline text effect for styling */
             -webkit-text-stroke: 1px rgba(255,255,255,0.1);
         }
 
