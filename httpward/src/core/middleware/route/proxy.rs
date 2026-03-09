@@ -3,10 +3,10 @@ use rama::{
     http::client::EasyHttpWebClient,
     http::service::client::HttpClientExt,
 };
-use http::Uri;
+use http::{HeaderMap, HeaderName, Uri};
 use thiserror::Error;
 use url::Url;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Error, Debug)]
 pub enum ProxyError {
@@ -16,6 +16,86 @@ pub enum ProxyError {
     InvalidUrl(String),
     #[error("upstream error: {0}")]
     Upstream(String),
+}
+
+/// Remove hop-by-hop headers and headers listed in Connection, then
+/// add/append forwarding headers (Via, X-Forwarded-For, etc).
+fn normalize_request_headers(
+    mut headers: HeaderMap,
+    client_ip: Option<&str>,
+    upstream_host: &str,
+    incoming_proto: &str, // "http" or "https"
+) -> Result<HeaderMap, Box<dyn std::error::Error>> {
+    // Hop-by-hop headers per RFC: always remove these.
+    let mut hop_by_hop = vec![
+        header::CONNECTION.clone(),
+        header::KEEP_ALIVE.clone(),
+        header::PROXY_AUTHENTICATE.clone(),
+        header::PROXY_AUTHORIZATION.clone(),
+        header::TE.clone(),
+        header::TRAILER.clone(),
+        header::TRANSFER_ENCODING.clone(),
+        header::UPGRADE.clone(),
+    ].into_iter().collect::<HashSet<_>>();
+
+    // If Connection header exists, its comma-separated tokens name additional hop-by-hop headers.
+    if let Some(conn_val) = headers.get(header::CONNECTION) {
+        if let Ok(s) = conn_val.to_str() {
+            for token in s.split(',').map(|t| t.trim()) {
+                if !token.is_empty() {
+                    if let Ok(hname) = HeaderName::from_lowercase(token.to_lowercase().as_bytes()) {
+                        hop_by_hop.insert(hname);
+                    }
+                }
+            }
+        }
+    }
+
+    // Remove hop-by-hop headers
+    for name in hop_by_hop {
+        headers.remove(name);
+    }
+
+    // Ensure Host header equals upstream authority
+    headers.insert(
+        header::HOST,
+        HeaderValue::from_str(upstream_host)?,
+    );
+
+    // Preserve original host in X-Forwarded-Host if present (optional)
+    // You can add logic to set X-Forwarded-Host only if original Host != upstream_host.
+    // headers.insert(HeaderName::from_static("x-forwarded-host"), ...);
+
+    // Append or create X-Forwarded-For
+    if let Some(ip) = client_ip {
+        let xff = HeaderName::from_static("x-forwarded-for");
+        let prev = headers.get(&xff).and_then(|v| v.to_str().ok()).unwrap_or("");
+        let new_val = if prev.is_empty() {
+            ip.to_string()
+        } else {
+            format!("{}, {}", prev, ip)
+        };
+        headers.insert(xff, HeaderValue::from_str(&new_val)?);
+    }
+
+    // Add X-Forwarded-Proto
+    headers.insert(
+        HeaderName::from_static("x-forwarded-proto"),
+        HeaderValue::from_str(incoming_proto)?,
+    );
+
+    // Add Via header
+    let via_name = HeaderName::from_static("via");
+    let our_via = format!("{} {}", incoming_proto, "my-proxy"); // replace my-proxy with actual id
+    let via_prev = headers.get(&via_name).and_then(|v| v.to_str().ok()).unwrap_or("");
+    let via_val = if via_prev.is_empty() {
+        our_via
+    } else {
+        format!("{}, {}", via_prev, our_via)
+    };
+    headers.insert(via_name, HeaderValue::from_str(&via_val)?);
+
+    Ok(headers)
 }
 
 /// HTTP/HTTPS proxy handler
@@ -77,10 +157,30 @@ impl ProxyHandler {
             }
         }
 
+        // Extract upstream authority (host:port)
+        let upstream_host = req
+            .uri()
+            .authority()
+            .map(|a| a.as_str())
+            .ok_or_else(|| ProxyError::Upstream("Missing upstream authority".into()))?;
+
+        // Example values (normally from connection context)
+        let client_ip = None; // Option<&str>
+        let proto = "http";   // or "https"
+
+        // Normalize headers before sending upstream
+        let headers = normalize_request_headers(
+            req.headers().clone(),
+            client_ip,
+            upstream_host,
+            proto,
+        ).map_err(|e| ProxyError::Upstream(e.to_string()))?;
+
         // Send request using Rama HTTP client
         let resp = self.client
             .request(req.method().clone(), req.uri().clone())
-            .headers(req.headers().clone())
+            .headers(headers)
+            .body(req.into_body())
             .send(rama::Context::default())
             .await
             .map_err(|e| ProxyError::Http(Box::new(e)))?;
