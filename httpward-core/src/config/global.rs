@@ -6,7 +6,7 @@ use crate::config::strategy::{Strategy, StrategyRef, StrategyCollection};
 
 /// Global application configuration (loaded from httpward.yaml)
 /// Inherits all fields from SiteConfig plus global-specific settings
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct GlobalConfig {
     /// Primary domain name (used for SNI matching & logging)
@@ -35,11 +35,26 @@ pub struct GlobalConfig {
 
     /// Default strategy for all domains and routes
     #[serde(default = "default_strategy")]
-    pub strategy: String,
+    pub strategy: Option<StrategyRef>,
 
     /// Global strategy definitions
     #[serde(default)]
     pub strategies: StrategyCollection,
+}
+
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self {
+            domain: String::default(),
+            domains: Vec::default(),
+            listeners: Vec::default(),
+            routes: Vec::default(),
+            log: LogConfig::default(),
+            sites_enabled: PathBuf::default(),
+            strategy: default_strategy(),
+            strategies: StrategyCollection::default(),
+        }
+    }
 }
 
 impl GlobalConfig {
@@ -65,17 +80,17 @@ impl GlobalConfig {
             domains: self.domains.clone(),
             listeners: self.listeners.clone(),
             routes: self.routes.clone(),
-            strategy: Some(self.strategy.clone()),
+            strategy: self.strategy.clone(),
             strategies: self.strategies.clone(),
         }
     }
 
     /// Get the default strategy
     pub fn get_default_strategy(&self) -> Option<Strategy> {
-        self.strategies.get(&self.strategy).map(|middleware| Strategy {
-            name: self.strategy.clone(),
-            middleware: middleware.clone(),
-        })
+        match &self.strategy {
+            Some(strategy_ref) => strategy_ref.resolve(&self.strategies),
+            None => None,
+        }
     }
 }
 
@@ -204,6 +219,79 @@ fn default_log_level() -> String {
     "warn".to_string()
 }
 
-fn default_strategy() -> String {
-    "default".to_string()
+fn default_strategy() -> Option<StrategyRef> {
+    Some(StrategyRef::Named("default".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::strategy::StrategyRef;
+
+    #[test]
+    fn test_global_default_strategy() {
+        let config = GlobalConfig::default();
+        
+        // Should have Some(StrategyRef::Named("default")) by default
+        assert!(config.strategy.is_some(), "Strategy should be Some, got {:?}", config.strategy);
+        
+        match config.strategy.unwrap() {
+            StrategyRef::Named(name) => assert_eq!(name, "default"),
+            _ => panic!("Expected Named strategy"),
+        }
+    }
+
+    #[test]
+    fn test_global_strategy_resolution() {
+        let mut config = GlobalConfig::default();
+        
+        // Add a default strategy to the collection
+        config.strategies.insert("default".to_string(), vec![
+            crate::config::strategy::MiddlewareConfig::new_named_json(
+                "logging".to_string(),
+                serde_json::json!({"level": "info"})
+            )
+        ]);
+        
+        // Should resolve the default strategy
+        let resolved = config.get_default_strategy();
+        assert!(resolved.is_some());
+        
+        let strategy = resolved.unwrap();
+        assert_eq!(strategy.name, "default");
+        assert_eq!(strategy.middleware.len(), 1);
+        assert_eq!(strategy.middleware[0].name(), "logging");
+    }
+
+    #[test]
+    fn test_global_inline_strategy() {
+        let mut config = GlobalConfig::default();
+        
+        // Set an inline strategy using Strategy
+        let inline_strategy = Strategy {
+            name: "inline_test".to_string(),
+            middleware: vec![
+                crate::config::strategy::MiddlewareConfig::new_named_json(
+                    "rate_limit".to_string(),
+                    serde_json::json!({"requests": 1000, "window": "1m"})
+                ),
+                crate::config::strategy::MiddlewareConfig::new_named_json(
+                    "logging".to_string(),
+                    serde_json::json!({"level": "debug"})
+                )
+            ]
+        };
+        
+        config.strategy = Some(StrategyRef::Inline(inline_strategy));
+        
+        // Should resolve the inline strategy
+        let resolved = config.get_default_strategy();
+        assert!(resolved.is_some());
+        
+        let strategy = resolved.unwrap();
+        assert_eq!(strategy.name, "inline_test");
+        assert_eq!(strategy.middleware.len(), 2);
+        assert_eq!(strategy.middleware[0].name(), "rate_limit");
+        assert_eq!(strategy.middleware[1].name(), "logging");
+    }
 }

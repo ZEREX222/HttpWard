@@ -399,6 +399,89 @@ middleware:
     }
 
     #[test]
+    fn test_strategy_ref_inline_collection() {
+        // Test Inline(Strategy) functionality
+        let inline_yaml = r#"
+name: "inline_strategy"
+middleware:
+  - rate_limit:
+      requests: 100
+      window: "1m"
+  - logging:
+      level: debug
+      format: json
+"#;
+
+        let inline_strategy: Strategy = serde_yaml::from_str(inline_yaml).unwrap();
+        assert_eq!(inline_strategy.name, "inline_strategy");
+        assert_eq!(inline_strategy.middleware.len(), 2);
+        
+        let strategy_ref = StrategyRef::Inline(inline_strategy);
+        let resolved = strategy_ref.resolve(&StrategyCollection::new());
+        
+        assert!(resolved.is_some());
+        let strategy = resolved.unwrap();
+        assert_eq!(strategy.name, "inline_strategy");
+        assert_eq!(strategy.middleware.len(), 2);
+        
+        // Check rate_limit middleware
+        let rate_limit = &strategy.middleware[0];
+        assert_eq!(rate_limit.name(), "rate_limit");
+        
+        #[derive(Deserialize)]
+        struct RateLimitConfig {
+            requests: u32,
+            window: String,
+        }
+        
+        let rate_config: RateLimitConfig = rate_limit.config_into().unwrap();
+        assert_eq!(rate_config.requests, 100);
+        assert_eq!(rate_config.window, "1m");
+        
+        // Check logging middleware
+        let logging = &strategy.middleware[1];
+        assert_eq!(logging.name(), "logging");
+        
+        let logging_json = logging.config_as_json().unwrap();
+        assert_eq!(logging_json["level"], "debug");
+        assert_eq!(logging_json["format"], "json");
+    }
+
+    #[test]
+    fn test_strategy_ref_named_vs_inline() {
+        let mut strategies = StrategyCollection::new();
+        
+        // Add a named strategy
+        strategies.insert("test".to_string(), vec![
+            MiddlewareConfig::new_named_json(
+                "auth".to_string(),
+                json!({"type": "basic"})
+            )
+        ]);
+        
+        // Test Named strategy
+        let named_ref = StrategyRef::Named("test".to_string());
+        let named_resolved = named_ref.resolve(&strategies).unwrap();
+        assert_eq!(named_resolved.name, "test");
+        assert_eq!(named_resolved.middleware.len(), 1);
+        
+        // Test Inline strategy
+        let inline_strategy = Strategy {
+            name: "inline_test".to_string(),
+            middleware: vec![
+                MiddlewareConfig::new_named_json(
+                    "logging".to_string(),
+                    json!({"level": "info"})
+                )
+            ]
+        };
+        let inline_ref = StrategyRef::Inline(inline_strategy);
+        let inline_resolved = inline_ref.resolve(&strategies).unwrap();
+        assert_eq!(inline_resolved.name, "inline_test");
+        assert_eq!(inline_resolved.middleware.len(), 1);
+    }
+
+    #[test]
     fn test_universal_value_roundtrip() {
         let original = json!({
             "string": "test",

@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::config::global::{Listener, Route};
-use crate::config::strategy::{Strategy, StrategyCollection};
+use crate::config::strategy::{Strategy, StrategyRef, StrategyCollection};
 
 /// Configuration for one virtual host / site
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
@@ -26,7 +26,7 @@ pub struct SiteConfig {
 
     /// Site-specific strategy (overrides global default)
     #[serde(default)]
-    pub strategy: Option<String>,
+    pub strategy: Option<StrategyRef>,
 
     /// Site-specific strategy definitions
     #[serde(default)]
@@ -49,8 +49,8 @@ impl SiteConfig {
         !self.domain.is_empty() || !self.domains.is_empty()
     }
 
-    /// Get the site strategy name
-    pub fn get_strategy(&self) -> Option<&String> {
+    /// Get the site strategy reference
+    pub fn get_strategy(&self) -> Option<&StrategyRef> {
         self.strategy.as_ref()
     }
 
