@@ -222,6 +222,8 @@ mod tests {
                     path_regex: None,
                 },
                 static_dir: PathBuf::from("C:/test/html/{*path}"),
+                strategy: None,
+                strategies: None,
             },
             params: {
                 let mut p = HashMap::new();
@@ -259,6 +261,8 @@ mod tests {
                     path_regex: None,
                 },
                 static_dir: PathBuf::from("C:/test/html/{*path}"),
+                strategy: None,
+                strategies: None,
             },
             params: {
                 let mut p = HashMap::new();

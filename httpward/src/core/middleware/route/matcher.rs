@@ -135,6 +135,8 @@ mod tests {
                     path_regex: None,
                 },
                 backend: "http://backend:8080".to_string(),
+                strategy: None,
+                strategies: None,
             },
         ];
         
@@ -156,6 +158,8 @@ mod tests {
                     path_regex: Some(r"^/([^/]+)/final$".to_string()),
                 },
                 backend: "http://zerex222.ru:8080/{1}".to_string(),
+                strategy: None,
+                strategies: None,
             },
         ];
         
@@ -176,6 +180,8 @@ mod tests {
                     path_regex: Some(r"^/api/users/(\d+)$".to_string()),
                 },
                 backend: "http://backend:8080".to_string(),
+                strategy: None,
+                strategies: None,
             },
         ];
         

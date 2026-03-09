@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-
+use schemars::JsonSchema;
 use crate::config::site::SiteConfig;
 use crate::config::strategy::{Strategy, StrategyRef, StrategyCollection};
 
 /// Global application configuration (loaded from httpward.yaml)
 /// Inherits all fields from SiteConfig plus global-specific settings
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct GlobalConfig {
     /// Primary domain name (used for SNI matching & logging)
@@ -79,7 +79,7 @@ impl GlobalConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Listener {
     /// Bind address (default: 0.0.0.0)
     #[serde(default = "default_host")]
@@ -98,7 +98,7 @@ fn default_host() -> String {
     "0.0.0.0".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Tls {
     #[serde(default)]
     pub self_signed: bool,
@@ -109,7 +109,7 @@ pub struct Tls {
 }
 
 /// Single routing rule — proxy / static / redirect
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Route {
     Proxy {
@@ -170,7 +170,7 @@ impl Route {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 pub struct Match {
     /// Using matchit library https://github.com/ibraheemdev/matchit
     #[serde(default)]
@@ -181,7 +181,7 @@ pub struct Match {
     pub path_regex: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Redirect {
     pub to: String,
 
@@ -193,7 +193,7 @@ fn default_redirect_code() -> u16 {
     301
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 pub struct LogConfig {
     /// Logging level ("trace" | "debug" | "info" | "warn" | "error")
     #[serde(default = "default_log_level")]

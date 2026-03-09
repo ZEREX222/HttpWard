@@ -259,6 +259,8 @@ mod tests {
                     path_regex: None,
                 },
                 static_dir: PathBuf::from("C:/test/html"),
+                strategy: None,
+                strategies: None,
             },
             // For subpaths, we need wildcard route
             Route::Static {
@@ -267,6 +269,8 @@ mod tests {
                     path_regex: None,
                 },
                 static_dir: PathBuf::from("C:/test/html"),
+                strategy: None,
+                strategies: None,
             },
         ];
         

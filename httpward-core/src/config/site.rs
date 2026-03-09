@@ -1,10 +1,11 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::config::global::{Listener, Route};
 use crate::config::strategy::{Strategy, StrategyCollection};
 
 /// Configuration for one virtual host / site
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct SiteConfig {
     /// Primary domain name (used for SNI matching & logging)

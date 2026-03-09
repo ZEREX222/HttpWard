@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize, Deserializer};
 use std::collections::HashMap;
+use schemars::JsonSchema;
 
 pub type StrategyCollection = HashMap<String, Vec<MiddlewareConfig>>;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Strategy {
     pub name: String,
 
@@ -11,11 +12,11 @@ pub struct Strategy {
     pub middleware: Vec<MiddlewareConfig>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 pub enum MiddlewareConfig {
     Named {
         name: String,
-        config: serde_yaml::Value,
+        config: serde_json::Value,
     },
 }
 
@@ -24,7 +25,7 @@ impl<'de> Deserialize<'de> for MiddlewareConfig {
     where
         D: Deserializer<'de>,
     {
-        let map: HashMap<String, serde_yaml::Value> =
+        let map: HashMap<String, serde_json::Value> =
             HashMap::deserialize(deserializer)?;
 
         if map.len() != 1 {
@@ -72,7 +73,7 @@ impl Strategy {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum StrategyRef {
     Named(String),

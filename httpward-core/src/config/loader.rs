@@ -6,10 +6,11 @@ use glob::glob;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use schemars::JsonSchema;
 use tracing::info;
 
 /// Combined configuration in memory: global + all loaded sites
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, JsonSchema)]
 pub struct AppConfig {
     pub global: GlobalConfig,
     pub sites: Vec<SiteConfig>,

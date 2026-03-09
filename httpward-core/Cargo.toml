@@ -9,6 +9,8 @@ edition = "2024"
 
 
 [dependencies]
+serde_json = { workspace = true }
+schemars= { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
@@ -17,6 +19,8 @@ anyhow = "1.0"
 glob = "0.3"
 rama = { workspace = true }
 async-trait = "0.1"
+
+
 
 
 

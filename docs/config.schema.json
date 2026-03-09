@@ -20,9 +20,22 @@
   ],
   "$defs": {
     "GlobalConfig": {
-      "description": "Global application configuration (loaded from httpward.yaml)",
+      "description": "Global application configuration (loaded from httpward.yaml)\nInherits all fields from SiteConfig plus global-specific settings",
       "type": "object",
       "properties": {
+        "domain": {
+          "description": "Primary domain name (used for SNI matching & logging)",
+          "type": "string",
+          "default": ""
+        },
+        "domains": {
+          "description": "Additional domain names / aliases",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
         "listeners": {
           "description": "Network listeners (bind address + port + optional TLS)",
           "type": "array",
@@ -50,6 +63,22 @@
           "description": "Path to directory with per-site .yaml / .yml files",
           "type": "string",
           "default": ""
+        },
+        "strategy": {
+          "description": "Default strategy for all domains and routes",
+          "type": "string",
+          "default": "default"
+        },
+        "strategies": {
+          "description": "Global strategy definitions",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/MiddlewareConfig"
+            }
+          },
+          "default": {}
         }
       },
       "additionalProperties": false
@@ -68,7 +97,7 @@
           "format": "uint16",
           "minimum": 0,
           "maximum": 65535,
-          "default": 80
+          "default": 0
         },
         "tls": {
           "description": "Optional TLS configuration",
@@ -87,17 +116,19 @@
     "Tls": {
       "type": "object",
       "properties": {
+        "self_signed": {
+          "type": "boolean",
+          "default": false
+        },
         "cert": {
-          "type": "string"
+          "type": "string",
+          "default": ""
         },
         "key": {
-          "type": "string"
+          "type": "string",
+          "default": ""
         }
-      },
-      "required": [
-        "cert",
-        "key"
-      ]
+      }
     },
     "Route": {
       "description": "Single routing rule — proxy / static / redirect",
@@ -110,6 +141,30 @@
             },
             "backend": {
               "type": "string"
+            },
+            "strategy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/StrategyRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "strategies": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/MiddlewareConfig"
+                }
+              },
+              "default": null
             }
           },
           "required": [
@@ -125,6 +180,30 @@
             },
             "static_dir": {
               "type": "string"
+            },
+            "strategy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/StrategyRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "strategies": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/MiddlewareConfig"
+                }
+              },
+              "default": null
             }
           },
           "required": [
@@ -140,6 +219,30 @@
             },
             "redirect": {
               "$ref": "#/$defs/Redirect"
+            },
+            "strategy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/StrategyRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "strategies": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/MiddlewareConfig"
+                }
+              },
+              "default": null
             }
           },
           "required": [
@@ -152,14 +255,8 @@
     "Match": {
       "type": "object",
       "properties": {
-        "path_prefix": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
         "path": {
+          "description": "Using matchit library https://github.com/ibraheemdev/matchit",
           "type": [
             "string",
             "null"
@@ -167,6 +264,7 @@
           "default": null
         },
         "path_regex": {
+          "description": "Using basic regexp. Please use path if it's possible.",
           "type": [
             "string",
             "null"
@@ -174,6 +272,60 @@
           "default": null
         }
       }
+    },
+    "StrategyRef": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/Strategy"
+        }
+      ]
+    },
+    "Strategy": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "middleware": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MiddlewareConfig"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "MiddlewareConfig": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Named": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "config": true
+              },
+              "required": [
+                "name",
+                "config"
+              ]
+            }
+          },
+          "required": [
+            "Named"
+          ],
+          "additionalProperties": false
+        }
+      ]
     },
     "Redirect": {
       "type": "object",
@@ -220,18 +372,6 @@
           },
           "default": []
         },
-        "tls": {
-          "description": "Optional TLS override for this site (SNI-level override)",
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Tls"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "listeners": {
           "description": "Optional site-specific listeners (overrides global listeners)",
           "type": "array",
@@ -247,6 +387,25 @@
             "$ref": "#/$defs/Route"
           },
           "default": []
+        },
+        "strategy": {
+          "description": "Site-specific strategy (overrides global default)",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "strategies": {
+          "description": "Site-specific strategy definitions",
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/MiddlewareConfig"
+            }
+          },
+          "default": {}
         }
       },
       "additionalProperties": false
