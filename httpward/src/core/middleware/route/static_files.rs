@@ -4,7 +4,8 @@ use rama::http::{Request as RamaRequest, Response as RamaResponse, Body as RamaB
 use tokio::fs;
 use tracing::debug;
 use httpward_core::config::Route;
-use crate::core::middleware::route::{MatchedRoute, RouteError};
+use httpward_core::core::server_models::{MatchedRoute, MatcherType};
+use crate::core::middleware::route::RouteError;
 
 /// Process static directory path with matcher parameters
 /// Replaces placeholders like {param}, {*any}, and {1}, {2} (regex groups) with actual values from params
@@ -187,8 +188,7 @@ mod tests {
     use std::path::PathBuf;
     use rama::http::{Method};
     use httpward_core::config::Match;
-    use crate::core::middleware::route::MatcherType;
-
+    
     #[test]
     fn test_process_static_dir_with_params() {
         let mut params = HashMap::new();
@@ -230,7 +230,7 @@ mod tests {
                 p.insert("path".to_string(), "style.css".to_string());
                 p
             },
-            matcher_type: MatcherType::Path,
+            matcher_type: httpward_core::core::server_models::MatcherType::Path,
         };
         
         // Test requesting a subpath with parameters
@@ -269,7 +269,7 @@ mod tests {
                 p.insert("path".to_string(), "".to_string());
                 p
             },
-            matcher_type: MatcherType::Path,
+            matcher_type: httpward_core::core::server_models::MatcherType::Path,
         };
         
         let request2 = RamaRequest::builder()

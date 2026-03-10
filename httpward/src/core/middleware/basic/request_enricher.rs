@@ -18,6 +18,7 @@ use rama::net::tls::{ProtocolVersion, SecureTransport};
 use rama::http::headers::ContentType;
 use std::str::FromStr;
 use httpward_core::config::{SiteConfig};
+use httpward_core::core::server_models::SiteManager;
 use httpward_core::core::HttpWardContext;
 use httpward_core::core::server_models::server_instance::ServerInstance;
 
@@ -128,7 +129,7 @@ impl<S> RequestEnricherService<S> {
     }
 
     /// Find site configuration by SNI from TLS context
-    fn find_site_by_sni<State>(&self, ctx: &Context<State>) -> Option<Arc<SiteConfig>> {
+    fn find_site_by_sni<State>(&self, ctx: &Context<State>) -> Option<Arc<SiteManager>> {
         // Try to get SNI from TLS context
         if let Some(st) = ctx.get::<rama::net::tls::SecureTransport>() {
             if let Some(client_hello) = st.client_hello() {
@@ -136,9 +137,18 @@ impl<S> RequestEnricherService<S> {
                     let sni_str = sni.to_string();
                     
                     // Find site using cached WildMatch patterns (more efficient)
-                    return self.cached_patterns.iter().find(|(_, patterns)| {
+                    if let Some((site_config, _)) = self.cached_patterns.iter().find(|(_, patterns)| {
                         patterns.iter().any(|pattern| pattern.matches(&sni_str))
-                    }).map(|(site, _)| site.clone());
+                    }) {
+                        // Create SiteManager from SiteConfig
+                        match SiteManager::new(site_config.clone()) {
+                            Ok(site_manager) => return Some(Arc::new(site_manager)),
+                            Err(e) => {
+                                warn!("Failed to create SiteManager for site {}: {}", sni_str, e);
+                                return None;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -205,7 +215,7 @@ where
 
         // Find site by SNI from TLS context if available
         let site = self.find_site_by_sni(&ctx);
-        let site_domain = site.as_ref().map(|s| s.domain.as_str());
+        let site_domain = site.as_ref().map(|sm| sm.site_name());
 
         // Create and insert HttpWardContext into the context
         let enriched_context = HttpWardContext {
@@ -213,7 +223,7 @@ where
             score: 0,
             request_content_type: request_content_type.clone(),
             response_content_type: ContentType::text(), // Will be set by ResponseEnricher
-            site: site.clone(),
+            current_site: site.clone(),
             server_instance: self.server_instance.clone(),
             ja4_fp,
             header_fp

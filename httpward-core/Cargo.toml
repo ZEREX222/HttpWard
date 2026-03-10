@@ -19,6 +19,9 @@ anyhow = "1.0"
 glob = "0.3"
 rama = { workspace = true }
 async-trait = "0.1"
+matchit = "0.9"
+regex = "1.12"
+thiserror = "2.0"
 
 
 
