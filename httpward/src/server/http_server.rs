@@ -6,10 +6,10 @@ use rama::net::fingerprint::Ja4;
 use rama::net::tls::{ProtocolVersion, SecureTransport};
 use std::sync::Arc;
 use tracing::{error, info, warn};
-use httpward_core::core::HttpWardContext;
+use httpward_core::core::context::HttpWardContext;
 use crate::core::middleware::{LogLayer, RequestEnricherLayer, ResponseEnricherLayer, RouteLayer, ErrorHandlerLayer, DynamicModuleLoaderLayer};
 use crate::core::error::ErrorHandler;
-use crate::runtime::server_instance::ServerInstance;
+use httpward_core::core::server_models::server_instance::ServerInstance;
 use crate::server::tls::tls::TlsConfigBuilder;
 
 /// HttpWard HTTP/TLS server
@@ -69,12 +69,12 @@ impl HttpWardServer {
             .iter()
             .map(|site| Arc::new(site.clone()))
             .collect();
-        let global_arc = Arc::new(self.instance.global.clone());
+        let server_instance_arc = Arc::new(self.instance.clone());
         
         let http_svc = HttpServer::auto(exec.clone()).service(
             (
                 ErrorHandlerLayer::new(),
-                RequestEnricherLayer::new(sites_arc, global_arc),
+                RequestEnricherLayer::new(sites_arc, server_instance_arc),
                 LogLayer::new(),
                 DynamicModuleLoaderLayer::new(),
                 ResponseEnricherLayer::new(),

@@ -5,7 +5,8 @@ use rama::{
 };
 use std::fmt::Debug;
 use tracing::{info, trace};
-use httpward_core::core::{ContentType, HttpWardContext};
+use rama::http::headers::ContentType;
+use httpward_core::core::HttpWardContext;
 
 /// Layer that adds request logging with custom context
 #[derive(Clone, Debug)]
@@ -63,8 +64,8 @@ where
         // Access request context
         let client_ip = ctx.get::<HttpWardContext>().map(|rc| rc.client_ip);
         let content_type = ctx.get::<HttpWardContext>()
-            .map(|rc| rc.request_content_type)
-            .unwrap_or(ContentType::Unknown);
+            .map(|rc| rc.request_content_type.clone())
+            .unwrap_or(ContentType::text());
 
         trace!("incoming request");
         info!(

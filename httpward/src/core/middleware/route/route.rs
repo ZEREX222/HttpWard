@@ -10,6 +10,8 @@ use thiserror::Error;
 use tracing::{debug, error};
 use httpward_core::config::{GlobalConfig, Redirect, Route};
 use httpward_core::core::HttpWardContext;
+use httpward_core::core::server_models::server_instance::ServerInstance;
+use httpward_core::core::server_models::listener::ListenerKey;
 use crate::core::error::ErrorHandler;
 use super::{
     matcher::{RouteMatcher, MatcherError},
@@ -97,9 +99,18 @@ where
             .cloned()
             .unwrap_or_else(|| {
                 // Fallback context if not present
+                let server_instance = ServerInstance {
+                    bind: ListenerKey {
+                        host: "127.0.0.1".to_string(),
+                        port: 8080,
+                    },
+                    sites: vec![],
+                    tls_registry: vec![],
+                    global: GlobalConfig::default(),
+                };
                 HttpWardContext::new(
                     std::net::SocketAddr::from(([127, 0, 0, 1], 8080)),
-                    Arc::new(GlobalConfig::default()),
+                    Arc::new(server_instance),
                 )
             });
 

@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::{info, error};
 
-use crate::runtime::server_instance::TlsMapping;
+use httpward_core::core::server_models::server_instance::TlsMapping;
 use super::tls::{FallbackSniResolver, build_certified_key, TlsError};
 use rama_tls_rustls::dep::rustls::sign::CertifiedKey;
 

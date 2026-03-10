@@ -15,18 +15,21 @@ use std::collections::HashMap;
 use rama::http::Body;
 use rama::net::fingerprint::Ja4;
 use rama::net::tls::{ProtocolVersion, SecureTransport};
-use httpward_core::config::{GlobalConfig, SiteConfig};
-use httpward_core::core::{parse_content_type, ContentType, HttpWardContext};
+use rama::http::headers::ContentType;
+use std::str::FromStr;
+use httpward_core::config::{SiteConfig};
+use httpward_core::core::HttpWardContext;
+use httpward_core::core::server_models::server_instance::ServerInstance;
 
 /// Extract content type from request headers
 fn extract_content_type_from_request(request: &Request<Body>) -> ContentType {
     // Try to extract headers from the request
     if let Some(headers) = request.headers().get("content-type") {
         if let Ok(content_type_str) = headers.to_str() {
-            return parse_content_type(content_type_str);
+            return ContentType::from_str(content_type_str).unwrap_or_else(|_| ContentType::text());
         }
     }
-    ContentType::Unknown
+    ContentType::text()
 }
 
 /// Extract header fingerprint from specific headers
@@ -75,16 +78,16 @@ fn extract_header_fingerprint(headers: &HeaderMap) -> Option<String> {
     Some(format!("{:x}", hasher.finish()))
 }
 
-/// Layer that enriches request context with HttpWardContext containing client_addr, site and global configs
+/// Layer that enriches request context with HttpWardContext containing client_addr, site and server_instance
 #[derive(Clone, Debug)]
 pub struct RequestEnricherLayer {
     sites: Vec<Arc<SiteConfig>>,
-    global: Arc<GlobalConfig>,
+    server_instance: Arc<ServerInstance>,
 }
 
 impl RequestEnricherLayer {
-    pub fn new(sites: Vec<Arc<SiteConfig>>, global: Arc<GlobalConfig>) -> Self {
-        Self { sites, global }
+    pub fn new(sites: Vec<Arc<SiteConfig>>, server_instance: Arc<ServerInstance>) -> Self {
+        Self { sites, server_instance }
     }
 }
 
@@ -92,7 +95,7 @@ impl<S> Layer<S> for RequestEnricherLayer {
     type Service = RequestEnricherService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RequestEnricherService::new(inner, self.sites.clone(), self.global.clone())
+        RequestEnricherService::new(inner, self.sites.clone(), self.server_instance.clone())
     }
 }
 
@@ -100,13 +103,13 @@ impl<S> Layer<S> for RequestEnricherLayer {
 #[derive(Clone, Debug)]
 pub struct RequestEnricherService<S> {
     inner: S,
-    global: Arc<GlobalConfig>,
+    server_instance: Arc<ServerInstance>,
     // Cached WildMatch patterns for better performance
     cached_patterns: Vec<(Arc<SiteConfig>, Vec<WildMatch>)>,
 }
 
 impl<S> RequestEnricherService<S> {
-    pub fn new(inner: S, sites: Vec<Arc<SiteConfig>>, global: Arc<GlobalConfig>) -> Self {
+    pub fn new(inner: S, sites: Vec<Arc<SiteConfig>>, server_instance: Arc<ServerInstance>) -> Self {
         // Pre-cache WildMatch patterns for all domains
         let cached_patterns = sites.iter().map(|site| {
             let all_domains = site.get_all_domains();
@@ -119,7 +122,7 @@ impl<S> RequestEnricherService<S> {
 
         Self { 
             inner, 
-            global,
+            server_instance,
             cached_patterns,
         }
     }
@@ -208,10 +211,10 @@ where
         let enriched_context = HttpWardContext {
             client_ip,
             score: 0,
-            request_content_type,
-            response_content_type: ContentType::Unknown, // Will be set by ResponseEnricher
+            request_content_type: request_content_type.clone(),
+            response_content_type: ContentType::text(), // Will be set by ResponseEnricher
             site: site.clone(),
-            global: self.global.clone(),
+            server_instance: self.server_instance.clone(),
             ja4_fp,
             header_fp
         };

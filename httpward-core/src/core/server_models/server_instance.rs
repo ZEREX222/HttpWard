@@ -1,7 +1,7 @@
 // server/server_instance.rs
 use std::path::PathBuf;
-use httpward_core::config::{SiteConfig, GlobalConfig};
-use super::listener::ListenerKey;
+use crate::config::{SiteConfig, GlobalConfig};
+use crate::core::server_models::listener::ListenerKey;
 
 #[derive(Debug, Clone)]
 pub struct TlsPaths {
@@ -18,7 +18,7 @@ pub struct TlsMapping {
 }
 
 /// Runtime server instance description.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ServerInstance {
     pub bind: ListenerKey,
     /// List of raw site configurations assigned to this listener.

@@ -2,8 +2,8 @@
 use std::collections::HashMap;
 use httpward_core::config::{AppConfig, SiteConfig, Listener};
 use crate::runtime::tls_provisioner;
-use super::listener::ListenerKey;
-use super::server_instance::{ServerInstance, TlsPaths, TlsMapping};
+use httpward_core::core::server_models::listener::ListenerKey;
+use httpward_core::core::server_models::server_instance::{ServerInstance, TlsPaths, TlsMapping};
 
 pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
     let mut servers_map: HashMap<ListenerKey, (Vec<SiteConfig>, Vec<TlsMapping>)> = HashMap::new();

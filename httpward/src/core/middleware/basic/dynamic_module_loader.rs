@@ -11,7 +11,7 @@ use rama::{
 use std::fmt::Debug;
 use httpward_core::httpward_middleware::layers::log::HttpWardLogLayer;
 use httpward_core::httpward_middleware::pipe::HttpWardMiddlewarePipeBuilder;
-use httpward_core::core::errors::HttpWardError;
+use httpward_core::core::error::errors::HttpWardError;
 
 /// Layer that dynamically loads and applies HttpWard middleware modules
 /// This layer integrates the abstract middleware pipe with Rama's layer system

@@ -17,7 +17,7 @@ use rama_tls_rustls::dep::rustls::{
 };
 use tracing::{info, warn, error};
 
-use crate::runtime::server_instance::TlsMapping;
+use httpward_core::core::server_models::server_instance::TlsMapping;
 use crate::server::tls::domain_store::{Cert, DomainStore};
 use super::tls_watcher::TlsFileWatcher;
 
