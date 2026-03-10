@@ -6,6 +6,7 @@ use tracing::debug;
 use httpward_core::config::Route;
 use httpward_core::core::server_models::{MatchedRoute, MatcherType};
 use crate::core::middleware::route::RouteError;
+use rama::http::dep::mime_guess;
 
 /// Process static directory path with matcher parameters
 /// Replaces placeholders like {param}, {*any}, and {1}, {2} (regex groups) with actual values from params
@@ -128,17 +129,16 @@ pub async fn handle_static(
                     .unwrap());
             }
             
-            // Try to determine content type
-            let content_type = guess_content_type(&file_path);
+            // Try to determine content type using mime_guess library
+            let content_type = mime_guess::from_path(&file_path)
+                .first_or_octet_stream()
+                .to_string();
             
             match fs::read(&file_path).await {
                 Ok(contents) => {
-                    let mut response = RamaResponse::builder()
-                        .status(StatusCode::OK);
-                        
-                    if let Some(ct) = content_type {
-                        response = response.header("Content-Type", ct);
-                    }
+                    let response = RamaResponse::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", content_type);
                     
                     Ok(response
                         .body(RamaBody::from(contents))
@@ -162,25 +162,6 @@ pub async fn handle_static(
     }
 }
 
-/// Guess content type based on file extension
-fn guess_content_type(path: &std::path::Path) -> Option<&'static str> {
-    let extension = path.extension()?.to_str()?;
-    
-    match extension.to_lowercase().as_str() {
-        "html" => Some("text/html"),
-        "css" => Some("text/css"),
-        "js" => Some("application/javascript"),
-        "json" => Some("application/json"),
-        "xml" => Some("application/xml"),
-        "png" => Some("image/png"),
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "gif" => Some("image/gif"),
-        "svg" => Some("image/svg+xml"),
-        "pdf" => Some("application/pdf"),
-        "txt" => Some("text/plain"),
-        _ => None,
-    }
-}
 
 #[cfg(test)]
 mod tests {
