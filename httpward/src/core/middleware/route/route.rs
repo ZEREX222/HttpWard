@@ -131,8 +131,8 @@ where
             Ok(matched_route) => {
                 tracing::debug!("Route matched: {:?}", matched_route.route);
                 // Handle different route types
-                match matched_route.route {
-                    Route::Proxy { ref backend, .. } => {
+                match &*matched_route.route {
+                    Route::Proxy { backend, .. } => {
                         // Check if WebSocket upgrade
                         let is_websocket = ProxyHandler::is_websocket_upgrade(&request);
                         
@@ -174,7 +174,7 @@ where
                             }
                         }
                     }
-                    Route::Static { ref static_dir, .. } => {
+                    Route::Static { static_dir, .. } => {
                         match static_files::handle_static(&request, static_dir, &matched_route).await {
                             Ok(response) => return Ok(response),
                             Err(e) => {
@@ -282,14 +282,14 @@ mod tests {
         assert!(result.is_ok(), "Failed to match /site route");
         
         let matched_route = result.unwrap();
-        assert!(matches!(matched_route.route, Route::Static { .. }));
+        assert!(matches!(&*matched_route.route, &Route::Static { .. }));
         
         // Test with subpath (should match wildcard route)
         let result2 = site_manager.get_route("/site/style.css");
         assert!(result2.is_ok(), "Failed to match /site/style.css route");
         
         let matched_route2 = result2.unwrap();
-        assert!(matches!(matched_route2.route, Route::Static { .. }));
+        assert!(matches!(&*matched_route2.route, &Route::Static { .. }));
         assert_eq!(matched_route2.params.get("path"), Some(&"style.css".to_string()));
         
         // Test non-matching path

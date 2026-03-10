@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use rama::http::{Request as RamaRequest, Response as RamaResponse, Body as RamaBody, StatusCode};
 use tokio::fs;
 use tracing::debug;
@@ -56,7 +57,7 @@ pub async fn handle_static(
     debug!("Processed static directory: {:?}", processed_static_dir);
     
     // Get the matched path from the route
-    let matched_path = match &matched_route.route {
+    let matched_path = match &*matched_route.route {
         Route::Static { r#match, .. } => {
             r#match.path.as_deref().unwrap_or("")
         }
@@ -197,7 +198,7 @@ mod tests {
     #[tokio::test]
     async fn test_static_file_with_params() {
         let matched_route = MatchedRoute {
-            route: Route::Static {
+            route: Arc::new(Route::Static {
                 r#match: Match {
                     path: Some("/site/{*path}".to_string()),
                     path_regex: None,
@@ -205,7 +206,7 @@ mod tests {
                 static_dir: PathBuf::from("C:/test/html/{*path}"),
                 strategy: None,
                 strategies: None,
-            },
+            }),
             params: {
                 let mut p = HashMap::new();
                 p.insert("path".to_string(), "style.css".to_string());
@@ -236,7 +237,7 @@ mod tests {
         
         // Test with empty parameter (should serve index.html)
         let matched_route2 = MatchedRoute {
-            route: Route::Static {
+            route: Arc::new(Route::Static {
                 r#match: Match {
                     path: Some("/site/{*path}".to_string()),
                     path_regex: None,
@@ -244,7 +245,7 @@ mod tests {
                 static_dir: PathBuf::from("C:/test/html/{*path}"),
                 strategy: None,
                 strategies: None,
-            },
+            }),
             params: {
                 let mut p = HashMap::new();
                 p.insert("path".to_string(), "".to_string());
