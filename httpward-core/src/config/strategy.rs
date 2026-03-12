@@ -136,7 +136,7 @@ fn merge_universal_missing_only(target: &mut UniversalValue, source: UniversalVa
 /// Used for strategy inheritance where we only want to merge configs of existing middleware
 pub fn supplement_middleware_configs(
     current: &mut Vec<MiddlewareConfig>,
-    incoming: Vec<MiddlewareConfig>,
+    incoming: &[MiddlewareConfig],
 ) -> Result<()> {
     // Build index: middleware name -> position
     let mut index = HashMap::new();
@@ -149,11 +149,11 @@ pub fn supplement_middleware_configs(
     for new_middleware in incoming {
         match new_middleware {
             MiddlewareConfig::Named { name, config } => {
-                if let Some(&pos) = index.get(&name) {
+                if let Some(&pos) = index.get(name) {
                     // Only merge existing middleware configs - don't add new ones
                     let MiddlewareConfig::Named { config: existing_config, .. } =
                         &mut current[pos];
-                    merge_universal_missing_only(existing_config, config)?;
+                    merge_universal_missing_only(existing_config, config.clone())?;
                 }
                 // If middleware doesn't exist in current, don't add it
             }
@@ -166,7 +166,7 @@ pub fn supplement_middleware_configs(
 /// Supplement middleware configurations - add missing middleware and missing properties
 pub fn supplement_middleware(
     current: &mut Vec<MiddlewareConfig>,
-    incoming: Vec<MiddlewareConfig>,
+    incoming: &[MiddlewareConfig],
 ) -> Result<()> {
     // Build index: middleware name -> position
     let mut index = HashMap::new();
@@ -179,15 +179,15 @@ pub fn supplement_middleware(
     for new_middleware in incoming {
         match new_middleware {
             MiddlewareConfig::Named { name, config } => {
-                if let Some(&pos) = index.get(&name) {
+                if let Some(&pos) = index.get(name) {
                     // Supplement existing middleware config with missing properties only
                     let MiddlewareConfig::Named { config: existing_config, .. } =
                         &mut current[pos];
-                    merge_universal_missing_only(existing_config, config)?;
+                    merge_universal_missing_only(existing_config, config.clone())?;
                 } else {
                     // Add completely new middleware
-                    current.push(MiddlewareConfig::Named { name: name.clone(), config });
-                    index.insert(name, current.len() - 1);
+                    current.push(MiddlewareConfig::Named { name: name.clone(), config: config.clone() });
+                    index.insert(name.clone(), current.len() - 1);
                 }
             }
         }
@@ -364,7 +364,7 @@ impl Strategy {
     }
 
     /// Supplement middleware configurations - only add missing middleware and missing properties
-    pub fn supplement_with(&mut self, incoming: Vec<MiddlewareConfig>) -> Result<()> {
+    pub fn supplement_with(&mut self, incoming: &[MiddlewareConfig]) -> Result<()> {
         supplement_middleware(Arc::make_mut(&mut self.middleware), incoming)
     }
 
@@ -717,7 +717,7 @@ middleware:
             )
         ];
 
-        supplement_middleware(&mut current, incoming).unwrap();
+        supplement_middleware(&mut current, &incoming).unwrap();
 
         assert_eq!(current.len(), 3); // rate_limit, logging, cors
 
@@ -775,7 +775,7 @@ middleware:
             )
         ];
 
-        strategy.supplement_with(incoming).unwrap();
+        strategy.supplement_with(&incoming).unwrap();
 
         assert_eq!(strategy.middleware.len(), 2);
 
@@ -817,7 +817,7 @@ max_size: 1000
             )
         ];
 
-        supplement_middleware(&mut current, incoming).unwrap();
+        supplement_middleware(&mut current, &incoming).unwrap();
 
         let cache = &current[0];
         assert_eq!(cache.name(), "cache");
@@ -862,7 +862,7 @@ max_size: 1000
             )
         ];
 
-        supplement_middleware(&mut current, incoming).unwrap();
+        supplement_middleware(&mut current, &incoming).unwrap();
 
         let test = &current[0];
         let config = test.config_as_json().unwrap();

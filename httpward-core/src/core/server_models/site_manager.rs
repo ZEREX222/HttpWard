@@ -399,7 +399,7 @@ mod tests {
 
             // Should have resolved strategy
             assert_eq!(matched.active_strategy.name, "site_default");
-            assert_eq!(matched.active_strategy.middleware.len(), 2); // rate_limit + auth
+            assert_eq!(matched.active_strategy.middleware.len(), 3); // rate_limit + auth + logging (inherited)
         }
 
         #[test]
