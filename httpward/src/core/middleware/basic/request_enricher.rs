@@ -268,7 +268,7 @@ mod tests {
         site_config.domains = vec![]; // No additional domains
         
         let site_config_arc = Arc::new(site_config);
-        let site_manager = SiteManager::new(site_config_arc.clone()).unwrap();
+        let site_manager = SiteManager::new(site_config_arc.clone(), None).unwrap();
         let site_manager_arc = Arc::new(site_manager);
         
         // Create server instance with unrestricted site
@@ -297,12 +297,12 @@ mod tests {
         // Create unrestricted site
         let mut unrestricted_config = SiteConfig::default();
         unrestricted_config.domain = "".to_string();
-        let unrestricted_site = SiteManager::new(Arc::new(unrestricted_config)).unwrap();
+        let unrestricted_site = SiteManager::new(Arc::new(unrestricted_config), None).unwrap();
         
         // Create domain-specific site
         let mut domain_config = SiteConfig::default();
         domain_config.domain = "example.com".to_string();
-        let domain_site = SiteManager::new(Arc::new(domain_config)).unwrap();
+        let domain_site = SiteManager::new(Arc::new(domain_config), None).unwrap();
         
         // Create server instance with both sites
         let server_instance = ServerInstance {
@@ -330,7 +330,7 @@ mod tests {
         // Create domain-specific site
         let mut domain_config = SiteConfig::default();
         domain_config.domain = "example.com".to_string();
-        let domain_site = SiteManager::new(Arc::new(domain_config)).unwrap();
+        let domain_site = SiteManager::new(Arc::new(domain_config), None).unwrap();
         
         // Create server instance with domain site
         let server_instance = ServerInstance {
@@ -361,7 +361,7 @@ mod tests {
         // Create domain-specific site
         let mut domain_config = SiteConfig::default();
         domain_config.domain = "example.com".to_string();
-        let domain_site = SiteManager::new(Arc::new(domain_config)).unwrap();
+        let domain_site = SiteManager::new(Arc::new(domain_config), None).unwrap();
         
         // Create server instance with domain site
         let server_instance = ServerInstance {
@@ -392,11 +392,11 @@ mod tests {
         // Create two different domain sites
         let mut config1 = SiteConfig::default();
         config1.domain = "example.com".to_string();
-        let site1 = SiteManager::new(Arc::new(config1)).unwrap();
+        let site1 = SiteManager::new(Arc::new(config1), None).unwrap();
         
         let mut config2 = SiteConfig::default();
         config2.domain = "other.com".to_string();
-        let site2 = SiteManager::new(Arc::new(config2)).unwrap();
+        let site2 = SiteManager::new(Arc::new(config2), None).unwrap();
         
         // Create server instance with both sites
         let server_instance = ServerInstance {

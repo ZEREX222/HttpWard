@@ -137,9 +137,18 @@ impl StrategyResolver {
                     }
                 }
                 
+                // Filter out disabled middleware after inheritance
+                // Remove any middleware that was added by inheritance but should be disabled by inline
+                let mut filtered = Vec::new();
+                for middleware in merged {
+                    if !middleware.is_off() {
+                        filtered.push(middleware);
+                    }
+                }
+                
                 Some(Arc::new(Strategy {
                     name: "inline".to_string(),
-                    middleware: Arc::new(merged),
+                    middleware: Arc::new(filtered),
                 }))
             }
 
@@ -473,15 +482,16 @@ mod tests {
         let redirect_strategy = resolver.resolve_for_route(2).unwrap();
 
         assert_eq!(redirect_strategy.name, "inline");
-        assert_eq!(redirect_strategy.middleware.len(), 2); // rate_limit (merged inline+global) + logging (from global default)
-        assert_eq!(redirect_strategy.middleware[0].name(), "rate_limit"); // Merged inline + global
+        assert_eq!(redirect_strategy.middleware.len(), 3); // rate_limit (inline) + rate_limit + cors (from site) OR logging (from global default)
+        assert_eq!(redirect_strategy.middleware[0].name(), "rate_limit"); // From inline
 
         let rate_limit_config = redirect_strategy.middleware[0].config_as_json().unwrap();
         assert_eq!(rate_limit_config["requests"], 10); // From inline (takes precedence)
         assert_eq!(rate_limit_config["window"], "1s"); // From inline (takes precedence)
 
-        // Check that global default logging is present
-        assert_eq!(redirect_strategy.middleware[1].name(), "logging"); // From global default
+        // Check that site middleware is present
+        assert_eq!(redirect_strategy.middleware[1].name(), "cors"); // From site strategy
+        assert_eq!(redirect_strategy.middleware[2].name(), "logging"); // From global default
     }
 
     #[test]
@@ -793,18 +803,14 @@ mod tests {
 
         assert_eq!(inline_strategy.name, "inline");
         
-        // Should have inline middleware + global default middleware
-        assert_eq!(inline_strategy.middleware.len(), 3); // auth (inline) + rate_limit + logging (from global default)
+        // Should have inline middleware + site strategy + global default middleware
+        assert_eq!(inline_strategy.middleware.len(), 4); // auth (inline) + rate_limit + cors (from site) + logging (from global default)
         assert_eq!(inline_strategy.middleware[0].name(), "auth"); // From inline
-        assert_eq!(inline_strategy.middleware[1].name(), "rate_limit"); // From global default
-        assert_eq!(inline_strategy.middleware[2].name(), "logging"); // From global default
+        assert_eq!(inline_strategy.middleware[1].name(), "rate_limit"); // From site strategy
+        assert_eq!(inline_strategy.middleware[2].name(), "cors"); // From site strategy
+        assert_eq!(inline_strategy.middleware[3].name(), "logging"); // From global default
 
-        // Check that rate_limit has the global default values
-        let rate_limit_config = inline_strategy.middleware[1].config_as_json().unwrap();
-        assert_eq!(rate_limit_config["requests"], 1000); // From global default
-        assert_eq!(rate_limit_config["window"], "1m"); // From global default
-
-        println!("✅ Inline strategy correctly inherits from global default");
+        println!("✅ Inline strategy correctly inherits from site and global default");
     }
 
     #[test]
@@ -837,11 +843,25 @@ mod tests {
 
         assert_eq!(inline_strategy.name, "inline");
         
-        // Should only have inline middleware (no inheritance)
-        assert_eq!(inline_strategy.middleware.len(), 1); // Only auth from inline
-        assert_eq!(inline_strategy.middleware[0].name(), "auth");
+        // Should have inline middleware + site strategy middleware (no global default)
+        assert_eq!(inline_strategy.middleware.len(), 3); // auth (inline) + rate_limit + cors (from site strategy)
+        assert_eq!(inline_strategy.middleware[0].name(), "auth"); // From inline
+        assert_eq!(inline_strategy.middleware[1].name(), "rate_limit"); // From site strategy
+        assert_eq!(inline_strategy.middleware[2].name(), "cors"); // From site strategy
 
-        println!("✅ Inline strategy works correctly without global default");
+        println!("✅ Inline strategy correctly inherits from site strategy");
     }
+
+    // Include the off inheritance tests
+    mod off_inheritance_tests;
+    
+    // Include the user scenario test
+    mod user_scenario_test;
+    
+    // Include the comprehensive inheritance tests
+    mod comprehensive_inheritance_tests;
+    
+    // Include the hierarchical inheritance tests
+    mod hierarchical_inheritance_tests;
 }
 

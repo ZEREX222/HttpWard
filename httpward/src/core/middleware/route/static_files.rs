@@ -207,6 +207,10 @@ mod tests {
                 strategy: None,
                 strategies: None,
             }),
+            active_strategy: Arc::new(httpward_core::config::Strategy {
+                name: "default".to_string(),
+                middleware: Arc::new(vec![]),
+            }),
             params: {
                 let mut p = HashMap::new();
                 p.insert("path".to_string(), "style.css".to_string());
@@ -245,6 +249,10 @@ mod tests {
                 static_dir: PathBuf::from("C:/test/html/{*path}"),
                 strategy: None,
                 strategies: None,
+            }),
+            active_strategy: Arc::new(httpward_core::config::Strategy {
+                name: "default".to_string(),
+                middleware: Arc::new(vec![]),
             }),
             params: {
                 let mut p = HashMap::new();

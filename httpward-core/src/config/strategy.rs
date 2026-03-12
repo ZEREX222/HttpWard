@@ -154,24 +154,93 @@ pub fn supplement_middleware_configs(
     let mut index = HashMap::new();
 
     for (i, m) in current.iter().enumerate() {
-        let MiddlewareConfig::Named { name, .. } = m;
-        index.insert(name.clone(), i);
+        let name = m.name();
+        index.insert(name.to_string(), i);
     }
 
     for new_middleware in incoming {
-        match new_middleware {
-            MiddlewareConfig::Named { name, config } => {
-                if let Some(&pos) = index.get(name) {
-                    // Only merge existing middleware configs - don't add new ones
-                    let MiddlewareConfig::Named { config: existing_config, .. } =
-                        &mut current[pos];
+        let name = new_middleware.name();
+        
+        if let Some(&pos) = index.get(name) {
+            // Only merge existing middleware configs - don't add new ones
+            match (&mut current[pos], new_middleware) {
+                (MiddlewareConfig::Named { config: existing_config, .. }, MiddlewareConfig::Named { config, .. }) => {
                     merge_universal_missing_only(existing_config, config.clone())?;
                 }
-                // If middleware doesn't exist in current, don't add it
+                // Handle cases where one or both are Off - don't merge configs for Off middleware
+                _ => {
+                    // Do nothing - either current or incoming is Off, so no config merging needed
+                }
+            }
+        }
+        // If middleware doesn't exist in current, don't add it (this function only supplements existing)
+    }
+
+    Ok(())
+}
+
+/// Filter out disabled middleware, considering inheritance rules
+/// If middleware is disabled in current but enabled in parent, it stays disabled
+/// If middleware is disabled in parent but enabled in current, it becomes enabled
+pub fn filter_disabled_middleware(
+    current: &mut Vec<MiddlewareConfig>,
+    parent: &[MiddlewareConfig],
+) -> Result<()> {
+    // Build index of parent middleware: name -> (is_disabled, config)
+    let mut parent_index = HashMap::new();
+    for middleware in parent {
+        let name = middleware.name();
+        parent_index.insert(name.to_string(), middleware.is_off());
+    }
+
+    // Process current middleware
+    let mut result = Vec::new();
+    
+    for middleware in current.iter() {
+        let name = middleware.name();
+        
+        match middleware {
+            MiddlewareConfig::Off { .. } => {
+                // Current middleware is disabled - check parent
+                if let Some(parent_disabled) = parent_index.get(name) {
+                    if !parent_disabled {
+                        // Parent has it enabled, so keep it disabled (current takes precedence)
+                        result.push(middleware.clone());
+                    }
+                    // If parent also has it disabled, don't add anything (remove it)
+                } else {
+                    // Parent doesn't have this middleware, keep it disabled
+                    result.push(middleware.clone());
+                }
+            }
+            MiddlewareConfig::Named { .. } => {
+                // Current middleware is enabled - always keep it
+                result.push(middleware.clone());
             }
         }
     }
 
+    // Add parent middleware that doesn't exist in current (if not disabled)
+    for middleware in parent {
+        let name = middleware.name();
+        
+        // Check if this middleware exists in current
+        let exists_in_current = current.iter().any(|m| m.name() == name);
+        
+        if !exists_in_current {
+            match middleware {
+                MiddlewareConfig::Named { .. } => {
+                    // Parent has it enabled and current doesn't have it - add it
+                    result.push(middleware.clone());
+                }
+                MiddlewareConfig::Off { .. } => {
+                    // Parent has it disabled and current doesn't have it - don't add
+                }
+            }
+        }
+    }
+
+    *current = result;
     Ok(())
 }
 
@@ -184,23 +253,39 @@ pub fn supplement_middleware(
     let mut index = HashMap::new();
 
     for (i, m) in current.iter().enumerate() {
-        let MiddlewareConfig::Named { name, .. } = m;
-        index.insert(name.clone(), i);
+        let name = m.name();
+        index.insert(name.to_string(), i);
     }
 
     for new_middleware in incoming {
-        match new_middleware {
-            MiddlewareConfig::Named { name, config } => {
-                if let Some(&pos) = index.get(name) {
-                    // Supplement existing middleware config with missing properties only
-                    let MiddlewareConfig::Named { config: existing_config, .. } =
-                        &mut current[pos];
+        let name = new_middleware.name();
+        
+        if let Some(&pos) = index.get(name) {
+            // Middleware exists - check if we should merge or handle disabled state
+            match (&mut current[pos], new_middleware) {
+                (MiddlewareConfig::Named { config: existing_config, .. }, MiddlewareConfig::Named { config, .. }) => {
+                    // Both are enabled - merge configurations
                     merge_universal_missing_only(existing_config, config.clone())?;
-                } else {
-                    // Add completely new middleware
-                    current.push(MiddlewareConfig::Named { name: name.clone(), config: config.clone() });
-                    index.insert(name.clone(), current.len() - 1);
                 }
+                (MiddlewareConfig::Off { .. }, MiddlewareConfig::Named { .. }) => {
+                    // Current is disabled but incoming is enabled - DON'T enable it
+                    // Current (inline/off) takes precedence over incoming (site/global)
+                    // Do nothing - keep it disabled
+                }
+                (MiddlewareConfig::Named { .. }, MiddlewareConfig::Off { .. }) => {
+                    // Current is enabled but incoming is disabled - keep current enabled (takes precedence)
+                    // Do nothing
+                }
+                (MiddlewareConfig::Off { .. }, MiddlewareConfig::Off { .. }) => {
+                    // Both are disabled - keep disabled
+                    // Do nothing
+                }
+            }
+        } else {
+            // Middleware doesn't exist in current - add if not disabled
+            if !new_middleware.is_off() {
+                current.push(new_middleware.clone());
+                index.insert(name.to_string(), current.len() - 1);
             }
         }
     }
@@ -283,6 +368,9 @@ pub enum MiddlewareConfig {
         #[schemars(with = "serde_json::Value")]
         config: UniversalValue,
     },
+    Off {
+        name: String,
+    },
 }
 
 impl MiddlewareConfig {
@@ -302,10 +390,21 @@ impl MiddlewareConfig {
         }
     }
     
+    /// Create new disabled middleware
+    pub fn new_off(name: String) -> Self {
+        MiddlewareConfig::Off { name }
+    }
+    
+    /// Check if middleware is disabled
+    pub fn is_off(&self) -> bool {
+        matches!(self, MiddlewareConfig::Off { .. })
+    }
+    
     /// Get middleware name
     pub fn name(&self) -> &str {
         match self {
             MiddlewareConfig::Named { name, .. } => name,
+            MiddlewareConfig::Off { name } => name,
         }
     }
     
@@ -313,6 +412,7 @@ impl MiddlewareConfig {
     pub fn config_as_json(&self) -> Result<serde_json::Value> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.as_json(),
+            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
         }
     }
     
@@ -320,6 +420,7 @@ impl MiddlewareConfig {
     pub fn config_as_yaml(&self) -> Result<serde_yaml::Value> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.as_yaml(),
+            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
         }
     }
     
@@ -327,6 +428,7 @@ impl MiddlewareConfig {
     pub fn config_to_json_string(&self) -> Result<String> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.to_json_string(),
+            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
         }
     }
     
@@ -334,6 +436,7 @@ impl MiddlewareConfig {
     pub fn config_to_yaml_string(&self) -> Result<String> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.to_yaml_string(),
+            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
         }
     }
     
@@ -360,10 +463,22 @@ impl<'de> Deserialize<'de> for MiddlewareConfig {
 
         let (name, yaml_value) = map.into_iter().next().unwrap();
 
-        Ok(MiddlewareConfig::Named { 
-            name, 
-            config: UniversalValue::from_yaml(yaml_value)
-        })
+        // Check if the value is "off" (string or boolean false)
+        match &yaml_value {
+            serde_yaml::Value::String(s) if s == "off" => {
+                return Ok(MiddlewareConfig::Off { name });
+            }
+            serde_yaml::Value::Bool(b) if !b => {
+                return Ok(MiddlewareConfig::Off { name });
+            }
+            _ => {
+                // Normal middleware configuration
+                Ok(MiddlewareConfig::Named { 
+                    name, 
+                    config: UniversalValue::from_yaml(yaml_value)
+                })
+            }
+        }
     }
 }
 
@@ -395,6 +510,18 @@ impl Strategy {
                     }) {
                         Arc::get_mut(&mut result.middleware).unwrap()[pos] = middleware.clone();
                     } else {
+                        Arc::get_mut(&mut result.middleware).unwrap().push(middleware.clone());
+                    }
+                }
+                MiddlewareConfig::Off { name } => {
+                    // Handle Off middleware - remove if exists, or add as Off
+                    if let Some(pos) = Arc::get_mut(&mut result.middleware).unwrap_or(&mut Vec::new()).iter().position(|m| {
+                        m.name() == name
+                    }) {
+                        // Update existing middleware to Off state
+                        Arc::get_mut(&mut result.middleware).unwrap()[pos] = middleware.clone();
+                    } else {
+                        // Add new Off middleware
                         Arc::get_mut(&mut result.middleware).unwrap().push(middleware.clone());
                     }
                 }
@@ -937,3 +1064,6 @@ max_size: 1000
         assert_eq!(resolved.middleware[1].name(), "logging");
     }
 }
+
+// Include the off functionality tests
+mod off_tests;

@@ -243,6 +243,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_static_route_matching() {
+        // Create global config with default strategy
+        let global_config = httpward_core::config::GlobalConfig {
+            strategy: Some(httpward_core::config::StrategyRef::Named("default".to_string())),
+            strategies: {
+                let mut strategies = std::collections::HashMap::new();
+                strategies.insert("default".to_string(), vec![]);
+                strategies
+            },
+            ..Default::default()
+        };
+        
         // Create site config with static routes
         let site_config = SiteConfig {
             domain: "test-site".to_string(),
@@ -273,8 +284,8 @@ mod tests {
             strategies: std::collections::HashMap::new(),
         };
         
-        // Create SiteManager
-        let site_manager = SiteManager::new(std::sync::Arc::new(site_config)).unwrap();
+        // Create SiteManager with global config
+        let site_manager = SiteManager::new(std::sync::Arc::new(site_config), Some(&global_config)).unwrap();
         
         // Test matching exact route
         let result = site_manager.get_route("/site");
