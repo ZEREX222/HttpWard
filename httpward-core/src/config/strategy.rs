@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize, Deserializer};
 use std::collections::HashMap;
 use anyhow::Result;
 use schemars::JsonSchema;
+use serde_yaml::Value;
+use serde_json;
 
 /// Universal wrapper type for working with YAML and JSON values
 #[derive(Debug, Clone)]
@@ -58,6 +60,96 @@ impl UniversalValue {
         let yaml_val = self.as_yaml()?;
         serde_yaml::to_string(&yaml_val).map_err(Into::into)
     }
+}
+
+/// Deep merge YAML values - only add missing properties
+fn merge_yaml_missing_only(target: &mut Value, source: Value) {
+    let is_null = matches!(target, Value::Null);
+    
+    if let (Value::Mapping(target_map), Value::Mapping(source_map)) = (&mut *target, &source) {
+        for (k, v) in source_map {
+            // Only add if key doesn't exist in target
+            if !target_map.contains_key(&k) {
+                target_map.insert(k.clone(), v.clone());
+            }
+        }
+    } else if is_null {
+        // If target is null but source has value, replace target
+        *target = source;
+    }
+    // Don't modify existing non-null values
+}
+
+/// Deep merge JSON values - only add missing properties
+fn merge_json_missing_only(target: &mut serde_json::Value, source: serde_json::Value) {
+    let is_null = matches!(target, serde_json::Value::Null);
+    
+    if let (serde_json::Value::Object(target_map), serde_json::Value::Object(source_map)) = (&mut *target, &source) {
+        for (k, v) in source_map {
+            // Only add if key doesn't exist in target
+            if !target_map.contains_key(k) {
+                target_map.insert(k.clone(), v.clone());
+            }
+        }
+    } else if is_null {
+        // If target is null but source has value, replace target
+        *target = source;
+    }
+    // Don't modify existing non-null values
+}
+
+/// Deep merge UniversalValue instances - only add missing properties
+fn merge_universal_missing_only(target: &mut UniversalValue, source: UniversalValue) -> Result<()> {
+    match (target, source) {
+        (UniversalValue::Yaml(t), UniversalValue::Yaml(s)) => {
+            merge_yaml_missing_only(t, s);
+        }
+        (UniversalValue::Json(t), UniversalValue::Json(s)) => {
+            merge_json_missing_only(t, s);
+        }
+        // Fallback if formats are different
+        (t, s) => {
+            let t_json = t.as_json()?;
+            let s_json = s.as_json()?;
+            let mut merged = t_json;
+            merge_json_missing_only(&mut merged, s_json);
+            *t = UniversalValue::from_json(merged);
+        }
+    }
+    Ok(())
+}
+
+/// Supplement middleware configurations - only add missing middleware and missing properties
+pub fn supplement_middleware(
+    current: &mut Vec<MiddlewareConfig>,
+    incoming: Vec<MiddlewareConfig>,
+) -> Result<()> {
+    // Build index: middleware name -> position
+    let mut index = HashMap::new();
+
+    for (i, m) in current.iter().enumerate() {
+        let MiddlewareConfig::Named { name, .. } = m;
+        index.insert(name.clone(), i);
+    }
+
+    for new_middleware in incoming {
+        match new_middleware {
+            MiddlewareConfig::Named { name, config } => {
+                if let Some(&pos) = index.get(&name) {
+                    // Supplement existing middleware config with missing properties only
+                    let MiddlewareConfig::Named { config: existing_config, .. } =
+                        &mut current[pos];
+                    merge_universal_missing_only(existing_config, config)?;
+                } else {
+                    // Add completely new middleware
+                    current.push(MiddlewareConfig::Named { name: name.clone(), config });
+                    index.insert(name, current.len() - 1);
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 // Serialize implementation for UniversalValue
@@ -191,6 +283,11 @@ impl Strategy {
             name,
             middleware: Vec::new(),
         }
+    }
+
+    /// Supplement middleware configurations - only add missing middleware and missing properties
+    pub fn supplement_with(&mut self, incoming: Vec<MiddlewareConfig>) -> Result<()> {
+        supplement_middleware(&mut self.middleware, incoming)
     }
 
     pub fn merge_with(&self, other: &Strategy) -> Strategy {
@@ -509,5 +606,208 @@ middleware:
         let parsed_final: serde_json::Value = serde_json::from_str(&final_str).unwrap();
         
         assert_eq!(parsed_original, parsed_final);
+    }
+
+    #[test]
+    fn test_supplement_middleware_missing_only() {
+        let mut current = vec![
+            MiddlewareConfig::new_named_json(
+                "rate_limit".to_string(),
+                json!({
+                    "requests": 1000,
+                    "window": "1m",
+                    "burst": 100
+                })
+            ),
+            MiddlewareConfig::new_named_json(
+                "logging".to_string(),
+                json!({
+                    "level": "info",
+                    "format": "text"
+                })
+            )
+        ];
+
+        let incoming = vec![
+            MiddlewareConfig::new_named_json(
+                "rate_limit".to_string(),
+                json!({
+                    "requests": 2000,  // Should NOT be updated (exists)
+                    "timeout": "30s"   // Should be added (missing)
+                })
+            ),
+            MiddlewareConfig::new_named_json(
+                "cors".to_string(),
+                json!({
+                    "origins": ["*"],
+                    "methods": ["GET", "POST"]
+                })
+            )
+        ];
+
+        supplement_middleware(&mut current, incoming).unwrap();
+
+        assert_eq!(current.len(), 3); // rate_limit, logging, cors
+
+        // Check rate_limit was supplemented (not merged)
+        let rate_limit = &current[0];
+        assert_eq!(rate_limit.name(), "rate_limit");
+        let config = rate_limit.config_as_json().unwrap();
+        assert_eq!(config["requests"], 1000);  // NOT updated
+        assert_eq!(config["window"], "1m");    // Preserved
+        assert_eq!(config["burst"], 100);      // Preserved
+        assert_eq!(config["timeout"], "30s");  // Added (was missing)
+
+        // Check logging was preserved
+        let logging = &current[1];
+        assert_eq!(logging.name(), "logging");
+        let config = logging.config_as_json().unwrap();
+        assert_eq!(config["level"], "info");
+        assert_eq!(config["format"], "text");
+
+        // Check cors was added
+        let cors = &current[2];
+        assert_eq!(cors.name(), "cors");
+        let config = cors.config_as_json().unwrap();
+        assert_eq!(config["origins"][0], "*");
+        assert_eq!(config["methods"][0], "GET");
+    }
+
+    #[test]
+    fn test_strategy_supplement_with_method() {
+        let mut strategy = Strategy::new("test".to_string());
+        strategy.middleware.push(
+            MiddlewareConfig::new_named_json(
+                "auth".to_string(),
+                json!({
+                    "type": "basic",
+                    "realm": "protected"
+                })
+            )
+        );
+
+        let incoming = vec![
+            MiddlewareConfig::new_named_json(
+                "auth".to_string(),
+                json!({
+                    "timeout": 300,      // Should be added (missing)
+                    "max_attempts": 5,    // Should be added (missing)
+                    "type": "jwt"         // Should NOT be updated (exists)
+                })
+            ),
+            MiddlewareConfig::new_named_json(
+                "rate_limit".to_string(),
+                json!({
+                    "requests": 100
+                })
+            )
+        ];
+
+        strategy.supplement_with(incoming).unwrap();
+
+        assert_eq!(strategy.middleware.len(), 2);
+
+        // Check auth was supplemented (not merged)
+        let auth = &strategy.middleware[0];
+        assert_eq!(auth.name(), "auth");
+        let config = auth.config_as_json().unwrap();
+        assert_eq!(config["type"], "basic");      // NOT updated
+        assert_eq!(config["realm"], "protected"); // Preserved
+        assert_eq!(config["timeout"], 300);       // Added (was missing)
+        assert_eq!(config["max_attempts"], 5);     // Added (was missing)
+
+        // Check rate_limit was added
+        let rate_limit = &strategy.middleware[1];
+        assert_eq!(rate_limit.name(), "rate_limit");
+        let config = rate_limit.config_as_json().unwrap();
+        assert_eq!(config["requests"], 100);
+    }
+
+    #[test]
+    fn test_supplement_middleware_yaml_formats() {
+        let mut current = vec![
+            MiddlewareConfig::new_named_yaml(
+                "cache".to_string(),
+                serde_yaml::from_str(r#"
+ttl: 300
+max_size: 1000
+"#).unwrap()
+            )
+        ];
+
+        let incoming = vec![
+            MiddlewareConfig::new_named_json(
+                "cache".to_string(),
+                json!({
+                    "ttl": 600,        // Should NOT be updated (exists)
+                    "strategy": "lru"  // Should be added (missing)
+                })
+            )
+        ];
+
+        supplement_middleware(&mut current, incoming).unwrap();
+
+        let cache = &current[0];
+        assert_eq!(cache.name(), "cache");
+        let config = cache.config_as_json().unwrap();
+        assert_eq!(config["ttl"], 300);        // NOT updated
+        assert_eq!(config["max_size"], 1000);  // Preserved
+        assert_eq!(config["strategy"], "lru"); // Added (was missing)
+    }
+
+    #[test]
+    fn test_supplement_middleware_no_overwrite() {
+        let mut current = vec![
+            MiddlewareConfig::new_named_json(
+                "test".to_string(),
+                json!({
+                    "existing_string": "old_value",
+                    "existing_number": 42,
+                    "existing_bool": true,
+                    "existing_null": null,
+                    "existing_array": [1, 2, 3],
+                    "existing_object": {"key": "value"}
+                })
+            )
+        ];
+
+        let incoming = vec![
+            MiddlewareConfig::new_named_json(
+                "test".to_string(),
+                json!({
+                    "existing_string": "new_value",    // Should NOT be updated
+                    "existing_number": 100,            // Should NOT be updated
+                    "existing_bool": false,             // Should NOT be updated
+                    "existing_null": "not_null",       // Should NOT be updated (null exists)
+                    "existing_array": [4, 5, 6],        // Should NOT be updated
+                    "existing_object": {"new_key": "new_value"}, // Should NOT be updated
+                    "new_string": "added",             // Should be added
+                    "new_number": 999,                 // Should be added
+                    "new_bool": false,                 // Should be added
+                    "new_array": [7, 8, 9],            // Should be added
+                    "new_object": {"added": "yes"}     // Should be added
+                })
+            )
+        ];
+
+        supplement_middleware(&mut current, incoming).unwrap();
+
+        let test = &current[0];
+        let config = test.config_as_json().unwrap();
+
+        // Check existing values are NOT updated
+        assert_eq!(config["existing_string"], "old_value");
+        assert_eq!(config["existing_number"], 42);
+        assert_eq!(config["existing_bool"], true);
+        assert_eq!(config["existing_null"], serde_json::Value::Null);
+        assert_eq!(config["existing_array"], json!([1, 2, 3]));
+        assert_eq!(config["existing_object"], json!({"key": "value"}));
+
+        // Check new values are added
+        assert_eq!(config["new_string"], "added");
+        assert_eq!(config["new_number"], 999);
+        assert_eq!(config["new_bool"], false);
+        assert_eq!(config["new_array"], json!([7, 8, 9]));
+        assert_eq!(config["new_object"], json!({"added": "yes"}));
     }
 }
