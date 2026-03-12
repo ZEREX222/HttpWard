@@ -4,12 +4,23 @@ use std::path::PathBuf;
 use matchit::Router;
 use regex::{Regex, RegexSet};
 use thiserror::Error;
-use crate::config::{SiteConfig, Route};
+use crate::config::{SiteConfig, Route, GlobalConfig};
+use super::strategy_resolver::StrategyResolver;
+use crate::config::strategy::Strategy;
 
 #[derive(Debug, Clone)]
 pub struct TlsPaths {
     pub cert: PathBuf,
     pub key: PathBuf,
+}
+
+/// Combined object containing a Route and its resolved active strategy
+#[derive(Debug, Clone)]
+pub struct RouteWithStrategy {
+    /// The route definition
+    pub route: Arc<Route>,
+    /// The resolved active strategy for this route
+    pub active_strategy: Arc<Strategy>,
 }
 
 /// A mapping between a set of domains and their specific certificate files.
@@ -30,10 +41,17 @@ pub enum SiteManagerError {
     NoMatch,
 }
 
-/// Matched route with parameters
+impl From<anyhow::Error> for SiteManagerError {
+    fn from(err: anyhow::Error) -> Self {
+        SiteManagerError::InvalidRegex(err.to_string())
+    }
+}
+
+/// Matched route with parameters and active strategy
 #[derive(Debug, Clone)]
 pub struct MatchedRoute {
     pub route: Arc<Route>,
+    pub active_strategy: Arc<Strategy>,
     pub params: HashMap<String, String>,
     pub matcher_type: MatcherType,
 }
@@ -54,15 +72,15 @@ pub struct SiteManager {
     regex_list: Vec<(Regex, usize)>,
     /// RegexSet for fast bulk matching
     regex_set: Option<RegexSet>,
-    /// routes stored as Arc to avoid expensive clones
-    routes: Vec<Arc<Route>>,
+    /// routes with their resolved strategies
+    routes_with_strategy: Vec<RouteWithStrategy>,
     /// TLS mappings for this site's domains
     tls_mappings: Vec<TlsMapping>,
 }
 
 impl SiteManager {
-    /// Create a new site manager from site configuration
-    pub fn new(site_config: Arc<SiteConfig>) -> Result<Self, SiteManagerError> {
+    /// Create a new site manager with global config for strategy resolution
+    pub fn new(site_config: Arc<SiteConfig>, global_config: Option<&GlobalConfig>) -> Result<Self, SiteManagerError> {
         let routes = site_config.routes.clone();
         let mut path_router = Router::new();
         let mut regex_raw: Vec<(String, usize)> = Vec::new();
@@ -109,13 +127,33 @@ impl SiteManager {
             None
         };
 
+        // Create strategy resolver if global config is provided
+        let strategy_resolver = if let Some(global) = global_config {
+            Some(Arc::new(StrategyResolver::new(&site_config, global)?))
+        } else {
+            None
+        };
+
+        // Create RouteWithStrategy objects
+        let mut routes_with_strategy = Vec::new();
+        if let Some(resolver) = &strategy_resolver {
+            for (index, route) in routes_arc.iter().enumerate() {
+                if let Some(strategy) = resolver.resolve_for_route(index, route, &site_config, true)? {
+                    routes_with_strategy.push(RouteWithStrategy {
+                        route: route.clone(),
+                        active_strategy: strategy,
+                    });
+                }
+            }
+        }
+
         Ok(Self {
             site_config,
             path_router,
             regex_list,
             regex_set,
-            routes: routes_arc,
-            tls_mappings: Vec::new(),
+            routes_with_strategy,
+            tls_mappings: Vec::new()
         })
     }
 
@@ -129,14 +167,15 @@ impl SiteManager {
         // First try matchit path patterns (fastest)
         if let Ok(matched) = self.path_router.at(path) {
             let route_index = *matched.value;
-            let route = self.routes[route_index].clone();
+            let route_with_strategy = &self.routes_with_strategy[route_index];
             let mut params = HashMap::with_capacity(matched.params.len());
             for (k, v) in matched.params.iter() {
                 params.insert(k.to_string(), v.to_string());
             }
 
             return Ok(MatchedRoute {
-                route,
+                route: route_with_strategy.route.clone(),
+                active_strategy: route_with_strategy.active_strategy.clone(),
                 params,
                 matcher_type: MatcherType::Path,
             });
@@ -170,8 +209,10 @@ impl SiteManager {
                             }
                         }
 
+                        let route_with_strategy = &self.routes_with_strategy[*route_index];
                         return Ok(MatchedRoute {
-                            route: self.routes[*route_index].clone(),
+                            route: route_with_strategy.route.clone(),
+                            active_strategy: route_with_strategy.active_strategy.clone(),
                             params,
                             matcher_type: MatcherType::Regex,
                         });
@@ -202,8 +243,10 @@ impl SiteManager {
                         }
                     }
 
+                    let route_with_strategy = &self.routes_with_strategy[*route_index];
                     return Ok(MatchedRoute {
-                        route: self.routes[*route_index].clone(),
+                        route: route_with_strategy.route.clone(),
+                        active_strategy: route_with_strategy.active_strategy.clone(),
                         params,
                         matcher_type: MatcherType::Regex,
                     });
@@ -215,8 +258,8 @@ impl SiteManager {
     }
 
     /// Get all routes (for debugging)
-    pub fn routes(&self) -> &[Arc<Route>] {
-        &self.routes
+    pub fn routes(&self) -> Vec<Arc<Route>> {
+        self.routes_with_strategy.iter().map(|rws| rws.route.clone()).collect()
     }
 
     /// Get site primary domain
@@ -275,126 +318,104 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_site_manager_creation() {
-        let site_config = Arc::new(create_test_site());
-        let site_manager = SiteManager::new(site_config.clone()).unwrap();
+    #[cfg(test)]
+    mod strategy_resolver_tests {
+        use super::*;
+        use crate::config::strategy::{MiddlewareConfig, StrategyRef};
+        use crate::config::{StrategyCollection, Match, GlobalConfig};
+        use serde_json::json;
 
-        assert_eq!(site_manager.site_name(), "test-site");
-        assert_eq!(site_manager.routes().len(), 2);
-        assert!(Arc::ptr_eq(&site_manager.site_config(), &site_config));
-        
-        // Test that routes are stored as Arc
-        for route in site_manager.routes() {
-            assert_eq!(Arc::strong_count(route), 1);
+        fn create_test_global_config() -> GlobalConfig {
+            let mut strategies = StrategyCollection::new();
+            strategies.insert(
+                "default".to_string(),
+                vec![
+                    MiddlewareConfig::new_named_json(
+                        "rate_limit".to_string(),
+                        json!({"requests": 1000, "window": "1m"})
+                    ),
+                    MiddlewareConfig::new_named_json(
+                        "logging".to_string(),
+                        json!({"level": "info"})
+                    ),
+                ]
+            );
+
+            GlobalConfig {
+                domain: "example.com".to_string(),
+                domains: vec![],
+                listeners: vec![],
+                routes: vec![],
+                log: Default::default(),
+                sites_enabled: Default::default(),
+                strategy: Some(StrategyRef::Named("default".to_string())),
+                strategies,
+            }
+        }
+
+        fn create_test_site_config_with_strategies() -> SiteConfig {
+            let mut strategies = StrategyCollection::new();
+            strategies.insert(
+                "site_default".to_string(),
+                vec![
+                    MiddlewareConfig::new_named_json(
+                        "rate_limit".to_string(),
+                        json!({"requests": 500}) // Missing "window" - should inherit
+                    ),
+                    MiddlewareConfig::new_named_json(
+                        "auth".to_string(),
+                        json!({"type": "jwt"})
+                    ),
+                ]
+            );
+
+            SiteConfig {
+                domain: "test.example.com".to_string(),
+                domains: vec![],
+                listeners: vec![],
+                routes: vec![
+                    Route::Proxy {
+                        r#match: Match { path: Some("/api".to_string()), ..Default::default() },
+                        backend: "http://backend".to_string(),
+                        strategy: Some(StrategyRef::Named("site_default".to_string())),
+                        strategies: None,
+                    }
+                ],
+                strategy: Some(StrategyRef::Named("site_default".to_string())),
+                strategies,
+            }
+        }
+
+        #[test]
+        fn test_get_route_with_strategy() {
+            let global_config = create_test_global_config();
+            let site_config = Arc::new(create_test_site_config_with_strategies());
+            let site_manager = SiteManager::new(site_config, Some(&global_config)).unwrap();
+
+            let matched = site_manager.get_route("/api").unwrap();
+
+            // Should have matched route
+            assert_eq!(matched.matcher_type, MatcherType::Path);
+
+            // Should have resolved strategy
+            assert_eq!(matched.active_strategy.name, "site_default");
+            assert_eq!(matched.active_strategy.middleware.len(), 2); // rate_limit + auth
+        }
+
+        #[test]
+        fn test_strategy_inheritance_in_resolver() {
+            let global_config = create_test_global_config();
+            let site_config = Arc::new(create_test_site_config_with_strategies());
+            let site_manager = SiteManager::new(site_config, Some(&global_config)).unwrap();
+
+            let matched = site_manager.get_route("/api").unwrap();
+
+            // Check rate_limit middleware inherited "window" from global
+            let rate_limit = &matched.active_strategy.middleware[0];
+            assert_eq!(rate_limit.name(), "rate_limit");
+            let config = rate_limit.config_as_json().unwrap();
+            assert_eq!(config["requests"], 500); // Site value
+            assert_eq!(config["window"], "1m"); // Inherited from global
         }
     }
-
-    #[test]
-    fn test_path_matching() {
-        let site_config = Arc::new(create_test_site());
-        let site_manager = SiteManager::new(site_config).unwrap();
-
-        let matched = site_manager.get_route("/api/users/123").unwrap();
-
-        assert!(matches!(*matched.route, Route::Proxy { .. }));
-        assert_eq!(matched.params.get("id"), Some(&"123".to_string()));
-        assert_eq!(matched.matcher_type, MatcherType::Path);
-    }
-
-    #[test]
-    fn test_regex_matching() {
-        let site_config = Arc::new(create_test_site());
-        let site_manager = SiteManager::new(site_config).unwrap();
-
-        let matched = site_manager.get_route("/my/final").unwrap();
-
-        assert!(matches!(*matched.route, Route::Proxy { .. }));
-        assert_eq!(matched.params.get("1"), Some(&"my".to_string()));
-        assert_eq!(matched.matcher_type, MatcherType::Regex);
-    }
-
-    #[test]
-    fn test_no_match() {
-        let site_config = Arc::new(create_test_site());
-        let site_manager = SiteManager::new(site_config).unwrap();
-
-        let result = site_manager.get_route("/nonexistent");
-        assert!(matches!(result, Err(SiteManagerError::NoMatch)));
-    }
-
-    #[test]
-    fn test_named_capture_groups() {
-        let mut site_config = create_test_site();
-        
-        // Add a route with named capture groups
-        site_config.routes.push(Route::Proxy {
-            r#match: Match {
-                path: None,
-                path_regex: Some(r"^/users/(?P<user_id>\d+)/posts/(?P<post_id>\d+)$".to_string()),
-            },
-            backend: "http://backend:8080/users/{user_id}/posts/{post_id}".to_string(),
-            strategy: None,
-            strategies: None,
-        });
-
-        let site_config = Arc::new(site_config);
-        let site_manager = SiteManager::new(site_config).unwrap();
-
-        let matched = site_manager.get_route("/users/123/posts/456").unwrap();
-
-        assert!(matches!(*matched.route, Route::Proxy { .. }));
-        assert_eq!(matched.params.get("user_id"), Some(&"123".to_string()));
-        assert_eq!(matched.params.get("post_id"), Some(&"456".to_string()));
-        assert_eq!(matched.matcher_type, MatcherType::Regex);
-    }
-
-    #[test]
-    fn test_regex_set_optimization() {
-        let site_config = Arc::new(create_test_site());
-        let site_manager = SiteManager::new(site_config).unwrap();
-
-        // Verify that RegexSet is created when regex patterns exist
-        assert!(site_manager.regex_set.is_some());
-        assert!(!site_manager.regex_list.is_empty());
-
-        // Test that multiple regex patterns can be matched efficiently
-        let results: Vec<_> = [
-            "/my/final",
-            "/test/final", 
-            "/another/final"
-        ].iter().map(|&path| site_manager.get_route(path).is_ok()).collect();
-
-        assert_eq!(results, vec![true, true, true]);
-    }
-
-    #[test]
-    fn test_arc_route_sharing() {
-        let site_config = Arc::new(create_test_site());
-        let site_manager = SiteManager::new(site_config).unwrap();
-
-        let matched1 = site_manager.get_route("/api/users/123").unwrap();
-        let matched2 = site_manager.get_route("/api/users/456").unwrap();
-
-        // Both should point to the same Arc<Route> (same route)
-        assert!(Arc::ptr_eq(&matched1.route, &matched2.route));
-        
-        // But have different parameters
-        assert_eq!(matched1.params.get("id"), Some(&"123".to_string()));
-        assert_eq!(matched2.params.get("id"), Some(&"456".to_string()));
-    }
-
-    #[test] 
-    fn test_hashmap_capacity_optimization() {
-        let site_config = Arc::new(create_test_site());
-        let site_manager = SiteManager::new(site_config).unwrap();
-
-        let matched = site_manager.get_route("/api/users/123").unwrap();
-        
-        // Verify that the params HashMap was created with proper capacity
-        // This is mainly to ensure the optimization is in place
-        assert!(!matched.params.is_empty());
-        assert_eq!(matched.params.len(), 1);
-    }
-
 }

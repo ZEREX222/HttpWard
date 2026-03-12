@@ -70,7 +70,7 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
             let mut compilation_errors = Vec::new();
             
             for site_config in sites {
-                match SiteManager::new(Arc::new(site_config.clone())) {
+                match SiteManager::new(Arc::new(site_config.clone()), Some(&config.global)) {
                     Ok(mut site_manager) => {
                         // Add TLS mappings to the site manager only for the current listener with TLS
                         // Find the listener that matches this server instance

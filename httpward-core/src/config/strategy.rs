@@ -86,9 +86,21 @@ fn merge_json_missing_only(target: &mut serde_json::Value, source: serde_json::V
     
     if let (serde_json::Value::Object(target_map), serde_json::Value::Object(source_map)) = (&mut *target, &source) {
         for (k, v) in source_map {
-            // Only add if key doesn't exist in target
             if !target_map.contains_key(k) {
+                // Key doesn't exist at all - add it
                 target_map.insert(k.clone(), v.clone());
+            } else {
+                // Key exists - check if we can recursively merge objects
+                let target_value = target_map.get_mut(k).unwrap();
+                match target_value {
+                    serde_json::Value::Object(_) => {
+                        // Both are objects - recursively merge missing fields only
+                        merge_json_missing_only(target_value, v.clone());
+                    }
+                    _ => {
+                        // Target is not an object - don't overwrite
+                    }
+                }
             }
         }
     } else if is_null {
@@ -119,7 +131,38 @@ fn merge_universal_missing_only(target: &mut UniversalValue, source: UniversalVa
     Ok(())
 }
 
-/// Supplement middleware configurations - only add missing middleware and missing properties
+/// Supplement middleware configurations - only merge existing middleware configs, don't add new ones
+/// Used for strategy inheritance where we only want to merge configs of existing middleware
+pub fn supplement_middleware_configs(
+    current: &mut Vec<MiddlewareConfig>,
+    incoming: Vec<MiddlewareConfig>,
+) -> Result<()> {
+    // Build index: middleware name -> position
+    let mut index = HashMap::new();
+
+    for (i, m) in current.iter().enumerate() {
+        let MiddlewareConfig::Named { name, .. } = m;
+        index.insert(name.clone(), i);
+    }
+
+    for new_middleware in incoming {
+        match new_middleware {
+            MiddlewareConfig::Named { name, config } => {
+                if let Some(&pos) = index.get(&name) {
+                    // Only merge existing middleware configs - don't add new ones
+                    let MiddlewareConfig::Named { config: existing_config, .. } =
+                        &mut current[pos];
+                    merge_universal_missing_only(existing_config, config)?;
+                }
+                // If middleware doesn't exist in current, don't add it
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Supplement middleware configurations - add missing middleware and missing properties
 pub fn supplement_middleware(
     current: &mut Vec<MiddlewareConfig>,
     incoming: Vec<MiddlewareConfig>,
@@ -801,7 +844,7 @@ max_size: 1000
         assert_eq!(config["existing_bool"], true);
         assert_eq!(config["existing_null"], serde_json::Value::Null);
         assert_eq!(config["existing_array"], json!([1, 2, 3]));
-        assert_eq!(config["existing_object"], json!({"key": "value"}));
+        assert_eq!(config["existing_object"], json!({"key": "value", "new_key": "new_value"}));
 
         // Check new values are added
         assert_eq!(config["new_string"], "added");
