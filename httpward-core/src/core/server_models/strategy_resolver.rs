@@ -111,10 +111,19 @@ impl StrategyResolver {
 
         let resolved = match strategy_ref {
             Some(StrategyRef::InlineMiddleware(m)) => {
-                // Inline middleware is already vector owned by caller; just wrap.
+                // Inline middleware should inherit from global default strategy
+                let mut merged = m.clone();
+                
+                // Supplement with global default strategy if it exists
+                if let Some(StrategyRef::Named(default_strategy_name)) = &global_default {
+                    if let Some(global_default_vec) = merged_site.get(default_strategy_name) {
+                        supplement_middleware(&mut merged, global_default_vec.as_ref().as_slice())?;
+                    }
+                }
+                
                 Some(Arc::new(Strategy {
                     name: "inline".to_string(),
-                    middleware: Arc::new(m),
+                    middleware: Arc::new(merged),
                 }))
             }
 
@@ -448,12 +457,15 @@ mod tests {
         let redirect_strategy = resolver.resolve_for_route(2).unwrap();
 
         assert_eq!(redirect_strategy.name, "inline");
-        assert_eq!(redirect_strategy.middleware.len(), 1);
-        assert_eq!(redirect_strategy.middleware[0].name(), "rate_limit");
+        assert_eq!(redirect_strategy.middleware.len(), 2); // rate_limit (merged inline+global) + logging (from global default)
+        assert_eq!(redirect_strategy.middleware[0].name(), "rate_limit"); // Merged inline + global
 
         let rate_limit_config = redirect_strategy.middleware[0].config_as_json().unwrap();
-        assert_eq!(rate_limit_config["requests"], 10);
-        assert_eq!(rate_limit_config["window"], "1s");
+        assert_eq!(rate_limit_config["requests"], 10); // From inline (takes precedence)
+        assert_eq!(rate_limit_config["window"], "1s"); // From inline (takes precedence)
+
+        // Check that global default logging is present
+        assert_eq!(redirect_strategy.middleware[1].name(), "logging"); // From global default
     }
 
     #[test]
@@ -735,5 +747,84 @@ mod tests {
         // Performance assertion - should be fast even with large configs
         assert!(creation_time.as_millis() < 100, "StrategyResolver creation should be fast even with large configs");
         assert!(resolution_time.as_millis() < 50, "Route resolution should be very fast");
+    }
+
+    #[test]
+    fn test_inline_strategy_inherits_from_global_default() {
+        let mut global = create_test_global_config();
+        let mut site = create_test_site_config();
+
+        // Add route with inline middleware
+        site.routes.push(Route::Proxy {
+            r#match: Match {
+                path: Some("/inline-test".to_string()),
+                path_regex: None,
+            },
+            backend: "http://backend".to_string(),
+            strategy: Some(StrategyRef::InlineMiddleware(vec![
+                MiddlewareConfig::new_named_json(
+                    "auth".to_string(),
+                    json!({
+                        "type": "basic"
+                    })
+                )
+            ])),
+            strategies: None,
+        });
+
+        let resolver = StrategyResolver::new(&site, &global).unwrap();
+        let inline_strategy = resolver.resolve_for_route(2).unwrap();
+
+        assert_eq!(inline_strategy.name, "inline");
+        
+        // Should have inline middleware + global default middleware
+        assert_eq!(inline_strategy.middleware.len(), 3); // auth (inline) + rate_limit + logging (from global default)
+        assert_eq!(inline_strategy.middleware[0].name(), "auth"); // From inline
+        assert_eq!(inline_strategy.middleware[1].name(), "rate_limit"); // From global default
+        assert_eq!(inline_strategy.middleware[2].name(), "logging"); // From global default
+
+        // Check that rate_limit has the global default values
+        let rate_limit_config = inline_strategy.middleware[1].config_as_json().unwrap();
+        assert_eq!(rate_limit_config["requests"], 1000); // From global default
+        assert_eq!(rate_limit_config["window"], "1m"); // From global default
+
+        println!("✅ Inline strategy correctly inherits from global default");
+    }
+
+    #[test]
+    fn test_inline_strategy_with_no_global_default() {
+        let mut global = create_test_global_config();
+        global.strategy = None; // No global default
+        
+        let mut site = create_test_site_config();
+
+        // Add route with inline middleware
+        site.routes.push(Route::Proxy {
+            r#match: Match {
+                path: Some("/inline-test".to_string()),
+                path_regex: None,
+            },
+            backend: "http://backend".to_string(),
+            strategy: Some(StrategyRef::InlineMiddleware(vec![
+                MiddlewareConfig::new_named_json(
+                    "auth".to_string(),
+                    json!({
+                        "type": "basic"
+                    })
+                )
+            ])),
+            strategies: None,
+        });
+
+        let resolver = StrategyResolver::new(&site, &global).unwrap();
+        let inline_strategy = resolver.resolve_for_route(2).unwrap();
+
+        assert_eq!(inline_strategy.name, "inline");
+        
+        // Should only have inline middleware (no inheritance)
+        assert_eq!(inline_strategy.middleware.len(), 1); // Only auth from inline
+        assert_eq!(inline_strategy.middleware[0].name(), "auth");
+
+        println!("✅ Inline strategy works correctly without global default");
     }
 }
