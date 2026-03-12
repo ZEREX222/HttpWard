@@ -66,7 +66,14 @@
         },
         "strategy": {
           "description": "Default strategy for all domains and routes",
-          "type": "string",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StrategyRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": "default"
         },
         "strategies": {
@@ -279,26 +286,11 @@
           "type": "string"
         },
         {
-          "$ref": "#/$defs/Strategy"
-        }
-      ]
-    },
-    "Strategy": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "middleware": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/MiddlewareConfig"
-          },
-          "default": []
+          }
         }
-      },
-      "required": [
-        "name"
       ]
     },
     "MiddlewareConfig": {
@@ -322,6 +314,26 @@
           },
           "required": [
             "Named"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Off": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          },
+          "required": [
+            "Off"
           ],
           "additionalProperties": false
         }
@@ -390,9 +402,13 @@
         },
         "strategy": {
           "description": "Site-specific strategy (overrides global default)",
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StrategyRef"
+            },
+            {
+              "type": "null"
+            }
           ],
           "default": null
         },
