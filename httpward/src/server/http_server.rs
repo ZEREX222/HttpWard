@@ -43,7 +43,13 @@ impl HttpWardServer {
         let display_addr = addr.to_string().replace("0.0.0.0", "127.0.0.1");
 
         let exec = Executor::graceful(shutdown.guard());
-        let tls_enabled = !self.instance.tls_registry.is_empty();
+        
+        // Collect TLS mappings from all site managers
+        let all_tls_mappings: Vec<httpward_core::core::server_models::site_manager::TlsMapping> = 
+            self.instance.site_managers.iter()
+                .flat_map(|sm| sm.tls_mappings().to_vec())
+                .collect();
+        let tls_enabled = !all_tls_mappings.is_empty();
 
         // Create HTTP service with dynamic middleware layers using LayerStackBuilder
         let error_handler = ErrorHandler::default();
@@ -61,20 +67,13 @@ impl HttpWardServer {
             }
         });
 
-        
-
         // Use LayerStackBuilder for dynamic middleware composition
-        // Create Arc references for configs to avoid duplication
-        let sites_arc: Vec<Arc<httpward_core::config::SiteConfig>> = self.instance.sites
-            .iter()
-            .map(|site| Arc::new(site.clone()))
-            .collect();
         let server_instance_arc = Arc::new(self.instance.clone());
         
         let http_svc = HttpServer::auto(exec.clone()).service(
             (
                 ErrorHandlerLayer::new(),
-                RequestEnricherLayer::new(sites_arc, server_instance_arc),
+                RequestEnricherLayer::new(server_instance_arc),
                 LogLayer::new(),
                 DynamicModuleLoaderLayer::new(),
                 ResponseEnricherLayer::new(),
@@ -90,7 +89,7 @@ impl HttpWardServer {
             info!("TLS enabled for server on https://{}", display_addr);
 
             // Build TLS acceptor data with SNI support
-            let tls_config = TlsConfigBuilder::new(self.instance.tls_registry.clone());
+            let tls_config = TlsConfigBuilder::new(all_tls_mappings);
             let tls_data = tls_config.build().await
                 .map_err(|e| format!("Failed to build TLS config: {}", e))?;
 

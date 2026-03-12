@@ -17,7 +17,7 @@ use rama_tls_rustls::dep::rustls::{
 };
 use tracing::{info, warn, error};
 
-use httpward_core::core::server_models::server_instance::TlsMapping;
+use httpward_core::core::server_models::site_manager::TlsMapping;
 use crate::server::tls::domain_store::{Cert, DomainStore};
 use super::tls_watcher::TlsFileWatcher;
 
@@ -145,7 +145,8 @@ impl FallbackSniResolver {
             
             let mut store = domain_store.write().unwrap();
             for domain in &mapping.domains {
-                store.insert(&domain.to_lowercase(), cert.clone());
+                let domain_str: &str = &domain.to_lowercase();
+                store.insert(domain_str, cert.clone());
             }
         }
         

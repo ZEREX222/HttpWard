@@ -104,8 +104,7 @@ where
                         host: "127.0.0.1".to_string(),
                         port: 8080,
                     },
-                    sites: vec![],
-                    tls_registry: vec![],
+                    site_managers: vec![],
                     global: GlobalConfig::default(),
                 };
                 HttpWardContext::new(

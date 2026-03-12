@@ -1,9 +1,24 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::path::PathBuf;
 use matchit::Router;
 use regex::{Regex, RegexSet};
 use thiserror::Error;
 use crate::config::{SiteConfig, Route};
+
+#[derive(Debug, Clone)]
+pub struct TlsPaths {
+    pub cert: PathBuf,
+    pub key: PathBuf,
+}
+
+/// A mapping between a set of domains and their specific certificate files.
+/// Used for SNI (Server Name Indication) lookup during the TLS handshake.
+#[derive(Debug, Clone)]
+pub struct TlsMapping {
+    pub domains: Vec<String>,
+    pub paths: TlsPaths,
+}
 
 #[derive(Error, Debug)]
 pub enum SiteManagerError {
@@ -41,6 +56,8 @@ pub struct SiteManager {
     regex_set: Option<RegexSet>,
     /// routes stored as Arc to avoid expensive clones
     routes: Vec<Arc<Route>>,
+    /// TLS mappings for this site's domains
+    tls_mappings: Vec<TlsMapping>,
 }
 
 impl SiteManager {
@@ -98,6 +115,7 @@ impl SiteManager {
             regex_list,
             regex_set,
             routes: routes_arc,
+            tls_mappings: Vec::new(),
         })
     }
 
@@ -204,6 +222,21 @@ impl SiteManager {
     /// Get site primary domain
     pub fn site_name(&self) -> &str {
         &self.site_config.domain
+    }
+
+    /// Add TLS mapping for this site
+    pub fn add_tls_mapping(&mut self, mapping: TlsMapping) {
+        self.tls_mappings.push(mapping);
+    }
+
+    /// Get all TLS mappings for this site
+    pub fn tls_mappings(&self) -> &[TlsMapping] {
+        &self.tls_mappings
+    }
+
+    /// Get TLS mappings as a list (for compatibility with existing code)
+    pub fn get_tls_list(&self) -> Vec<TlsMapping> {
+        self.tls_mappings.clone()
     }
 }
 

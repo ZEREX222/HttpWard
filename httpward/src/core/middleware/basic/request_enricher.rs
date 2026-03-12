@@ -17,8 +17,7 @@ use rama::net::fingerprint::Ja4;
 use rama::net::tls::{ProtocolVersion, SecureTransport};
 use rama::http::headers::ContentType;
 use std::str::FromStr;
-use httpward_core::config::{SiteConfig};
-use httpward_core::core::server_models::SiteManager;
+use httpward_core::core::server_models::site_manager::SiteManager;
 use httpward_core::core::HttpWardContext;
 use httpward_core::core::server_models::server_instance::ServerInstance;
 
@@ -82,13 +81,12 @@ fn extract_header_fingerprint(headers: &HeaderMap) -> Option<String> {
 /// Layer that enriches request context with HttpWardContext containing client_addr, site and server_instance
 #[derive(Clone, Debug)]
 pub struct RequestEnricherLayer {
-    sites: Vec<Arc<SiteConfig>>,
     server_instance: Arc<ServerInstance>,
 }
 
 impl RequestEnricherLayer {
-    pub fn new(sites: Vec<Arc<SiteConfig>>, server_instance: Arc<ServerInstance>) -> Self {
-        Self { sites, server_instance }
+    pub fn new(server_instance: Arc<ServerInstance>) -> Self {
+        Self { server_instance }
     }
 }
 
@@ -96,7 +94,7 @@ impl<S> Layer<S> for RequestEnricherLayer {
     type Service = RequestEnricherService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RequestEnricherService::new(inner, self.sites.clone(), self.server_instance.clone())
+        RequestEnricherService::new(inner, self.server_instance.clone())
     }
 }
 
@@ -106,19 +104,19 @@ pub struct RequestEnricherService<S> {
     inner: S,
     server_instance: Arc<ServerInstance>,
     // Cached WildMatch patterns for better performance
-    cached_patterns: Vec<(Arc<SiteConfig>, Vec<WildMatch>)>,
+    cached_patterns: Vec<(Arc<SiteManager>, Vec<WildMatch>)>,
 }
 
 impl<S> RequestEnricherService<S> {
-    pub fn new(inner: S, sites: Vec<Arc<SiteConfig>>, server_instance: Arc<ServerInstance>) -> Self {
+    pub fn new(inner: S, server_instance: Arc<ServerInstance>) -> Self {
         // Pre-cache WildMatch patterns for all domains
-        let cached_patterns = sites.iter().map(|site| {
-            let all_domains = site.get_all_domains();
+        let cached_patterns = server_instance.site_managers.iter().map(|site_manager| {
+            let all_domains = site_manager.site_config().get_all_domains();
             let patterns: Vec<WildMatch> = all_domains
                 .iter()
                 .map(|domain| WildMatch::new(domain))
                 .collect();
-            (site.clone(), patterns)
+            (site_manager.clone(), patterns)
         }).collect();
 
         Self { 
@@ -128,7 +126,7 @@ impl<S> RequestEnricherService<S> {
         }
     }
 
-    /// Find site configuration by SNI from TLS context
+    /// Find site manager by SNI from TLS context
     fn find_site_by_sni<State>(&self, ctx: &Context<State>) -> Option<Arc<SiteManager>> {
         // Try to get SNI from TLS context
         if let Some(st) = ctx.get::<rama::net::tls::SecureTransport>() {
@@ -136,18 +134,11 @@ impl<S> RequestEnricherService<S> {
                 if let Some(sni) = client_hello.ext_server_name() {
                     let sni_str = sni.to_string();
                     
-                    // Find site using cached WildMatch patterns (more efficient)
-                    if let Some((site_config, _)) = self.cached_patterns.iter().find(|(_, patterns)| {
+                    // Find site manager using cached WildMatch patterns (more efficient)
+                    if let Some((site_manager, _)) = self.cached_patterns.iter().find(|(_, patterns)| {
                         patterns.iter().any(|pattern| pattern.matches(&sni_str))
                     }) {
-                        // Create SiteManager from SiteConfig
-                        match SiteManager::new(site_config.clone()) {
-                            Ok(site_manager) => return Some(Arc::new(site_manager)),
-                            Err(e) => {
-                                warn!("Failed to create SiteManager for site {}: {}", sni_str, e);
-                                return None;
-                            }
-                        }
+                        return Some(site_manager.clone());
                     }
                 }
             }

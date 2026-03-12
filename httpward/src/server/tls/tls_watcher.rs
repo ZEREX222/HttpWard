@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::{info, error};
 
-use httpward_core::core::server_models::server_instance::TlsMapping;
+use httpward_core::core::server_models::site_manager::TlsMapping;
 use super::tls::{FallbackSniResolver, build_certified_key, TlsError};
 use rama_tls_rustls::dep::rustls::sign::CertifiedKey;
 
@@ -58,7 +58,7 @@ impl TlsFileWatcher {
                 file_to_domains
                     .entry(mapping.paths.cert.clone())
                     .or_insert_with(Vec::new)
-                    .push(domain.clone());
+                    .push(domain.clone() as String);
                 file_to_domains
                     .entry(mapping.paths.key.clone())
                     .or_insert_with(Vec::new)

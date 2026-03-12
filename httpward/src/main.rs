@@ -26,12 +26,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let server_plans = build_server_plan(&config);
 
     for server in &server_plans {
+        let total_tls_mappings: usize = server.site_managers.iter()
+            .map(|sm| sm.tls_mappings().len())
+            .sum();
+        
         debug!(
             "Will start server on {}:{} ({} sites attached / {} TLS attached)",
             server.bind.host,
             server.bind.port,
-            server.sites.len(),
-            server.tls_registry.len()
+            server.site_managers.len(),
+            total_tls_mappings
         );
         
         // Detailed server configuration
@@ -41,18 +45,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // Sites details
         debug!("    Sites attached:");
-        for (i, site) in server.sites.iter().enumerate() {
-            debug!("      Site {}: '{}'", i, site.domain);
-            debug!("        Domains: {:?}", site.get_all_domains());
-            debug!("        Listeners: {} listeners", site.listeners.len());
-            debug!("        Routes: {} routes", site.routes.len());
+        for (i, site_manager) in server.site_managers.iter().enumerate() {
+            debug!("      Site {}: '{}'", i, site_manager.site_name());
+            debug!("        Domains: {:?}", site_manager.site_config().get_all_domains());
+            debug!("        Listeners: {} listeners", site_manager.site_config().listeners.len());
+            debug!("        Routes: {} routes", site_manager.site_config().routes.len());
         }
 
         // TLS details
         debug!("    TLS registry:");
-        for (i, tls_mapping) in server.tls_registry.iter().enumerate() {
-            debug!("      TLS {}: domains={:?}, cert={:?}, key={:?}", 
-                i, tls_mapping.domains, tls_mapping.paths.cert, tls_mapping.paths.key);
+        for (site_idx, site_manager) in server.site_managers.iter().enumerate() {
+            for (i, tls_mapping) in site_manager.tls_mappings().iter().enumerate() {
+                debug!("      TLS {}.{}: domains={:?}, cert={:?}, key={:?}", 
+                    site_idx, i, tls_mapping.domains, tls_mapping.paths.cert, tls_mapping.paths.key);
+            }
         }
         
         debug!(""); // Empty line for readability

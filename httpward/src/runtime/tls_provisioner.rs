@@ -1,4 +1,4 @@
-use httpward_core::core::server_models::server_instance::TlsPaths;
+use httpward_core::core::server_models::site_manager::TlsPaths;
 use rcgen::generate_simple_self_signed;
 use std::env;
 use std::fs;
