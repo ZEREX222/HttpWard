@@ -1,8 +1,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::config::global::{Listener, Route};
-use crate::config::strategy::{Strategy, StrategyRef, StrategyCollection};
+use crate::config::strategy::{Strategy, StrategyRef, LegacyStrategyCollection as StrategyCollection};
 
 /// Configuration for one virtual host / site
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
@@ -58,7 +59,7 @@ impl SiteConfig {
     pub fn get_site_strategy(&self, name: &str) -> Option<Strategy> {
         self.strategies.get(name).map(|middleware| Strategy {
             name: name.to_string(),
-            middleware: middleware.clone(),
+            middleware: Arc::new(middleware.clone()),
         })
     }
 

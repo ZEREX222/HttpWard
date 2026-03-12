@@ -1,6 +1,6 @@
 // src/config/loader.rs
 use super::{GlobalConfig, SiteConfig};
-use super::strategy::{StrategyCollection, MiddlewareConfig};
+use super::strategy::{LegacyStrategyCollection as StrategyCollection, MiddlewareConfig};
 use anyhow::{Context, Result};
 use glob::glob;
 use std::collections::HashMap;

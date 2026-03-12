@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use schemars::JsonSchema;
 use crate::config::site::SiteConfig;
-use crate::config::strategy::{Strategy, StrategyRef, StrategyCollection};
+use crate::config::strategy::{Strategy, StrategyRef, LegacyStrategyCollection as StrategyCollection};
 
 /// Global application configuration (loaded from httpward.yaml)
 /// Inherits all fields from SiteConfig plus global-specific settings
@@ -270,7 +271,7 @@ mod tests {
         // Set an inline strategy using Strategy
         let inline_strategy = Strategy {
             name: "inline_test".to_string(),
-            middleware: vec![
+            middleware: Arc::new(vec![
                 crate::config::strategy::MiddlewareConfig::new_named_json(
                     "rate_limit".to_string(),
                     serde_json::json!({"requests": 1000, "window": "1m"})
@@ -279,7 +280,7 @@ mod tests {
                     "logging".to_string(),
                     serde_json::json!({"level": "debug"})
                 )
-            ]
+            ])
         };
         
         config.strategy = Some(StrategyRef::Inline(inline_strategy));

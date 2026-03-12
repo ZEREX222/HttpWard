@@ -138,7 +138,7 @@ impl SiteManager {
         let mut routes_with_strategy = Vec::new();
         if let Some(resolver) = &strategy_resolver {
             for (index, route) in routes_arc.iter().enumerate() {
-                if let Some(strategy) = resolver.resolve_for_route(index, route, &site_config, true)? {
+                if let Some(strategy) = resolver.resolve_for_route(index) {
                     routes_with_strategy.push(RouteWithStrategy {
                         route: route.clone(),
                         active_strategy: strategy,

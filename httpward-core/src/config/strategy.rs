@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize, Deserializer};
 use std::collections::HashMap;
+use std::sync::Arc;
 use anyhow::Result;
 use schemars::JsonSchema;
 use serde_yaml::Value;
@@ -219,14 +220,48 @@ impl<'de> Deserialize<'de> for UniversalValue {
     }
 }
 
-pub type StrategyCollection = HashMap<String, Vec<MiddlewareConfig>>;
+// Legacy type for backward compatibility - use the optimized version in strategy_resolver
+pub type LegacyStrategyCollection = HashMap<String, Vec<MiddlewareConfig>>;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, JsonSchema)]
 pub struct Strategy {
     pub name: String,
 
     #[serde(default)]
-    pub middleware: Vec<MiddlewareConfig>,
+    pub middleware: Arc<Vec<MiddlewareConfig>>,
+}
+
+impl<'de> serde::Deserialize<'de> for Strategy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        struct Helper {
+            name: String,
+            #[serde(default)]
+            middleware: Vec<MiddlewareConfig>,
+        }
+
+        let helper = Helper::deserialize(deserializer)?;
+        Ok(Strategy {
+            name: helper.name,
+            middleware: Arc::new(helper.middleware),
+        })
+    }
+}
+
+impl serde::Serialize for Strategy {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("Strategy", 2)?;
+        state.serialize_field("name", &self.name)?;
+        state.serialize_field("middleware", &*self.middleware)?;
+        state.end()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -324,31 +359,31 @@ impl Strategy {
     pub fn new(name: String) -> Self {
         Self {
             name,
-            middleware: Vec::new(),
+            middleware: Arc::new(Vec::new()),
         }
     }
 
     /// Supplement middleware configurations - only add missing middleware and missing properties
     pub fn supplement_with(&mut self, incoming: Vec<MiddlewareConfig>) -> Result<()> {
-        supplement_middleware(&mut self.middleware, incoming)
+        supplement_middleware(Arc::make_mut(&mut self.middleware), incoming)
     }
 
     pub fn merge_with(&self, other: &Strategy) -> Strategy {
         let mut result = self.clone();
 
-        for middleware in &other.middleware {
+        for middleware in other.middleware.iter() {
             match middleware {
                 MiddlewareConfig::Named { name, .. } => {
-                    if let Some(pos) = result.middleware.iter().position(|m| {
+                    if let Some(pos) = Arc::get_mut(&mut result.middleware).unwrap_or(&mut Vec::new()).iter().position(|m| {
                         matches!(
                             m,
                             MiddlewareConfig::Named { name: existing, .. }
                             if existing == name
                         )
                     }) {
-                        result.middleware[pos] = middleware.clone();
+                        Arc::get_mut(&mut result.middleware).unwrap()[pos] = middleware.clone();
                     } else {
-                        result.middleware.push(middleware.clone());
+                        Arc::get_mut(&mut result.middleware).unwrap().push(middleware.clone());
                     }
                 }
             }
@@ -366,11 +401,11 @@ pub enum StrategyRef {
 }
 
 impl StrategyRef {
-    pub fn resolve(&self, strategies: &StrategyCollection) -> Option<Strategy> {
+    pub fn resolve(&self, strategies: &LegacyStrategyCollection) -> Option<Strategy> {
         match self {
             StrategyRef::Named(name) => strategies.get(name).map(|middleware| Strategy {
                 name: name.clone(),
-                middleware: middleware.clone(),
+                middleware: Arc::new(middleware.clone()),
             }),
             StrategyRef::Inline(strategy) => Some(strategy.clone()),
         }
@@ -557,7 +592,7 @@ middleware:
         assert_eq!(inline_strategy.middleware.len(), 2);
         
         let strategy_ref = StrategyRef::Inline(inline_strategy);
-        let resolved = strategy_ref.resolve(&StrategyCollection::new());
+        let resolved = strategy_ref.resolve(&LegacyStrategyCollection::new());
         
         assert!(resolved.is_some());
         let strategy = resolved.unwrap();
@@ -589,7 +624,7 @@ middleware:
 
     #[test]
     fn test_strategy_ref_named_vs_inline() {
-        let mut strategies = StrategyCollection::new();
+        let mut strategies = LegacyStrategyCollection::new();
         
         // Add a named strategy
         strategies.insert("test".to_string(), vec![
@@ -608,12 +643,12 @@ middleware:
         // Test Inline strategy
         let inline_strategy = Strategy {
             name: "inline_test".to_string(),
-            middleware: vec![
+            middleware: Arc::new(vec![
                 MiddlewareConfig::new_named_json(
                     "logging".to_string(),
                     json!({"level": "info"})
                 )
-            ]
+            ])
         };
         let inline_ref = StrategyRef::Inline(inline_strategy);
         let inline_resolved = inline_ref.resolve(&strategies).unwrap();
@@ -719,7 +754,7 @@ middleware:
     #[test]
     fn test_strategy_supplement_with_method() {
         let mut strategy = Strategy::new("test".to_string());
-        strategy.middleware.push(
+        Arc::make_mut(&mut strategy.middleware).push(
             MiddlewareConfig::new_named_json(
                 "auth".to_string(),
                 json!({

@@ -10,6 +10,6 @@ pub use global::{GlobalConfig, Listener, Route, Match, Redirect, Tls, LogConfig}
 pub use loader::{AppConfig, load};
 pub use site::SiteConfig;
 pub use strategy::{
-    Strategy, StrategyCollection, StrategyRef,
+    Strategy, LegacyStrategyCollection as StrategyCollection, StrategyRef,
     MiddlewareConfig, UniversalValue
 };

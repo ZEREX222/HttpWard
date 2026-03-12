@@ -2,69 +2,60 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::hash::{Hash, Hasher};
 use anyhow::Result;
+use tracing::{debug, trace, instrument};
 
-use crate::config::strategy::{Strategy, StrategyCollection, StrategyRef, supplement_middleware, supplement_middleware_configs};
-use crate::config::{SiteConfig, GlobalConfig, Route};
+use crate::config::strategy::{Strategy, StrategyRef, supplement_middleware_configs, supplement_middleware, LegacyStrategyCollection};
+use crate::config::{SiteConfig, GlobalConfig, Route, MiddlewareConfig};
 
-/// Key for route-level cache
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct RouteKey {
-    site_name: String,
-    route_index: usize,
-}
+/// Optimized strategy collection using Arc to reduce cloning
+pub type StrategyCollection = HashMap<String, Arc<Vec<MiddlewareConfig>>>;
 
-impl Hash for RouteKey {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.site_name.hash(state);
-        self.route_index.hash(state);
-    }
-}
-
-/// Cache for resolved strategies to avoid repeated computation
-type StrategyCache = HashMap<RouteKey, Arc<Strategy>>;
-
-/// Resolver that holds precomputed merged collections and caches
-/// Strategy resolution with optimal performance and memory usage
+/// High-performance resolver with precomputed strategies and no runtime overhead
 #[derive(Debug, Clone)]
 pub struct StrategyResolver {
     /// Global strategies (Arc for memory efficiency)
     global: Arc<StrategyCollection>,
     /// Precomputed merged site -> global strategies (Arc for memory efficiency)
     merged_site: Arc<StrategyCollection>,
-    /// Cache for per-route resolved strategies
-    cache: Arc<StrategyCache>,
-    /// Site identifier for cache keys
-    site_name: String,
+    /// Precomputed resolved strategies for all routes (eliminates runtime resolution)
+    resolved_routes: Vec<Option<Arc<Strategy>>>,
 }
 
 impl StrategyResolver {
     /// Create resolver for a given site and global config.
-    /// This precomputes merged_site map for optimal performance.
+    /// This precomputes merged_site map and resolves all routes for optimal performance.
+    #[instrument(skip(site, global))]
     pub fn new(site: &SiteConfig, global: &GlobalConfig) -> Result<Self> {
-        // Precompute global map as Arc for memory efficiency
-        let global_map = Arc::new(global.strategies.clone());
-        let mut merged_site_map: StrategyCollection = HashMap::new();
-
-        // First, add all global strategies - for availability
-        for (name, gvec) in global_map.iter() {
-            merged_site_map.insert(name.clone(), gvec.clone());
-        }
-
-        // Then, process site strategies with inheritance
+        debug!("Creating StrategyResolver for site: {}", site.domain);
+        
+        // Convert legacy collections to optimized Arc-based collections
+        let global_map: StrategyCollection = global.strategies
+            .iter()
+            .map(|(name, vec)| (name.clone(), Arc::new(vec.clone())))
+            .collect();
+        let global_map = Arc::new(global_map);
+        
+        // Simplified merged_site creation: start with global, then overlay site
+        let mut merged_site_map: StrategyCollection = global_map.iter()
+            .map(|(name, arc_vec): (&String, &Arc<Vec<MiddlewareConfig>>)| (name.clone(), arc_vec.clone()))
+            .collect();
+        
+        // Process site strategies with inheritance
         for (name, site_middleware_vec) in site.strategies.iter() {
-            if let Some(global_vec) = global_map.get(name) {
-                // child = site_vec.clone(), then supplement from global
-                let mut child = site_middleware_vec.clone();
-                // supplement missing properties from global into child
-                supplement_middleware_configs(&mut child, global_vec.clone())?;
-                merged_site_map.insert(name.clone(), child);
+            let site_arc = Arc::new(site_middleware_vec.clone());
+            
+            if let Some(global_arc) = global_map.get(name) {
+                // Direct name match - merge site overrides global
+                let mut merged = site_middleware_vec.clone();
+                supplement_middleware_configs(&mut merged, (**global_arc).clone())?;
+                merged_site_map.insert(name.clone(), Arc::new(merged));
             } else {
                 // Check if this is the site's default strategy and inherit from global default
                 if let (Some(site_default_ref), Some(global_default_ref)) = (&site.strategy, &global.strategy) {
                     let site_default_name = match site_default_ref {
                         StrategyRef::Named(name) => name,
                         StrategyRef::Inline(_) => {
-                            merged_site_map.insert(name.clone(), site_middleware_vec.clone());
+                            merged_site_map.insert(name.clone(), site_arc);
                             continue;
                         }
                     };
@@ -73,61 +64,64 @@ impl StrategyResolver {
                         let global_default_name = match global_default_ref {
                             StrategyRef::Named(name) => name,
                             StrategyRef::Inline(_) => {
-                                merged_site_map.insert(name.clone(), site_middleware_vec.clone());
+                                merged_site_map.insert(name.clone(), site_arc);
                                 continue;
                             }
                         };
                         
-                        if let Some(global_default_vec) = global_map.get(global_default_name) {
-                            let mut child = site_middleware_vec.clone();
-                            supplement_middleware_configs(&mut child, global_default_vec.clone())?;
-                            merged_site_map.insert(name.clone(), child);
+                        if let Some(global_default_arc) = global_map.get(global_default_name) {
+                            let mut merged = site_middleware_vec.clone();
+                            supplement_middleware_configs(&mut merged, (**global_default_arc).clone())?;
+                            merged_site_map.insert(name.clone(), Arc::new(merged));
                         } else {
-                            merged_site_map.insert(name.clone(), site_middleware_vec.clone());
+                            merged_site_map.insert(name.clone(), site_arc);
                         }
                     } else {
-                        merged_site_map.insert(name.clone(), site_middleware_vec.clone());
+                        merged_site_map.insert(name.clone(), site_arc);
                     }
                 } else {
-                    merged_site_map.insert(name.clone(), site_middleware_vec.clone());
+                    merged_site_map.insert(name.clone(), site_arc);
                 }
             }
         }
-
+        
+        let merged_site = Arc::new(merged_site_map);
+        
+        // Precompute resolved strategies for all routes
+        let mut resolved_routes = Vec::with_capacity(site.routes.len());
+        for (index, route) in site.routes.iter().enumerate() {
+            let resolved = Self::resolve_single_route_static(route, site, &merged_site, false, &global.strategy)?;
+            resolved_routes.push(resolved);
+            trace!("Precomputed strategy for route {}: {:?}", index, resolved_routes[index].as_ref().map(|s| &s.name));
+        }
+        
         Ok(Self {
             global: global_map,
-            merged_site: Arc::new(merged_site_map),
-            cache: Arc::new(HashMap::new()),
-            site_name: site.domain.clone(),
+            merged_site,
+            resolved_routes,
         })
     }
 
-    /// Get the chosen strategy reference in priority order:
-    /// 1) route.strategy (if provided)
-    /// 2) site.strategy 
-    /// 3) global.strategy
-    fn get_chosen_strategy_ref(
-        &self,
+    /// Static helper for getting chosen strategy reference
+    fn get_chosen_strategy_ref_static(
         route: &Route,
         site: &SiteConfig,
         route_strategy_override: Option<&StrategyRef>,
+        global_default: &Option<StrategyRef>,
     ) -> Option<StrategyRef> {
         // Priority: provided override > route.strategy > site.strategy > global.strategy
         route_strategy_override
             .cloned()
             .or_else(|| route.get_strategy().cloned())
             .or_else(|| site.strategy.clone())
-            .or_else(|| None) // TODO: Add global.strategy when available
+            .or_else(|| global_default.clone())
     }
 
-    /// Find named strategy in the resolution chain:
-    /// 1) route.strategies (if any)
-    /// 2) merged_site (site overrides merged with global)  
-    /// 3) global
-    fn find_named_strategy(
-        &self,
+    /// Static helper for finding named strategy
+    fn find_named_strategy_static(
         name: &str,
         route: &Route,
+        merged_site: &StrategyCollection,
         supplement_from_higher_levels: bool,
     ) -> Option<Strategy> {
         // 1) Try route-level strategies first
@@ -135,13 +129,13 @@ impl StrategyResolver {
             if let Some(route_vec) = route_collection.get(name) {
                 let mut base = Strategy {
                     name: name.to_string(),
-                    middleware: route_vec.clone(),
+                    middleware: Arc::new(route_vec.clone()),
                 };
                 
                 if supplement_from_higher_levels {
                     // Supplement from site level (merged_site)
-                    if let Some(site_vec) = self.merged_site.get(name) {
-                        let _ = supplement_middleware(&mut base.middleware, site_vec.clone());
+                    if let Some(site_arc) = merged_site.get(name) {
+                        let _ = supplement_middleware(Arc::make_mut(&mut base.middleware), (**site_arc).clone());
                     }
                 }
                 
@@ -150,68 +144,41 @@ impl StrategyResolver {
         }
 
         // 2) Try merged_site (site + global already merged)
-        if let Some(site_vec) = self.merged_site.get(name) {
+        if let Some(site_arc) = merged_site.get(name) {
             return Some(Strategy {
                 name: name.to_string(),
-                middleware: site_vec.clone(),
-            });
-        }
-
-        // 3) Try global strategies
-        if let Some(global_vec) = self.global.get(name) {
-            return Some(Strategy {
-                name: name.to_string(),
-                middleware: global_vec.clone(),
+                middleware: site_arc.clone(),
             });
         }
 
         None
     }
 
-    /// Resolve StrategyRef for a given route (by index) with caching.
-    /// 
-    /// The precedence for finding a named strategy is:
-    /// 1) route.strategies
-    /// 2) merged_site (site overrides merged with global)
-    /// 3) global
-    ///
-    /// If `ref` is Inline, this returns inline as-is (no supplement by default).
-    /// Set `supplement_inline_with_parents` to true if you want inline strategies
-    /// to inherit from parent strategies.
-    pub fn resolve_for_route(
-        &self,
-        route_index: usize,
+    /// Helper method to resolve a single route strategy (used during precomputation)
+    fn resolve_single_route_static(
         route: &Route,
         site: &SiteConfig,
+        merged_site: &StrategyCollection,
         supplement_inline_with_parents: bool,
+        global_default: &Option<StrategyRef>,
     ) -> Result<Option<Arc<Strategy>>> {
-        let key = RouteKey {
-            site_name: self.site_name.clone(),
-            route_index,
-        };
-
-        // Check cache first (read-only access)
-        if let Some(cached) = self.cache.get(&key) {
-            return Ok(Some(cached.clone()));
-        }
-
         // Determine chosen strategy reference
-        let strategy_ref = self.get_chosen_strategy_ref(route, site, None);
+        let strategy_ref = Self::get_chosen_strategy_ref_static(route, site, None, global_default);
 
         let resolved = match strategy_ref {
             Some(StrategyRef::Inline(mut inline)) => {
                 // Inline strategy - treat as final by default
                 if supplement_inline_with_parents {
                     // Optional: supplement inline with parent strategies
-                    if let Some(parent_strategy) = self.find_named_strategy(&inline.name, route, false) {
-                        inline.supplement_with(parent_strategy.middleware)?;
+                    if let Some(parent_strategy) = Self::find_named_strategy_static(&inline.name, route, merged_site, false) {
+                        inline.supplement_with(parent_strategy.middleware.as_ref().clone())?;
                     }
                 }
                 Some(Arc::new(inline))
             }
             Some(StrategyRef::Named(name)) => {
                 // Find named strategy with proper inheritance chain
-                self.find_named_strategy(&name, route, true).map(Arc::new)
+                Self::find_named_strategy_static(&name, route, merged_site, true).map(Arc::new)
             }
             None => None,
         };
@@ -219,86 +186,58 @@ impl StrategyResolver {
         Ok(resolved)
     }
 
+    /// Resolve strategy for a given route (by index) - ultra-fast lookup
+    /// Uses precomputed routes only - no runtime overhead
+    #[instrument(skip(self))]
+    pub fn resolve_for_route(&self, route_index: usize) -> Option<Arc<Strategy>> {
+        if route_index >= self.resolved_routes.len() {
+            return None;
+        }
+        self.resolved_routes.get(route_index).cloned().flatten()
+    }
+
     /// Resolve strategy for a site (global + site overrides)
+    #[instrument(skip(self, site))]
     pub fn resolve_for_site(&self, site: &SiteConfig) -> Result<Option<Arc<Strategy>>> {
         if let Some(strategy_ref) = &site.strategy {
             match strategy_ref {
                 StrategyRef::Inline(inline) => {
+                    debug!("Resolving inline site strategy: {}", inline.name);
                     Ok(Some(Arc::new(inline.clone())))
                 }
                 StrategyRef::Named(name) => {
-                    // Look in merged_site first, then global
-                    if let Some(site_vec) = self.merged_site.get(name) {
+                    debug!("Resolving named site strategy: {}", name);
+                    // Look in merged_site first (already contains global + site)
+                    if let Some(site_arc) = self.merged_site.get(name) {
                         let strategy = Strategy {
                             name: name.clone(),
-                            middleware: site_vec.clone(),
-                        };
-                        Ok(Some(Arc::new(strategy)))
-                    } else if let Some(global_vec) = self.global.get(name) {
-                        let strategy = Strategy {
-                            name: name.clone(),
-                            middleware: global_vec.clone(),
+                            middleware: site_arc.clone(),
                         };
                         Ok(Some(Arc::new(strategy)))
                     } else {
+                        trace!("Site strategy '{}' not found in merged_site", name);
                         Ok(None)
                     }
                 }
             }
         } else {
+            trace!("No site strategy defined");
             Ok(None)
         }
     }
 
     /// Get all available strategies (global + site merged)
-    pub fn get_all_strategies(&self) -> StrategyCollection {
-        let mut all = self.global.as_ref().clone();
+    pub fn get_all_strategies(&self) -> LegacyStrategyCollection {
+        let mut all = self.global.iter()
+            .map(|(name, arc_vec): (&String, &Arc<Vec<MiddlewareConfig>>)| (name.clone(), (**arc_vec).clone()))
+            .collect::<LegacyStrategyCollection>();
         
         // Add/override with site strategies (already merged with global)
-        for (name, strategy) in self.merged_site.iter() {
-            all.insert(name.clone(), strategy.clone());
+        for (name, arc_vec) in self.merged_site.iter() {
+            all.insert(name.clone(), (**arc_vec).clone());
         }
         
         all
-    }
-
-    /// Clear the strategy cache (useful for configuration reloads)
-    pub fn clear_cache(&mut self) {
-        // Note: This would require interior mutability in real implementation
-        // For now, this is a placeholder for the API
-    }
-
-    /// Get cache statistics for monitoring
-    pub fn cache_stats(&self) -> (usize, usize) {
-        // Returns (cache_size, estimated_memory_bytes)
-        let cache_size = self.cache.len();
-        let estimated_memory = cache_size * std::mem::size_of::<RouteKey>() 
-            + cache_size * std::mem::size_of::<Arc<Strategy>>();
-        (cache_size, estimated_memory)
-    }
-}
-
-/// Factory for creating and managing StrategyResolver instances
-pub struct StrategyResolverFactory;
-
-impl StrategyResolverFactory {
-    /// Create a resolver for a site with optimal memory usage
-    pub fn create_for_site(site: &SiteConfig, global: &GlobalConfig) -> Result<StrategyResolver> {
-        StrategyResolver::new(site, global)
-    }
-
-    /// Create resolvers for multiple sites efficiently
-    pub fn create_for_sites(
-        sites: &[SiteConfig], 
-        global: &GlobalConfig
-    ) -> Result<Vec<StrategyResolver>> {
-        let mut resolvers = Vec::with_capacity(sites.len());
-        
-        for site in sites {
-            resolvers.push(StrategyResolver::new(site, global)?);
-        }
-        
-        Ok(resolvers)
     }
 }
 
@@ -309,7 +248,7 @@ mod tests {
     use serde_json::json;
 
     fn create_test_global() -> GlobalConfig {
-        let mut strategies = StrategyCollection::new();
+        let mut strategies = LegacyStrategyCollection::new();
         strategies.insert(
             "default".to_string(),
             vec![
@@ -337,7 +276,7 @@ mod tests {
     }
 
     fn create_test_site() -> SiteConfig {
-        let mut strategies = StrategyCollection::new();
+        let mut strategies = LegacyStrategyCollection::new();
         strategies.insert(
             "site_default".to_string(),
             vec![
@@ -356,7 +295,14 @@ mod tests {
             domain: "test.example.com".to_string(),
             domains: vec![],
             listeners: vec![],
-            routes: vec![],
+            routes: vec![
+                Route::Proxy {
+                    r#match: Default::default(),
+                    backend: "http://backend".to_string(),
+                    strategy: Some(StrategyRef::Named("site_default".to_string())),
+                    strategies: None,
+                }
+            ],
             strategy: Some(StrategyRef::Named("site_default".to_string())),
             strategies,
         }
@@ -386,6 +332,9 @@ mod tests {
         let config = rate_limit.config_as_json().unwrap();
         assert_eq!(config["requests"], 500); // Site value
         assert_eq!(config["window"], "1m"); // Inherited from global
+        
+        // Check that resolved_routes is precomputed
+        assert_eq!(resolver.resolved_routes.len(), site.routes.len());
     }
 
     #[test]
@@ -402,12 +351,65 @@ mod tests {
             strategies: None,
         };
         
-        let resolved = resolver.resolve_for_route(0, &route, &site, false).unwrap();
+        let resolved = resolver.resolve_for_route(0);
         
         assert!(resolved.is_some());
         let strategy = resolved.unwrap();
         assert_eq!(strategy.name, "site_default");
         assert_eq!(strategy.middleware.len(), 2);
+    }
+
+    #[test]
+    fn test_precomputed_routes_only() {
+        let global = create_test_global();
+        let site = create_test_site();
+        let resolver = StrategyResolver::new(&site, &global).unwrap();
+        
+        // Test that all routes are precomputed
+        assert_eq!(resolver.resolved_routes.len(), site.routes.len());
+        
+        // Test that resolve_for_route works with precomputed routes only
+        for (index, _route) in site.routes.iter().enumerate() {
+            let resolved = resolver.resolve_for_route(index);
+            assert!(resolved.is_some(), "Route {} should have precomputed strategy", index);
+        }
+        
+        // Test that invalid index returns None (no fallback computation)
+        let resolved = resolver.resolve_for_route(999);
+        assert!(resolved.is_none(), "Invalid route index should return None");
+        
+        // Test that valid index works
+        let resolved = resolver.resolve_for_route(0);
+        assert!(resolved.is_some(), "Valid route index should return strategy");
+    }
+
+    #[test]
+    fn test_global_strategy_inheritance() {
+        let global = create_test_global();
+        let site = create_test_site();
+        let resolver = StrategyResolver::new(&site, &global).unwrap();
+        
+        // Create a site without strategy (should inherit from global)
+        let mut site_no_strategy = site.clone();
+        site_no_strategy.strategy = None;
+        // Update the route to not have a strategy either
+        site_no_strategy.routes[0] = Route::Proxy {
+            r#match: Default::default(),
+            backend: "http://backend".to_string(),
+            strategy: None,
+            strategies: None,
+        };
+        
+        // Create a new resolver with the modified site
+        let resolver_no_strategy = StrategyResolver::new(&site_no_strategy, &global).unwrap();
+        
+        let resolved = resolver_no_strategy.resolve_for_route(0);
+        
+        // Should inherit global.default strategy
+        assert!(resolved.is_some());
+        let strategy = resolved.unwrap();
+        assert_eq!(strategy.name, "default");
+        assert_eq!(strategy.middleware.len(), 2); // rate_limit + logging
     }
 
     #[test]
@@ -418,22 +420,26 @@ mod tests {
         
         let inline_strategy = Strategy {
             name: "inline_test".to_string(),
-            middleware: vec![
+            middleware: Arc::new(vec![
                 MiddlewareConfig::new_named_json(
                     "cors".to_string(),
                     json!({"origins": ["*"]})
                 ),
-            ],
+            ])
         };
         
-        let route = Route::Proxy {
+        // Create a site with inline strategy
+        let mut site_inline = site.clone();
+        site_inline.routes[0] = Route::Proxy {
             r#match: Default::default(),
             backend: "http://backend".to_string(),
             strategy: Some(StrategyRef::Inline(inline_strategy.clone())),
             strategies: None,
         };
         
-        let resolved = resolver.resolve_for_route(0, &route, &site, false).unwrap();
+        let resolver_inline = StrategyResolver::new(&site_inline, &global).unwrap();
+        
+        let resolved = resolver_inline.resolve_for_route(0);
         
         assert!(resolved.is_some());
         let strategy = resolved.unwrap();
@@ -459,25 +465,6 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_key_equality() {
-        let key1 = RouteKey {
-            site_name: "test.com".to_string(),
-            route_index: 0,
-        };
-        let key2 = RouteKey {
-            site_name: "test.com".to_string(),
-            route_index: 0,
-        };
-        let key3 = RouteKey {
-            site_name: "test.com".to_string(),
-            route_index: 1,
-        };
-        
-        assert_eq!(key1, key2);
-        assert_ne!(key1, key3);
-    }
-
-    #[test]
     fn test_get_all_strategies() {
         let global = create_test_global();
         let site = create_test_site();
@@ -489,6 +476,11 @@ mod tests {
         assert!(all.contains_key("default"));
         assert!(all.contains_key("site_default"));
         assert_eq!(all.len(), 2);
+        
+        // Verify the strategies are properly merged
+        let site_default = &all["site_default"];
+        assert_eq!(site_default.len(), 2);
+        assert_eq!(site_default[0].name(), "rate_limit");
     }
 
     #[test]
@@ -503,5 +495,25 @@ mod tests {
         let strategy = resolved.unwrap();
         assert_eq!(strategy.name, "site_default");
         assert_eq!(strategy.middleware.len(), 2);
+    }
+
+    #[test]
+    fn test_precomputed_routes_performance() {
+        let global = create_test_global();
+        let site = create_test_site();
+        let resolver = StrategyResolver::new(&site, &global).unwrap();
+        
+        // Create a test route
+        let route = Route::Proxy {
+            r#match: Default::default(),
+            backend: "http://backend".to_string(),
+            strategy: Some(StrategyRef::Named("site_default".to_string())),
+            strategies: None,
+        };
+        
+        // Resolution for precomputed route index should be instant
+        // Test site has 1 route, so index 0 should work
+        let resolved = resolver.resolve_for_route(0);
+        assert!(resolved.is_some()); // Should resolve precomputed strategy
     }
 }
