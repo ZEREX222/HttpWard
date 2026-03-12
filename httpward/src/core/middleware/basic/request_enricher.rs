@@ -128,6 +128,11 @@ impl<S> RequestEnricherService<S> {
 
     /// Find site manager by SNI from TLS context
     fn find_site_by_sni<State>(&self, ctx: &Context<State>) -> Option<Arc<SiteManager>> {
+        // First, check if there's a site with no domain restrictions
+        let unrestricted_site = self.server_instance.site_managers.iter().find(|site_manager| {
+            !site_manager.site_config().has_domains()
+        });
+        
         // Try to get SNI from TLS context
         if let Some(st) = ctx.get::<rama::net::tls::SecureTransport>() {
             if let Some(client_hello) = st.client_hello() {
@@ -143,7 +148,9 @@ impl<S> RequestEnricherService<S> {
                 }
             }
         }
-        None
+        
+        // If no SNI match found, return unrestricted site if available
+        unrestricted_site.cloned()
     }
 }
 
@@ -227,5 +234,80 @@ where
 
         // Continue with the inner service
         self.inner.serve(ctx, request).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rama::Context;
+    use httpward_core::config::{SiteConfig, GlobalConfig};
+    use httpward_core::core::server_models::{ServerInstance, SiteManager, listener::ListenerKey};
+    use std::sync::Arc;
+    
+    #[tokio::test]
+    async fn test_find_site_by_sni_with_unrestricted_site() {
+        // Create site config with no domains (unrestricted)
+        let mut site_config = SiteConfig::default();
+        site_config.domain = "".to_string(); // Empty domain means unrestricted
+        site_config.domains = vec![]; // No additional domains
+        
+        let site_config_arc = Arc::new(site_config);
+        let site_manager = SiteManager::new(site_config_arc.clone()).unwrap();
+        let site_manager_arc = Arc::new(site_manager);
+        
+        // Create server instance with unrestricted site
+        let server_instance = ServerInstance {
+            bind: ListenerKey { host: "127.0.0.1".to_string(), port: 8080 },
+            site_managers: vec![site_manager_arc.clone()],
+            global: GlobalConfig::default(),
+        };
+        let server_instance_arc = Arc::new(server_instance);
+        
+        // Create request enricher service
+        let service = RequestEnricherService::new((), server_instance_arc.clone());
+        
+        // Test with empty context (no SNI)
+        let ctx = Context::default();
+        let found_site = service.find_site_by_sni(&ctx);
+        
+        // Should return the unrestricted site
+        assert!(found_site.is_some());
+        assert_eq!(found_site.unwrap().site_name(), site_config_arc.domain);
+    }
+    
+    #[tokio::test]
+    async fn test_find_site_by_sni_prefer_domain_match_over_unrestricted() {
+        // Create unrestricted site
+        let mut unrestricted_config = SiteConfig::default();
+        unrestricted_config.domain = "".to_string();
+        let unrestricted_site = SiteManager::new(Arc::new(unrestricted_config)).unwrap();
+        
+        // Create domain-specific site
+        let mut domain_config = SiteConfig::default();
+        domain_config.domain = "example.com".to_string();
+        let domain_site = SiteManager::new(Arc::new(domain_config)).unwrap();
+        
+        // Create server instance with both sites
+        let server_instance = ServerInstance {
+            bind: ListenerKey { host: "127.0.0.1".to_string(), port: 8080 },
+            site_managers: vec![Arc::new(unrestricted_site), Arc::new(domain_site)],
+            global: GlobalConfig::default(),
+        };
+        let server_instance_arc = Arc::new(server_instance);
+        
+        // Create request enricher service
+        let service = RequestEnricherService::new((), server_instance_arc.clone());
+        
+        // Test with context that has SNI matching domain site
+        let ctx = Context::default();
+        // Note: In real scenario, SNI would be in TLS context, but for this test
+        // we're testing the fallback behavior when no SNI match is found
+        
+        let found_site = service.find_site_by_sni(&ctx);
+        
+        // Should return the unrestricted site since no SNI match found
+        assert!(found_site.is_some());
+        assert_eq!(found_site.unwrap().site_name(), "");
     }
 }

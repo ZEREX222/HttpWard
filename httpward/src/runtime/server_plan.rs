@@ -44,7 +44,21 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
             port: listener.port,
         };
 
-        let _sites_vec = servers_map.entry(key).or_default();
+        let sites_vec = servers_map.entry(key).or_default();
+        
+        // If no sites are using this listener and TLS is configured, create a global site
+        if sites_vec.is_empty() {
+            if let Some(_paths) = resolve_global_listener_tls(&config.global, listener) {
+                let _domains = get_global_listener_domains(&config.global);
+                
+                // Create a global site config for localhost access
+                let mut global_site = config.global.to_site_config();
+                global_site.listeners = vec![listener.clone()];
+                
+                // Add to sites to be processed
+                sites_vec.push(global_site);
+            }
+        }
     }
 
     // 3. Build final instances with compiled SiteManagers
@@ -62,12 +76,18 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
                         for listener in get_effective_listeners(&site_config, &config.global) {
                             if let Some(paths) = resolve_site_tls(&site_config, &listener) {
                                 let domains = site_config.get_all_domains();
-                                if !domains.is_empty() {
-                                    site_manager.add_tls_mapping(TlsMapping {
-                                        domains,
-                                        paths,
-                                    });
-                                }
+                                
+                                // Use domains from site config, or fallback to localhost for global sites
+                                let tls_domains = if domains.is_empty() {
+                                    vec!["localhost".to_string(), "127.0.0.1".to_string()]
+                                } else {
+                                    domains
+                                };
+                                
+                                site_manager.add_tls_mapping(TlsMapping {
+                                    domains: tls_domains,
+                                    paths,
+                                });
                             }
                         }
                         
@@ -94,6 +114,35 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
 }
 
 
+/// Get domains for a global listener - uses global domains if configured,
+/// otherwise falls back to localhost domains for local access
+fn get_global_listener_domains(global_config: &httpward_core::config::GlobalConfig) -> Vec<String> {
+    if global_config.has_domains() {
+        global_config.get_all_domains()
+    } else {
+        vec!["localhost".to_string(), "127.0.0.1".to_string()]
+    }
+}
+
+/// Resolves TLS for a listener specifically used by a Global context
+/// Uses global domains if configured, otherwise defaults to localhost
+fn resolve_global_listener_tls(global_config: &httpward_core::config::GlobalConfig, listener: &Listener) -> Option<TlsPaths> {
+    let tls_config = listener.tls.as_ref()?;
+
+    if tls_config.self_signed {
+        let domains = get_global_listener_domains(global_config);
+        tls_provisioner::provision_self_signed(&domains)
+            .ok()
+            .map(|p| TlsPaths { cert: p.cert, key: p.key })
+    } else {
+        if tls_config.cert.as_os_str().is_empty() { return None; }
+        Some(TlsPaths {
+            cert: tls_config.cert.clone(),
+            key: tls_config.key.clone(),
+        })
+    }
+}
+
 /// Get effective listeners for a site (site listeners or global fallback)
 fn get_effective_listeners(site: &SiteConfig, global_config: &httpward_core::config::GlobalConfig) -> Vec<Listener> {
     if site.listeners.is_empty() {
@@ -109,9 +158,14 @@ fn resolve_site_tls(site: &SiteConfig, listener: &Listener) -> Option<TlsPaths> 
 
     if tls_config.self_signed {
         let domains = site.get_all_domains();
-        if domains.is_empty() { return None; }
+        // Use localhost domains if site has no domains (for global sites)
+        let tls_domains = if domains.is_empty() {
+            vec!["localhost".to_string(), "127.0.0.1".to_string()]
+        } else {
+            domains
+        };
 
-        tls_provisioner::provision_self_signed(&domains)
+        tls_provisioner::provision_self_signed(&tls_domains)
             .ok()
             .map(|p| TlsPaths { cert: p.cert, key: p.key })
     } else {
