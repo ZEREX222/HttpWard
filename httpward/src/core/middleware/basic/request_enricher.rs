@@ -126,30 +126,45 @@ impl<S> RequestEnricherService<S> {
         }
     }
 
-    /// Find site manager by SNI from TLS context
-    fn find_site_by_sni<State>(&self, ctx: &Context<State>) -> Option<Arc<SiteManager>> {
+    /// Find site manager by domain from either Host header (HTTP) or SNI (HTTPS)
+    fn find_site_by_domain<State>(&self, ctx: &Context<State>, request: &Request<Body>) -> Option<Arc<SiteManager>> {
         // First, check if there's a site with no domain restrictions
         let unrestricted_site = self.server_instance.site_managers.iter().find(|site_manager| {
             !site_manager.site_config().has_domains()
         });
         
-        // Try to get SNI from TLS context
-        if let Some(st) = ctx.get::<rama::net::tls::SecureTransport>() {
-            if let Some(client_hello) = st.client_hello() {
-                if let Some(sni) = client_hello.ext_server_name() {
-                    let sni_str = sni.to_string();
-                    
-                    // Find site manager using cached WildMatch patterns (more efficient)
-                    if let Some((site_manager, _)) = self.cached_patterns.iter().find(|(_, patterns)| {
-                        patterns.iter().any(|pattern| pattern.matches(&sni_str))
-                    }) {
-                        return Some(site_manager.clone());
+        let mut domain_to_match = None;
+        
+        // Try to get domain from Host header (HTTP) first
+        if let Some(host_header) = request.headers().get("host") {
+            if let Ok(host_str) = host_header.to_str() {
+                // Remove port if present (e.g., "example.com:8080" -> "example.com")
+                domain_to_match = Some(host_str.split(':').next().unwrap_or(host_str).to_lowercase());
+            }
+        }
+        
+        // If no Host header, try SNI from TLS context (HTTPS)
+        if domain_to_match.is_none() {
+            if let Some(st) = ctx.get::<rama::net::tls::SecureTransport>() {
+                if let Some(client_hello) = st.client_hello() {
+                    if let Some(sni) = client_hello.ext_server_name() {
+                        domain_to_match = Some(sni.to_string().to_lowercase());
                     }
                 }
             }
         }
         
-        // If no SNI match found, return unrestricted site if available
+        // If we have a domain to match, find the corresponding site
+        if let Some(domain) = domain_to_match {
+            // Find site manager using cached WildMatch patterns (more efficient)
+            if let Some((site_manager, _)) = self.cached_patterns.iter().find(|(_, patterns)| {
+                patterns.iter().any(|pattern| pattern.matches(&domain))
+            }) {
+                return Some(site_manager.clone());
+            }
+        }
+        
+        // If no domain match found, return unrestricted site if available
         unrestricted_site.cloned()
     }
 }
@@ -211,8 +226,8 @@ where
         // Extract content type from request headers
         let request_content_type = extract_content_type_from_request(&request);
 
-        // Find site by SNI from TLS context if available
-        let site = self.find_site_by_sni(&ctx);
+        // Find site by domain from either Host header (HTTP) or SNI (HTTPS)
+        let site = self.find_site_by_domain(&ctx, &request);
         let site_domain = site.as_ref().map(|sm| sm.site_name());
 
         // Create and insert HttpWardContext into the context
@@ -246,7 +261,7 @@ mod tests {
     use std::sync::Arc;
     
     #[tokio::test]
-    async fn test_find_site_by_sni_with_unrestricted_site() {
+    async fn test_find_site_by_domain_with_unrestricted_site() {
         // Create site config with no domains (unrestricted)
         let mut site_config = SiteConfig::default();
         site_config.domain = "".to_string(); // Empty domain means unrestricted
@@ -267,9 +282,10 @@ mod tests {
         // Create request enricher service
         let service = RequestEnricherService::new((), server_instance_arc.clone());
         
-        // Test with empty context (no SNI)
+        // Test with empty context (no SNI) and empty request
         let ctx = Context::default();
-        let found_site = service.find_site_by_sni(&ctx);
+        let request = Request::builder().body(Body::empty()).unwrap();
+        let found_site = service.find_site_by_domain(&ctx, &request);
         
         // Should return the unrestricted site
         assert!(found_site.is_some());
@@ -277,7 +293,7 @@ mod tests {
     }
     
     #[tokio::test]
-    async fn test_find_site_by_sni_prefer_domain_match_over_unrestricted() {
+    async fn test_find_site_by_domain_prefer_domain_match_over_unrestricted() {
         // Create unrestricted site
         let mut unrestricted_config = SiteConfig::default();
         unrestricted_config.domain = "".to_string();
@@ -299,15 +315,110 @@ mod tests {
         // Create request enricher service
         let service = RequestEnricherService::new((), server_instance_arc.clone());
         
-        // Test with context that has SNI matching domain site
+        // Test with context and request that has no Host header and no SNI
         let ctx = Context::default();
-        // Note: In real scenario, SNI would be in TLS context, but for this test
-        // we're testing the fallback behavior when no SNI match is found
-        
-        let found_site = service.find_site_by_sni(&ctx);
+        let request = Request::builder().body(Body::empty()).unwrap();
+        let found_site = service.find_site_by_domain(&ctx, &request);
         
         // Should return the unrestricted site since no SNI match found
         assert!(found_site.is_some());
         assert_eq!(found_site.unwrap().site_name(), "");
+    }
+    
+    #[tokio::test]
+    async fn test_find_site_by_domain_with_host_header() {
+        // Create domain-specific site
+        let mut domain_config = SiteConfig::default();
+        domain_config.domain = "example.com".to_string();
+        let domain_site = SiteManager::new(Arc::new(domain_config)).unwrap();
+        
+        // Create server instance with domain site
+        let server_instance = ServerInstance {
+            bind: ListenerKey { host: "127.0.0.1".to_string(), port: 8080 },
+            site_managers: vec![Arc::new(domain_site)],
+            global: GlobalConfig::default(),
+        };
+        let server_instance_arc = Arc::new(server_instance);
+        
+        // Create request enricher service
+        let service = RequestEnricherService::new((), server_instance_arc.clone());
+        
+        // Test with request that has Host header
+        let ctx = Context::default();
+        let request = Request::builder()
+            .header("host", "example.com")
+            .body(Body::empty())
+            .unwrap();
+        let found_site = service.find_site_by_domain(&ctx, &request);
+        
+        // Should return the domain-specific site
+        assert!(found_site.is_some());
+        assert_eq!(found_site.unwrap().site_name(), "example.com");
+    }
+    
+    #[tokio::test]
+    async fn test_find_site_by_domain_with_port_in_host_header() {
+        // Create domain-specific site
+        let mut domain_config = SiteConfig::default();
+        domain_config.domain = "example.com".to_string();
+        let domain_site = SiteManager::new(Arc::new(domain_config)).unwrap();
+        
+        // Create server instance with domain site
+        let server_instance = ServerInstance {
+            bind: ListenerKey { host: "127.0.0.1".to_string(), port: 8080 },
+            site_managers: vec![Arc::new(domain_site)],
+            global: GlobalConfig::default(),
+        };
+        let server_instance_arc = Arc::new(server_instance);
+        
+        // Create request enricher service
+        let service = RequestEnricherService::new((), server_instance_arc.clone());
+        
+        // Test with request that has Host header with port
+        let ctx = Context::default();
+        let request = Request::builder()
+            .header("host", "example.com:8080")
+            .body(Body::empty())
+            .unwrap();
+        let found_site = service.find_site_by_domain(&ctx, &request);
+        
+        // Should return the domain-specific site (port should be stripped)
+        assert!(found_site.is_some());
+        assert_eq!(found_site.unwrap().site_name(), "example.com");
+    }
+    
+    #[tokio::test]
+    async fn test_find_site_by_domain_host_header_takes_precedence() {
+        // Create two different domain sites
+        let mut config1 = SiteConfig::default();
+        config1.domain = "example.com".to_string();
+        let site1 = SiteManager::new(Arc::new(config1)).unwrap();
+        
+        let mut config2 = SiteConfig::default();
+        config2.domain = "other.com".to_string();
+        let site2 = SiteManager::new(Arc::new(config2)).unwrap();
+        
+        // Create server instance with both sites
+        let server_instance = ServerInstance {
+            bind: ListenerKey { host: "127.0.0.1".to_string(), port: 8080 },
+            site_managers: vec![Arc::new(site1), Arc::new(site2)],
+            global: GlobalConfig::default(),
+        };
+        let server_instance_arc = Arc::new(server_instance);
+        
+        // Create request enricher service
+        let service = RequestEnricherService::new((), server_instance_arc.clone());
+        
+        // Test with request that has Host header (should match example.com)
+        let ctx = Context::default();
+        let request = Request::builder()
+            .header("host", "example.com")
+            .body(Body::empty())
+            .unwrap();
+        let found_site = service.find_site_by_domain(&ctx, &request);
+        
+        // Should return example.com site
+        assert!(found_site.is_some());
+        assert_eq!(found_site.unwrap().site_name(), "example.com");
     }
 }

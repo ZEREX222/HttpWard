@@ -1,16 +1,13 @@
+use crate::core::error::ErrorHandler;
+use crate::core::middleware::{DynamicModuleLoaderLayer, ErrorHandlerLayer, LogLayer, RequestEnricherLayer, ResponseEnricherLayer, RouteLayer};
+use crate::server::tls::tls::TlsConfigBuilder;
+use httpward_core::core::server_models::server_instance::ServerInstance;
 use rama::{graceful::Shutdown, http::{
     server::HttpServer, Body, Request, Response,
     StatusCode,
 }, layer::Layer, net::address::SocketAddress, rt::Executor, service::service_fn, tcp::server::TcpListener, tls::rustls::server::TlsAcceptorLayer, Context};
-use rama::net::fingerprint::Ja4;
-use rama::net::tls::{ProtocolVersion, SecureTransport};
 use std::sync::Arc;
-use tracing::{error, info, warn};
-use httpward_core::core::context::HttpWardContext;
-use crate::core::middleware::{LogLayer, RequestEnricherLayer, ResponseEnricherLayer, RouteLayer, ErrorHandlerLayer, DynamicModuleLoaderLayer};
-use crate::core::error::ErrorHandler;
-use httpward_core::core::server_models::server_instance::ServerInstance;
-use crate::server::tls::tls::TlsConfigBuilder;
+use tracing::{info, warn};
 
 /// HttpWard HTTP/TLS server
 pub struct HttpWardServer {

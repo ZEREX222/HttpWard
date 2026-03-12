@@ -72,22 +72,28 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
             for site_config in sites {
                 match SiteManager::new(Arc::new(site_config.clone())) {
                     Ok(mut site_manager) => {
-                        // Add TLS mappings to the site manager
+                        // Add TLS mappings to the site manager only for the current listener with TLS
+                        // Find the listener that matches this server instance
                         for listener in get_effective_listeners(&site_config, &config.global) {
-                            if let Some(paths) = resolve_site_tls(&site_config, &listener) {
-                                let domains = site_config.get_all_domains();
-                                
-                                // Use domains from site config, or fallback to localhost for global sites
-                                let tls_domains = if domains.is_empty() {
-                                    vec!["localhost".to_string(), "127.0.0.1".to_string()]
-                                } else {
-                                    domains
-                                };
-                                
-                                site_manager.add_tls_mapping(TlsMapping {
-                                    domains: tls_domains,
-                                    paths,
-                                });
+                            if listener.host == key.host && listener.port == key.port {
+                                if listener.tls.is_some() {
+                                    if let Some(paths) = resolve_site_tls(&site_config, &listener) {
+                                        let domains = site_config.get_all_domains();
+                                        
+                                        // Use domains from site config, or fallback to localhost for global sites
+                                        let tls_domains = if domains.is_empty() {
+                                            vec!["localhost".to_string(), "127.0.0.1".to_string()]
+                                        } else {
+                                            domains
+                                        };
+                                        
+                                        site_manager.add_tls_mapping(TlsMapping {
+                                            domains: tls_domains,
+                                            paths,
+                                        });
+                                    }
+                                }
+                                break; // Found the matching listener, no need to check others
                             }
                         }
                         

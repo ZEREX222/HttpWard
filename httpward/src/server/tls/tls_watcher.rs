@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use notify::{Watcher, RecursiveMode, RecommendedWatcher, Event, EventKind};
@@ -11,6 +11,63 @@ use tracing::{info, error};
 use httpward_core::core::server_models::site_manager::TlsMapping;
 use super::tls::{FallbackSniResolver, build_certified_key, TlsError};
 use rama_tls_rustls::dep::rustls::sign::CertifiedKey;
+
+/// Global TlsFileWatcher manager to prevent duplicate watchers
+static TLS_WATCHER_MANAGER: OnceLock<Arc<TlsWatcherManager>> = OnceLock::new();
+
+/// Global manager for TLS file watchers to ensure uniqueness
+pub struct TlsWatcherManager {
+    unique_files: Arc<tokio::sync::RwLock<std::collections::HashSet<PathBuf>>>,
+}
+
+impl TlsWatcherManager {
+    /// Get or create the global watcher manager instance
+    pub fn instance() -> Arc<Self> {
+        TLS_WATCHER_MANAGER.get_or_init(|| {
+            Arc::new(Self {
+                unique_files: Arc::new(tokio::sync::RwLock::new(std::collections::HashSet::new())),
+            })
+        }).clone()
+    }
+
+    /// Register mappings and ensure unique watchers are created
+    pub async fn register_mappings(&self, mappings: Vec<TlsMapping>, resolver: Arc<FallbackSniResolver>) -> Result<(), TlsError> {
+        let mut unique_files = std::collections::HashSet::new();
+        
+        // Collect all unique files from mappings
+        for mapping in &mappings {
+            unique_files.insert(mapping.paths.cert.clone());
+            unique_files.insert(mapping.paths.key.clone());
+        }
+
+        // Check which files are not already being watched
+        let mut files_to_watch = Vec::new();
+        {
+            let mut watched_files = self.unique_files.write().await;
+            for file_path in unique_files {
+                if !watched_files.contains(&file_path) {
+                    watched_files.insert(file_path.clone());
+                    files_to_watch.push(file_path);
+                }
+            }
+        }
+
+        // Create watcher only for new files
+        if !files_to_watch.is_empty() {
+            let watcher = TlsFileWatcher::new(mappings, resolver.clone())
+                .with_debounce_delay(Duration::from_millis(1000));
+            
+            // Start the watcher in background
+            tokio::spawn(async move {
+                if let Err(e) = watcher.run().await {
+                    error!("TLS file watcher error: {:?}", e);
+                }
+            });
+        }
+
+        Ok(())
+    }
+}
 
 /// File watcher for TLS certificate changes with debouncing
 pub struct TlsFileWatcher {
@@ -31,7 +88,7 @@ impl TlsFileWatcher {
             mappings,
             resolver,
             file_to_domains,
-            debounce_delay: Duration::from_millis(500), // 500ms debounce delay
+            debounce_delay: Duration::from_millis(1000), // 1000ms debounce delay
         }
     }
 
@@ -45,7 +102,7 @@ impl TlsFileWatcher {
             mappings,
             resolver,
             file_to_domains,
-            debounce_delay: Duration::from_millis(500), // 500ms debounce delay
+            debounce_delay: Duration::from_millis(1000), // 1000ms debounce delay
         }
     }
 
@@ -98,7 +155,7 @@ impl TlsFileWatcher {
             notify::Config::default(),
         )?;
 
-        // Watch all certificate and key files
+        // Watch all certificate and key files (deduplicated)
         let mut watched_paths = std::collections::HashSet::new();
         for mapping in &self.mappings {
             if !watched_paths.contains(&mapping.paths.cert) {

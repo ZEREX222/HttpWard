@@ -19,7 +19,7 @@ use tracing::{info, warn, error};
 
 use httpward_core::core::server_models::site_manager::TlsMapping;
 use crate::server::tls::domain_store::{Cert, DomainStore};
-use super::tls_watcher::TlsFileWatcher;
+use super::tls_watcher::{TlsWatcherManager};
 
 
 
@@ -70,17 +70,11 @@ impl TlsConfigBuilder {
         // Create resolver directly from mappings using DomainStore
         let resolver = Arc::new(FallbackSniResolver::from_mappings(self.mappings.clone()).await?);
 
-        // Watcher to update certificates if they were changed
-        let watcher = TlsFileWatcher::new(
-            self.mappings, 
-            resolver.clone(),
-        ).with_debounce_delay(std::time::Duration::from_millis(1000));
-
-        tokio::spawn(async move {
-            if let Err(e) = watcher.run().await {
-                error!("TLS file watcher error: {:?}", e);
-            }
-        });
+        // Register mappings with global watcher manager to ensure unique watchers
+        let watcher_manager = TlsWatcherManager::instance();
+        if let Err(e) = watcher_manager.register_mappings(self.mappings.clone(), resolver.clone()).await {
+            error!("Failed to register TLS mappings with watcher manager: {:?}", e);
+        }
 
         // Build rustls server config with custom resolver
         let mut server_config = ServerConfig::builder()
