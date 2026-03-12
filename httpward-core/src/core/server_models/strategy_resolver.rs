@@ -111,13 +111,29 @@ impl StrategyResolver {
 
         let resolved = match strategy_ref {
             Some(StrategyRef::InlineMiddleware(m)) => {
-                // Inline middleware should inherit from global default strategy
+                // Inline middleware should inherit from site strategy first, then global default
                 let mut merged = m.clone();
                 
-                // Supplement with global default strategy if it exists
+                // First, supplement with site strategy if it exists
+                if let Some(StrategyRef::Named(site_strategy_name)) = &site.strategy {
+                    if let Some(site_strategy_vec) = merged_site.get(site_strategy_name) {
+                        supplement_middleware(&mut merged, site_strategy_vec.as_ref().as_slice())?;
+                    }
+                }
+                
+                // Then, supplement with global default strategy if it exists and is different
                 if let Some(StrategyRef::Named(default_strategy_name)) = &global_default {
-                    if let Some(global_default_vec) = merged_site.get(default_strategy_name) {
-                        supplement_middleware(&mut merged, global_default_vec.as_ref().as_slice())?;
+                    // Only supplement if site strategy is different from global default
+                    let site_strategy_name = site.strategy.as_ref()
+                        .and_then(|s| match s {
+                            StrategyRef::Named(name) => Some(name.clone()),
+                            _ => None,
+                        });
+                    
+                    if site_strategy_name.as_ref() != Some(default_strategy_name) {
+                        if let Some(global_default_vec) = merged_site.get(default_strategy_name) {
+                            supplement_middleware(&mut merged, global_default_vec.as_ref().as_slice())?;
+                        }
                     }
                 }
                 
@@ -828,3 +844,4 @@ mod tests {
         println!("✅ Inline strategy works correctly without global default");
     }
 }
+
