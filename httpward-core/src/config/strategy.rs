@@ -69,9 +69,21 @@ fn merge_yaml_missing_only(target: &mut Value, source: Value) {
     
     if let (Value::Mapping(target_map), Value::Mapping(source_map)) = (&mut *target, &source) {
         for (k, v) in source_map {
-            // Only add if key doesn't exist in target
             if !target_map.contains_key(&k) {
+                // Key doesn't exist at all - add it
                 target_map.insert(k.clone(), v.clone());
+            } else {
+                // Key exists - check if we can recursively merge objects
+                match (target_map.get_mut(&k), &v) {
+                    (Some(Value::Mapping(_)), Value::Mapping(_)) => {
+                        // Both are mappings - recursively merge missing fields only
+                        let target_value = target_map.get_mut(&k).unwrap();
+                        merge_yaml_missing_only(target_value, v.clone());
+                    }
+                    _ => {
+                        // Target is not a mapping or source is not a mapping - don't overwrite
+                    }
+                }
             }
         }
     } else if is_null {
