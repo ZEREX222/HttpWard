@@ -228,6 +228,7 @@ fn default_strategy() -> Option<StrategyRef> {
 mod tests {
     use super::*;
     use crate::config::strategy::StrategyRef;
+    use crate::config::MiddlewareConfig;
 
     #[test]
     fn test_global_default_strategy() {
@@ -283,14 +284,23 @@ mod tests {
             ])
         };
         
-        config.strategy = Some(StrategyRef::Inline(inline_strategy));
+        config.strategy = Some(StrategyRef::InlineMiddleware(vec![
+            MiddlewareConfig::new_named_json(
+                "rate_limit".to_string(),
+                serde_json::json!({"requests": 1000, "window": "1m"})
+            ),
+            MiddlewareConfig::new_named_json(
+                "logging".to_string(),
+                serde_json::json!({"level": "debug"})
+            )
+        ]));
         
         // Should resolve the inline strategy
         let resolved = config.get_default_strategy();
         assert!(resolved.is_some());
         
         let strategy = resolved.unwrap();
-        assert_eq!(strategy.name, "inline_test");
+        assert_eq!(strategy.name, "inline");
         assert_eq!(strategy.middleware.len(), 2);
         assert_eq!(strategy.middleware[0].name(), "rate_limit");
         assert_eq!(strategy.middleware[1].name(), "logging");

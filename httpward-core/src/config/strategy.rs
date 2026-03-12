@@ -397,7 +397,7 @@ impl Strategy {
 #[serde(untagged)]
 pub enum StrategyRef {
     Named(String),
-    Inline(Strategy),
+    InlineMiddleware(Vec<MiddlewareConfig>),
 }
 
 impl StrategyRef {
@@ -407,7 +407,10 @@ impl StrategyRef {
                 name: name.clone(),
                 middleware: Arc::new(middleware.clone()),
             }),
-            StrategyRef::Inline(strategy) => Some(strategy.clone()),
+            StrategyRef::InlineMiddleware(middleware) => Some(Strategy {
+                name: "inline".to_string(),
+                middleware: Arc::new(middleware.clone()),
+            }),
         }
     }
 }
@@ -574,11 +577,9 @@ middleware:
     }
 
     #[test]
-    fn test_strategy_ref_inline_collection() {
-        // Test Inline(Strategy) functionality
+    fn test_strategy_ref_inline_middleware_collection() {
+        // Test InlineMiddleware(Vec<MiddlewareConfig>) functionality
         let inline_yaml = r#"
-name: "inline_strategy"
-middleware:
   - rate_limit:
       requests: 100
       window: "1m"
@@ -587,16 +588,12 @@ middleware:
       format: json
 "#;
 
-        let inline_strategy: Strategy = serde_yaml::from_str(inline_yaml).unwrap();
-        assert_eq!(inline_strategy.name, "inline_strategy");
-        assert_eq!(inline_strategy.middleware.len(), 2);
-        
-        let strategy_ref = StrategyRef::Inline(inline_strategy);
+        let strategy_ref: StrategyRef = serde_yaml::from_str(inline_yaml).unwrap();
         let resolved = strategy_ref.resolve(&LegacyStrategyCollection::new());
         
         assert!(resolved.is_some());
         let strategy = resolved.unwrap();
-        assert_eq!(strategy.name, "inline_strategy");
+        assert_eq!(strategy.name, "inline");
         assert_eq!(strategy.middleware.len(), 2);
         
         // Check rate_limit middleware
@@ -640,19 +637,16 @@ middleware:
         assert_eq!(named_resolved.name, "test");
         assert_eq!(named_resolved.middleware.len(), 1);
         
-        // Test Inline strategy
-        let inline_strategy = Strategy {
-            name: "inline_test".to_string(),
-            middleware: Arc::new(vec![
-                MiddlewareConfig::new_named_json(
-                    "logging".to_string(),
-                    json!({"level": "info"})
-                )
-            ])
-        };
-        let inline_ref = StrategyRef::Inline(inline_strategy);
+        // Test Inline middleware strategy
+        let inline_middleware = vec![
+            MiddlewareConfig::new_named_json(
+                "logging".to_string(),
+                json!({"level": "info"})
+            )
+        ];
+        let inline_ref = StrategyRef::InlineMiddleware(inline_middleware);
         let inline_resolved = inline_ref.resolve(&strategies).unwrap();
-        assert_eq!(inline_resolved.name, "inline_test");
+        assert_eq!(inline_resolved.name, "inline");
         assert_eq!(inline_resolved.middleware.len(), 1);
     }
 
@@ -887,5 +881,47 @@ max_size: 1000
         assert_eq!(config["new_bool"], false);
         assert_eq!(config["new_array"], json!([7, 8, 9]));
         assert_eq!(config["new_object"], json!({"added": "yes"}));
+    }
+
+    #[test]
+    fn test_inline_middleware_strategy_ref() {
+        let yaml_str = r#"
+    - rate_limit:
+        requests: 100
+        window: "1m"
+    - logging:
+        level: debug
+    "#;
+        
+        let strategy_ref: StrategyRef = serde_yaml::from_str(yaml_str).unwrap();
+        
+        match strategy_ref {
+            StrategyRef::InlineMiddleware(middleware) => {
+                assert_eq!(middleware.len(), 2);
+                assert_eq!(middleware[0].name(), "rate_limit");
+                assert_eq!(middleware[1].name(), "logging");
+            }
+            _ => panic!("Expected InlineMiddleware variant"),
+        }
+    }
+
+    #[test]
+    fn test_inline_middleware_strategy_ref_resolution() {
+        let yaml_str = r#"
+    - rate_limit:
+        requests: 50
+        window: "30s"
+    - logging:
+        level: info
+    "#;
+        
+        let strategy_ref: StrategyRef = serde_yaml::from_str(yaml_str).unwrap();
+        let strategies = LegacyStrategyCollection::new();
+        
+        let resolved = strategy_ref.resolve(&strategies).unwrap();
+        assert_eq!(resolved.name, "inline");
+        assert_eq!(resolved.middleware.len(), 2);
+        assert_eq!(resolved.middleware[0].name(), "rate_limit");
+        assert_eq!(resolved.middleware[1].name(), "logging");
     }
 }

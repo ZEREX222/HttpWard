@@ -54,7 +54,7 @@ impl StrategyResolver {
                 if let (Some(site_default_ref), Some(global_default_ref)) = (&site.strategy, &global.strategy) {
                     let site_default_name = match site_default_ref {
                         StrategyRef::Named(name) => name,
-                        StrategyRef::Inline(_) => {
+                        StrategyRef::InlineMiddleware(_) => {
                             merged_site_map.insert(name.clone(), site_arc);
                             continue;
                         }
@@ -63,7 +63,7 @@ impl StrategyResolver {
                     if name == site_default_name {
                         let global_default_name = match global_default_ref {
                             StrategyRef::Named(name) => name,
-                            StrategyRef::Inline(_) => {
+                            StrategyRef::InlineMiddleware(_) => {
                                 merged_site_map.insert(name.clone(), site_arc);
                                 continue;
                             }
@@ -166,15 +166,13 @@ impl StrategyResolver {
         let strategy_ref = Self::get_chosen_strategy_ref_static(route, site, None, global_default);
 
         let resolved = match strategy_ref {
-            Some(StrategyRef::Inline(mut inline)) => {
-                // Inline strategy - treat as final by default
-                if supplement_inline_with_parents {
-                    // Optional: supplement inline with parent strategies
-                    if let Some(parent_strategy) = Self::find_named_strategy_static(&inline.name, route, merged_site, false) {
-                        inline.supplement_with(parent_strategy.middleware.as_ref().clone())?;
-                    }
-                }
-                Some(Arc::new(inline))
+            Some(StrategyRef::InlineMiddleware(middleware)) => {
+                // Inline middleware array - create strategy with default name
+                let strategy = Strategy {
+                    name: "inline".to_string(),
+                    middleware: Arc::new(middleware),
+                };
+                Some(Arc::new(strategy))
             }
             Some(StrategyRef::Named(name)) => {
                 // Find named strategy with proper inheritance chain
@@ -201,9 +199,13 @@ impl StrategyResolver {
     pub fn resolve_for_site(&self, site: &SiteConfig) -> Result<Option<Arc<Strategy>>> {
         if let Some(strategy_ref) = &site.strategy {
             match strategy_ref {
-                StrategyRef::Inline(inline) => {
-                    debug!("Resolving inline site strategy: {}", inline.name);
-                    Ok(Some(Arc::new(inline.clone())))
+                StrategyRef::InlineMiddleware(middleware) => {
+                    debug!("Resolving inline middleware site strategy");
+                    let strategy = Strategy {
+                        name: "inline".to_string(),
+                        middleware: Arc::new(middleware.clone()),
+                    };
+                    Ok(Some(Arc::new(strategy)))
                 }
                 StrategyRef::Named(name) => {
                     debug!("Resolving named site strategy: {}", name);
@@ -413,27 +415,22 @@ mod tests {
     }
 
     #[test]
-    fn test_inline_strategy_resolution() {
+    fn test_inline_middleware_strategy_resolution() {
         let global = create_test_global();
         let site = create_test_site();
         let resolver = StrategyResolver::new(&site, &global).unwrap();
         
-        let inline_strategy = Strategy {
-            name: "inline_test".to_string(),
-            middleware: Arc::new(vec![
-                MiddlewareConfig::new_named_json(
-                    "cors".to_string(),
-                    json!({"origins": ["*"]})
-                ),
-            ])
-        };
-        
-        // Create a site with inline strategy
+        // Create a site with inline middleware strategy
         let mut site_inline = site.clone();
         site_inline.routes[0] = Route::Proxy {
             r#match: Default::default(),
             backend: "http://backend".to_string(),
-            strategy: Some(StrategyRef::Inline(inline_strategy.clone())),
+            strategy: Some(StrategyRef::InlineMiddleware(vec![
+                MiddlewareConfig::new_named_json(
+                    "cors".to_string(),
+                    json!({"origins": ["*"]})
+                ),
+            ])),
             strategies: None,
         };
         
@@ -443,7 +440,7 @@ mod tests {
         
         assert!(resolved.is_some());
         let strategy = resolved.unwrap();
-        assert_eq!(strategy.name, "inline_test");
+        assert_eq!(strategy.name, "inline");
         assert_eq!(strategy.middleware.len(), 1);
         assert_eq!(strategy.middleware[0].name(), "cors");
     }
