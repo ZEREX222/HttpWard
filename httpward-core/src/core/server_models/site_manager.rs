@@ -262,6 +262,29 @@ impl SiteManager {
         self.routes_with_strategy.iter().map(|rws| rws.route.clone()).collect()
     }
 
+    /// Get all unique active middleware names used by strategies in this site (excludes Off middleware)
+    pub fn get_active_middleware_names(&self) -> Vec<String> {
+        use std::collections::HashSet;
+        
+        let mut middleware_names = HashSet::new();
+        for route_with_strategy in &self.routes_with_strategy {
+            for middleware_config in route_with_strategy.active_strategy.middleware.iter() {
+                match middleware_config {
+                    crate::config::strategy::MiddlewareConfig::Named { name, .. } => {
+                        middleware_names.insert(name.clone());
+                    },
+                    crate::config::strategy::MiddlewareConfig::Off { name: _ } => {
+                        // Skip Off middleware - they are disabled
+                    },
+                }
+            }
+        }
+        
+        let mut result: Vec<String> = middleware_names.into_iter().collect();
+        result.sort(); // Сортируем для консистентности
+        result
+    }
+
     /// Get site primary domain
     pub fn site_name(&self) -> &str {
         &self.site_config.domain
@@ -416,6 +439,71 @@ mod tests {
             let config = rate_limit.config_as_json().unwrap();
             assert_eq!(config["requests"], 500); // Site value
             assert_eq!(config["window"], "1m"); // Inherited from global
+        }
+
+        #[test]
+        fn test_get_active_middleware_names() {
+            let global_config = create_test_global_config();
+            let site_config = Arc::new(create_test_site_config_with_strategies());
+            let site_manager = SiteManager::new(site_config, Some(&global_config)).unwrap();
+
+            let middleware_names = site_manager.get_active_middleware_names();
+            
+            // Should contain middleware names from the strategy: rate_limit, auth, logging
+            assert_eq!(middleware_names.len(), 3);
+            assert!(middleware_names.contains(&"rate_limit".to_string()));
+            assert!(middleware_names.contains(&"auth".to_string()));
+            assert!(middleware_names.contains(&"logging".to_string()));
+        }
+
+        #[test]
+        fn test_get_active_middleware_names_excludes_off() {
+            use crate::config::strategy::{MiddlewareConfig, StrategyRef};
+            use crate::config::StrategyCollection;
+            
+            let global_config = create_test_global_config();
+            
+            // Create site config with Off middleware
+            let mut strategies = StrategyCollection::new();
+            strategies.insert(
+                "mixed_strategy".to_string(),
+                vec![
+                    MiddlewareConfig::new_named_json(
+                        "rate_limit".to_string(),
+                        json!({"requests": 100})
+                    ),
+                    MiddlewareConfig::Off { name: "logging".to_string() }, // Disabled middleware
+                    MiddlewareConfig::new_named_json(
+                        "cors".to_string(),
+                        json!({"origins": "*"})
+                    ),
+                ]
+            );
+
+            let site_config = SiteConfig {
+                domain: "test.example.com".to_string(),
+                domains: vec![],
+                listeners: vec![],
+                routes: vec![
+                    Route::Proxy {
+                        r#match: Match { path: Some("/api".to_string()), ..Default::default() },
+                        backend: "http://backend".to_string(),
+                        strategy: Some(StrategyRef::Named("mixed_strategy".to_string())),
+                        strategies: None,
+                    }
+                ],
+                strategy: Some(StrategyRef::Named("mixed_strategy".to_string())),
+                strategies,
+            };
+
+            let site_manager = SiteManager::new(Arc::new(site_config), Some(&global_config)).unwrap();
+            let middleware_names = site_manager.get_active_middleware_names();
+            
+            // Should only contain active middleware, exclude "logging" which is Off
+            assert_eq!(middleware_names.len(), 2);
+            assert!(middleware_names.contains(&"rate_limit".to_string()));
+            assert!(middleware_names.contains(&"cors".to_string()));
+            assert!(!middleware_names.contains(&"logging".to_string())); // Should be excluded
         }
     }
 }
