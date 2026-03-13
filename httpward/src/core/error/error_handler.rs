@@ -4,21 +4,27 @@ use std::path::Path;
 
 #[derive(Clone, Debug)]
 pub struct ErrorHandler {
-    template_content: String,
+    template_content: &'static [u8],
 }
 
 impl ErrorHandler {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let template_path = Path::new("httpward/assets/error.html");
-        let template_content = fs::read_to_string(template_path)
+        let template_content = fs::read(template_path)
             .map_err(|e| format!("Failed to read error template: {}", e))?;
         
-        Ok(Self { template_content })
+        // Convert Vec<u8> to Box<[u8]> and then leak to get &'static [u8]
+        let static_content = Box::leak(template_content.into_boxed_slice());
+        
+        Ok(Self { template_content: static_content })
     }
 
     pub fn create_error_response(&self, status: StatusCode, title: &str, description: &str) -> Result<Response<Body>, Box<dyn std::error::Error>> {
         let status_code = status.as_u16();
-        let content = self.template_content
+        let template_str = std::str::from_utf8(self.template_content)
+            .map_err(|e| format!("Invalid UTF-8 in template: {}", e))?;
+        
+        let content = template_str
             .replace("{{e_num}}", &status_code.to_string())
             .replace("{{e_text}}", title)
             .replace("{{e_desc}}", description);
@@ -68,9 +74,9 @@ impl ErrorHandler {
 
 impl Default for ErrorHandler {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|_| Self {
-            template_content: include_str!("../../../assets/error.html").to_string(),
-        })
+        Self {
+            template_content: include_bytes!("../../../assets/error.html"),
+        }
     }
 }
 
@@ -83,9 +89,10 @@ mod tests {
     fn test_error_handler_creation() {
         let handler = ErrorHandler::default();
         assert!(!handler.template_content.is_empty());
-        assert!(handler.template_content.contains("{{e_num}}"));
-        assert!(handler.template_content.contains("{{e_text}}"));
-        assert!(handler.template_content.contains("{{e_desc}}"));
+        let template_str = std::str::from_utf8(handler.template_content).unwrap();
+        assert!(template_str.contains("{{e_num}}"));
+        assert!(template_str.contains("{{e_text}}"));
+        assert!(template_str.contains("{{e_desc}}"));
     }
 
     #[test]
@@ -120,15 +127,15 @@ mod tests {
     #[test]
     fn test_template_replacement() {
         let handler = ErrorHandler::default();
-        let template = handler.template_content.clone();
+        let template_str = std::str::from_utf8(handler.template_content).unwrap();
         
         // Test that template contains placeholders
-        assert!(template.contains("{{e_num}}"));
-        assert!(template.contains("{{e_text}}"));
-        assert!(template.contains("{{e_desc}}"));
+        assert!(template_str.contains("{{e_num}}"));
+        assert!(template_str.contains("{{e_text}}"));
+        assert!(template_str.contains("{{e_desc}}"));
         
         // Test replacement logic
-        let result = template
+        let result = template_str
             .replace("{{e_num}}", "404")
             .replace("{{e_text}}", "Not Found")
             .replace("{{e_desc}}", "Page not found");
