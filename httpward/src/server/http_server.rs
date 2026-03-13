@@ -1,4 +1,4 @@
-use crate::core::error::ErrorHandler;
+use httpward_core::error::ErrorHandler;
 use crate::core::middleware::{DynamicModuleLoaderLayer, ErrorHandlerLayer, LogLayer, RequestEnricherLayer, ResponseEnricherLayer, RouteLayer};
 use crate::server::tls::tls::TlsConfigBuilder;
 use httpward_core::core::server_models::server_instance::ServerInstance;

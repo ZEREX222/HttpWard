@@ -6,7 +6,7 @@ use rama::{
 };
 use std::fmt::Debug;
 use tracing::{error, warn, info};
-use crate::core::error::ErrorHandler;
+use httpward_core::error::ErrorHandler;
 use httpward_core::httpward_middleware::{IsHttpWardError, HttpWardMiddlewareError};
 
 /// Layer that provides consistent error handling

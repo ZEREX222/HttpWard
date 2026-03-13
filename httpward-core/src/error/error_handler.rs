@@ -9,7 +9,7 @@ pub struct ErrorHandler {
 
 impl ErrorHandler {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let template_path = Path::new("httpward/assets/error.html");
+        let template_path = Path::new("httpward-core/assets/error.html");
         let template_content = fs::read(template_path)
             .map_err(|e| format!("Failed to read error template: {}", e))?;
         
@@ -75,7 +75,7 @@ impl ErrorHandler {
 impl Default for ErrorHandler {
     fn default() -> Self {
         Self {
-            template_content: include_bytes!("../../../assets/error.html"),
+            template_content: include_bytes!("../../assets/error.html"),
         }
     }
 }

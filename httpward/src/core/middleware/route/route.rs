@@ -12,7 +12,7 @@ use httpward_core::config::{GlobalConfig, Redirect, Route};
 use httpward_core::core::HttpWardContext;
 use httpward_core::core::server_models::server_instance::ServerInstance;
 use httpward_core::core::server_models::listener::ListenerKey;
-use crate::core::error::ErrorHandler;
+use httpward_core::error::ErrorHandler;
 use super::{
     proxy::{ProxyHandler, ProxyError},
     websocket::{WebSocketHandler, WebSocketError},
