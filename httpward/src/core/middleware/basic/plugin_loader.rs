@@ -13,11 +13,13 @@ use httpward_core::httpward_middleware::pipe::MiddlewareFatPtr;
 type CreateFn = unsafe extern "C" fn() -> MiddlewareFatPtr;
 type DestroyFn = unsafe extern "C" fn(MiddlewareFatPtr);
 
+
 /// A loaded plugin.
 /// Keeps the `Library` alive as long as plugin is used.
 pub struct LoadedPlugin {
-    lib: Library,
-    ptr: MiddlewareFatPtr,
+    lib: Option<Library>,
+    destroy: Option<DestroyFn>,
+    ptr: Option<MiddlewareFatPtr>,
 }
 
 impl LoadedPlugin {
@@ -29,11 +31,23 @@ impl LoadedPlugin {
         tracing::info!(target: "plugin_loader", "Library loaded, getting function symbols");
         // get symbols
         let create: libloading::Symbol<CreateFn> = unsafe { lib.get(b"create_middleware")? };
-        let _destroy: libloading::Symbol<DestroyFn> = unsafe { lib.get(b"destroy_middleware")? };
+        let destroy: libloading::Symbol<DestroyFn> = unsafe { lib.get(b"destroy_middleware")? };
         tracing::info!(target: "plugin_loader", "Function symbols obtained, creating middleware instance");
         let ptr = unsafe { create() };
         tracing::info!(target: "plugin_loader", "Middleware instance created successfully");
-        Ok(Self { lib, ptr })
+        // Copy the function pointers before moving lib
+        let destroy_fn = *destroy;
+        Ok(Self { lib: Some(lib), destroy: Some(destroy_fn), ptr: Some(ptr) })
+    }
+
+    /// Manually destroy the plugin and free resources.
+    /// This is called automatically when LoadedPlugin is dropped.
+    pub unsafe fn destroy(mut self) {
+        tracing::info!(target: "plugin_loader", "Destroying plugin instance");
+        if let (Some(destroy_fn), Some(ptr)) = (self.destroy.take(), self.ptr.take()) {
+            unsafe { destroy_fn(ptr) };
+        }
+        // Library will be dropped automatically
     }
 
     /// Convert internal pointer into BoxedMiddleware (Arc<dyn HttpWardMiddleware>).
@@ -44,18 +58,33 @@ impl LoadedPlugin {
     /// Implementation approach:
     /// - Reconstruct Box<dyn HttpWardMiddleware> from raw pointer
     /// - Convert Box -> Arc
-    pub fn into_boxed_middleware(self) -> Arc<dyn HttpWardMiddleware + Send + Sync> {
+    pub fn into_boxed_middleware(mut self) -> Arc<dyn HttpWardMiddleware + Send + Sync> {
         unsafe {
+            // Take the ptr before consuming self
+            let ptr = self.ptr.take().expect("ptr should be available");
+            
             // Reconstruct fat pointer from components
-            let raw = std::mem::transmute::<(*mut std::ffi::c_void, *mut std::ffi::c_void), *mut (dyn HttpWardMiddleware + Send + Sync)>((self.ptr.data, self.ptr.vtable));
+            let raw = std::mem::transmute::<(*mut std::ffi::c_void, *mut std::ffi::c_void), *mut (dyn HttpWardMiddleware + Send + Sync)>((ptr.data, ptr.vtable));
             // Reconstruct Box<dyn HttpWardMiddleware + Send + Sync>
             let boxed: Box<dyn HttpWardMiddleware + Send + Sync> = Box::from_raw(raw);
             let arc: Arc<dyn HttpWardMiddleware + Send + Sync> = Arc::from(boxed);
 
             // Forget the lib to keep it loaded
-            let lib = self.lib;
-            std::mem::forget(lib);
+            if let Some(lib) = self.lib.take() {
+                std::mem::forget(lib);
+            }
             arc
+        }
+    }
+}
+
+impl Drop for LoadedPlugin {
+    fn drop(&mut self) {
+        unsafe {
+            tracing::info!(target: "plugin_loader", "Dropping LoadedPlugin, destroying middleware instance");
+            if let (Some(destroy_fn), Some(ptr)) = (self.destroy.take(), self.ptr.take()) {
+                destroy_fn(ptr);
+            }
         }
     }
 }

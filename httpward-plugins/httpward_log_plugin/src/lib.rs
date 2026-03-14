@@ -53,6 +53,24 @@ pub extern "C" fn create_middleware() -> MiddlewareFatPtr {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn destroy_middleware(_ptr: MiddlewareFatPtr) {
-    // Intentionally do nothing, as we leak the library to keep it loaded.
+pub extern "C" fn destroy_middleware(ptr: MiddlewareFatPtr) {
+    println!("[plugin] destroy_middleware called");
+    // If either part is null, nothing to do.
+    if ptr.data.is_null() || ptr.vtable.is_null() {
+        println!("[plugin] destroy_middleware: null ptr, skipping");
+        return;
+    }
+
+    unsafe {
+        // Reconstruct a raw fat pointer *mut (dyn Trait)
+        // Transmute the tuple (data, vtable) back into a trait object pointer.
+        let raw = std::mem::transmute::<(*mut std::ffi::c_void, *mut std::ffi::c_void), *mut (dyn HttpWardMiddleware + Send + Sync)>( (ptr.data, ptr.vtable) );
+
+        // Recreate the Box and drop it here inside the plugin.
+        // This ensures free happens in the plugin's allocator.
+        let _boxed: Box<dyn HttpWardMiddleware + Send + Sync> = Box::from_raw(raw);
+        // when `_boxed` goes out of scope, it will be dropped here in the plugin
+    }
+
+    println!("[plugin] destroyed middleware");
 }
