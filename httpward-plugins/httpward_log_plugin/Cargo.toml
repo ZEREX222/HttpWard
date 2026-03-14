@@ -7,7 +7,6 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-tracing = { workspace = true }
 httpward-core = { path = "../../httpward-core" }
 async-trait = "0.1"
 rama = { workspace = true }
