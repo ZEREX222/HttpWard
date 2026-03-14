@@ -24,6 +24,7 @@ thiserror = "2.0"
 base64 = "0.22"
 sha1 = "0.10"
 http = "1.4"
+libloading = "0.8"
 
 
 [dev-dependencies]

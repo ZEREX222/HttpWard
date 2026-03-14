@@ -3,6 +3,7 @@ pub mod request_enricher;
 pub mod response_enricher;
 pub mod error_handler;
 pub mod dynamic_module_loader;
+pub mod plugin_loader;
 
 pub use log::LogLayer;
 pub use request_enricher::RequestEnricherLayer;

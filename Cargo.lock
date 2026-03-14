@@ -984,6 +984,7 @@ dependencies = [
  "base64",
  "http",
  "httpward-core",
+ "libloading",
  "notify",
  "rama",
  "rama-tls-rustls",
@@ -1024,6 +1025,16 @@ dependencies = [
  "httpward-core",
  "schemars",
  "serde_json",
+]
+
+[[package]]
+name = "httpward_log_plugin"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "httpward-core",
+ "rama",
+ "tracing",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 // File: httpward-core/src/httpward_middleware/pipe.rs
 
+use std::os::raw::c_void;
 use std::sync::Arc;
 use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use crate::httpward_middleware::next::Next;
@@ -58,6 +59,17 @@ impl HttpWardMiddlewarePipe {
     {
         let mut new_vec = (*self.inner).clone();
         new_vec.push(Arc::new(mw));
+        Self {
+            inner: Arc::new(new_vec),
+        }
+    }
+
+    /// Add a boxed middleware (Arc<dyn HttpWardMiddleware>) into the pipe.
+    /// This is useful when the middleware is created dynamically (plugins).
+    pub fn add_boxed_layer(&self, mw: BoxedMiddleware) -> Self {
+        // Clone the inner Vec and append the boxed middleware.
+        let mut new_vec = (*self.inner).clone();
+        new_vec.push(mw);
         Self {
             inner: Arc::new(new_vec),
         }
@@ -132,6 +144,13 @@ impl HttpWardMiddlewarePipeBuilder {
             inner: Arc::new(self.v),
         }
     }
+}
+
+/// C-compatible representation of a fat pointer to dyn HttpWardMiddleware.
+#[repr(C)]
+pub struct MiddlewareFatPtr {
+    pub data: *mut c_void,
+    pub vtable: *mut c_void,
 }
 
 #[cfg(test)]

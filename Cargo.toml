@@ -5,7 +5,8 @@ rust-version = "1.93.1"
 members = [
     "httpward",
     "httpward-docs",
-    "httpward-core"
+    "httpward-core",
+    "httpward-plugins/httpward_log_plugin"
 ]
 
 [workspace.dependencies]
