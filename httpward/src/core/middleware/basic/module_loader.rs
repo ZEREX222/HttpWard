@@ -1,63 +1,17 @@
 // httpward/src/core/middleware/basic/module_loader
-// Plugin loader using libloading and raw pointers.
+// Module loader using libloading and raw pointers.
 // Comments/in-code text in English.
 
 use std::path::Path;
 use std::sync::Arc;
 use std::error::Error;
-use std::ffi::CStr;
 use std::os::raw::c_char;
 use libloading::Library;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use httpward_core::httpward_middleware::pipe::MiddlewareFatPtr;
+use httpward_core::module_logging::host_functions::*;
 
-// Host logging functions for plugins with different levels
-#[unsafe(no_mangle)]
-pub extern "C" fn host_log_error(ptr: *const c_char) {
-    let msg = unsafe { CStr::from_ptr(ptr) }
-        .to_string_lossy()
-        .into_owned();
-
-    tracing::error!(target: "plugin", "[PLUGIN] {}", msg);
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn host_log_warn(ptr: *const c_char) {
-    let msg = unsafe { CStr::from_ptr(ptr) }
-        .to_string_lossy()
-        .into_owned();
-
-    tracing::warn!(target: "plugin", "[PLUGIN] {}", msg);
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn host_log_info(ptr: *const c_char) {
-    let msg = unsafe { CStr::from_ptr(ptr) }
-        .to_string_lossy()
-        .into_owned();
-
-    tracing::info!(target: "plugin", "[PLUGIN] {}", msg);
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn host_log_debug(ptr: *const c_char) {
-    let msg = unsafe { CStr::from_ptr(ptr) }
-        .to_string_lossy()
-        .into_owned();
-
-    tracing::debug!(target: "plugin", "[PLUGIN] {}", msg);
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn host_log_trace(ptr: *const c_char) {
-    let msg = unsafe { CStr::from_ptr(ptr) }
-        .to_string_lossy()
-        .into_owned();
-
-    tracing::trace!(target: "plugin", "[PLUGIN] {}", msg);
-}
-
-/// C-ABI types exported by plugin
+/// C-ABI types exported by module
 type CreateFn = unsafe extern "C" fn() -> MiddlewareFatPtr;
 type DestroyFn = unsafe extern "C" fn(MiddlewareFatPtr);
 type SetLoggerFn = unsafe extern "C" fn(
@@ -69,40 +23,40 @@ type SetLoggerFn = unsafe extern "C" fn(
 );
 
 
-/// A loaded plugin.
-/// Keeps the `Library` alive as long as plugin is used.
-pub struct LoadedPlugin {
+/// A loaded module.
+/// Keeps the `Library` alive as long as module is used.
+pub struct LoadedModule {
     lib: Option<Library>,
     destroy: Option<DestroyFn>,
     ptr: Option<MiddlewareFatPtr>,
 }
 
-impl LoadedPlugin {
-    /// Load plugin library and create middleware instance.
-    /// Safety: host and plugin must be built with the same Rust toolchain and matching core crate types.
+impl LoadedModule {
+    /// Load module library and create middleware instance.
+    /// Safety: host and module must be built with the same Rust toolchain and matching core crate types.
     pub unsafe fn load(path: &Path) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        tracing::info!(target: "plugin_loader", "Loading plugin library from: {}", path.display());
+        tracing::info!(target: "module_loader", "Loading module library from: {}", path.display());
         let lib = unsafe { Library::new(path)? };
-        tracing::info!(target: "plugin_loader", "Library loaded, getting function symbols");
-        // Set host loggers in the plugin
-        let set_logger: libloading::Symbol<SetLoggerFn> = unsafe { lib.get(b"plugin_set_logger")? };
+        tracing::info!(target: "module_loader", "Library loaded, getting function symbols");
+        // Set host loggers in the module
+        let set_logger: libloading::Symbol<SetLoggerFn> = unsafe { lib.get(b"module_set_logger")? };
         unsafe { set_logger(host_log_error, host_log_warn, host_log_info, host_log_debug, host_log_trace) };
-        tracing::info!(target: "plugin_loader", "Plugin loggers set");
+        tracing::info!(target: "module_loader", "Module loggers set");
         // get symbols
         let create: libloading::Symbol<CreateFn> = unsafe { lib.get(b"create_middleware")? };
         let destroy: libloading::Symbol<DestroyFn> = unsafe { lib.get(b"destroy_middleware")? };
-        tracing::info!(target: "plugin_loader", "Function symbols obtained, creating middleware instance");
+        tracing::info!(target: "module_loader", "Function symbols obtained, creating middleware instance");
         let ptr = unsafe { create() };
-        tracing::info!(target: "plugin_loader", "Middleware instance created successfully");
+        tracing::info!(target: "module_loader", "Middleware instance created successfully");
         // Copy the function pointers before moving lib
         let destroy_fn = *destroy;
         Ok(Self { lib: Some(lib), destroy: Some(destroy_fn), ptr: Some(ptr) })
     }
 
-    /// Manually destroy the plugin and free resources.
-    /// This is called automatically when LoadedPlugin is dropped.
+    /// Manually destroy the module and free resources.
+    /// This is called automatically when LoadedModule is dropped.
     pub unsafe fn destroy(mut self) {
-        tracing::info!(target: "plugin_loader", "Destroying plugin instance");
+        tracing::info!(target: "module_loader", "Destroying module instance");
         if let (Some(destroy_fn), Some(ptr)) = (self.destroy.take(), self.ptr.take()) {
             unsafe { destroy_fn(ptr) };
         }
@@ -137,10 +91,10 @@ impl LoadedPlugin {
     }
 }
 
-impl Drop for LoadedPlugin {
+impl Drop for LoadedModule {
     fn drop(&mut self) {
         unsafe {
-            tracing::info!(target: "plugin_loader", "Dropping LoadedPlugin, destroying middleware instance");
+            tracing::info!(target: "module_loader", "Dropping LoadedModule, destroying middleware instance");
             if let (Some(destroy_fn), Some(ptr)) = (self.destroy.take(), self.ptr.take()) {
                 destroy_fn(ptr);
             }

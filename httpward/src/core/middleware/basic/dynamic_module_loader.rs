@@ -15,7 +15,7 @@ use httpward_core::httpward_middleware::pipe::HttpWardMiddlewarePipeBuilder;
 use std::fs;
 
 /// Re-export the plugin loader
-use super::module_loader::LoadedPlugin;
+use super::module_loader::LoadedModule;
 
 /// Layer that dynamically loads and applies HttpWard middleware modules
 /// This layer integrates the abstract middleware pipe with Rama's layer system
@@ -85,7 +85,7 @@ impl DynamicModuleLoaderLayer {
         tracing::info!(target: "dynamic_module_loader", "Loading plugin from path: {}", path.display());
         // Safety: Plugin loading via libloading is unsafe. We do it in an isolated helper.
         unsafe {
-            let loaded = LoadedPlugin::load(path)?;
+            let loaded = LoadedModule::load(path)?;
             let boxed = loaded.into_boxed_middleware();
             // Register into pipe
             self.middleware_pipe = self.middleware_pipe.add_boxed_layer(boxed);
