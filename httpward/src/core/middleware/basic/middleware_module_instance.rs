@@ -2,7 +2,6 @@
 // Module loader using libloading and raw pointers.
 // Comments/in-code text in English.
 
-use std::path::Path;
 use std::sync::Arc;
 use std::error::Error;
 use std::os::raw::c_char;
@@ -23,21 +22,20 @@ type SetLoggerFn = unsafe extern "C" fn(
 );
 
 
-/// A loaded module.
+/// A middleware module instance.
 /// Keeps the `Library` alive as long as module is used.
-pub struct LoadedModule {
+pub struct MiddlewareModuleInstance {
     lib: Option<Library>,
     destroy: Option<DestroyFn>,
     ptr: Option<MiddlewareFatPtr>,
 }
 
-impl LoadedModule {
-    /// Load module library and create middleware instance.
+impl MiddlewareModuleInstance {
+    /// Create middleware instance from loaded library.
     /// Safety: host and module must be built with the same Rust toolchain and matching core crate types.
-    pub unsafe fn load(path: &Path) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        tracing::info!(target: "module_loader", "Loading module library from: {}", path.display());
-        let lib = unsafe { Library::new(path)? };
-        tracing::info!(target: "module_loader", "Library loaded, getting function symbols");
+    pub unsafe fn create_middleware_instance(lib: Library) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        tracing::info!(target: "module_loader", "Creating middleware instance from loaded library");
+        tracing::info!(target: "module_loader", "Getting function symbols from library");
         // Set host loggers in the module
         let set_logger: libloading::Symbol<SetLoggerFn> = unsafe { lib.get(b"module_set_logger")? };
         unsafe { set_logger(host_log_error, host_log_warn, host_log_info, host_log_debug, host_log_trace) };
@@ -54,7 +52,7 @@ impl LoadedModule {
     }
 
     /// Manually destroy the module and free resources.
-    /// This is called automatically when LoadedModule is dropped.
+    /// This is called automatically when MiddlewareModuleInstance is dropped.
     pub unsafe fn destroy(mut self) {
         tracing::info!(target: "module_loader", "Destroying module instance");
         if let (Some(destroy_fn), Some(ptr)) = (self.destroy.take(), self.ptr.take()) {
@@ -91,10 +89,10 @@ impl LoadedModule {
     }
 }
 
-impl Drop for LoadedModule {
+impl Drop for MiddlewareModuleInstance {
     fn drop(&mut self) {
         unsafe {
-            tracing::info!(target: "module_loader", "Dropping LoadedModule, destroying middleware instance");
+            tracing::info!(target: "module_loader", "Dropping MiddlewareModuleInstance, destroying middleware instance");
             if let (Some(destroy_fn), Some(ptr)) = (self.destroy.take(), self.ptr.take()) {
                 destroy_fn(ptr);
             }
