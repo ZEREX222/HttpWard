@@ -2,37 +2,32 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use libloading::Library;
-use httpward_core::core::server_models::{ServerInstance, SiteManager};
-use httpward_core::config::strategy::MiddlewareConfig;
+use httpward_core::core::server_models::ServerInstance;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use tracing::{info, error, warn};
 use super::middleware_module_instance::MiddlewareModuleInstance;
 use super::middleware_global_module_storage::{initialize_global_storage, with_global_storage, ModuleRecord};
 
 /// Manager for dynamic loading of middleware modules based on strategy configuration
+/// Works only with GlobalModuleStorage, doesn't store any local data
 #[derive(Debug)]
 pub struct MiddlewareModuleLoadManager {
-    /// Loaded middleware libraries
-    loaded_modules: Vec<LoadedModule>,
     /// Modules directory path
     modules_dir: PathBuf,
-}
-
-/// Information about a loaded middleware module
-#[derive(Debug)]
-pub struct LoadedModule {
-    /// Module name
-    pub name: String,
-    /// Loaded library (wrapped in Arc for shared ownership)
-    pub library: Arc<Library>,
-    /// File path
-    pub path: PathBuf,
 }
 
 impl MiddlewareModuleLoadManager {
     /// Create new module load manager from multiple server instances
     pub fn from_server_instances(server_instances: &[ServerInstance]) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let modules_dir = Path::new("modules").to_path_buf();
+        Self::from_server_instances_with_dir(server_instances, Path::new("modules"))
+    }
+    
+    /// Create new module load manager from multiple server instances with custom modules directory
+    pub fn from_server_instances_with_dir<P: AsRef<Path>>(
+        server_instances: &[ServerInstance], 
+        modules_dir: P
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let modules_dir = modules_dir.as_ref().to_path_buf();
         
         // Initialize global storage if not already done
         initialize_global_storage()?;
@@ -44,13 +39,13 @@ impl MiddlewareModuleLoadManager {
               middleware_names.len(), server_instances.len(), middleware_names);
         
         let mut manager = Self {
-            loaded_modules: Vec::new(),
             modules_dir,
         };
         
         // Load modules for each middleware name and add to global storage
-        for name in middleware_names {
-            if let Err(e) = manager.load_module_by_name_and_add_to_global(&name) {
+        let middleware_count = middleware_names.len();
+        for name in &middleware_names {
+            if let Err(e) = manager.load_module_by_name_and_add_to_global(name) {
                 error!(target: "module_load_manager",
                        "Failed to load module '{}': {}", name, e);
                 return Err(e);
@@ -58,7 +53,7 @@ impl MiddlewareModuleLoadManager {
         }
         
         info!(target: "module_load_manager", 
-              "Successfully loaded {} middleware modules", manager.loaded_modules.len());
+              "Successfully loaded {} middleware modules", middleware_count);
         
         Ok(manager)
     }
@@ -66,6 +61,14 @@ impl MiddlewareModuleLoadManager {
     /// Create new module load manager from single server instance (for backward compatibility)
     pub fn from_server_instance(server_instance: &ServerInstance) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Self::from_server_instances(&[server_instance.clone()])
+    }
+    
+    /// Create new module load manager from single server instance with custom modules directory
+    pub fn from_server_instance_with_dir<P: AsRef<Path>>(
+        server_instance: &ServerInstance,
+        modules_dir: P
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        Self::from_server_instances_with_dir(&[server_instance.clone()], modules_dir)
     }
     
     /// Extract unique middleware names from multiple server instances
@@ -107,20 +110,7 @@ impl MiddlewareModuleLoadManager {
         // Check if already loaded in global storage
         if let Ok(has_module) = with_global_storage(|storage| storage.has_module(name)) {
             if has_module {
-                info!(target: "module_load_manager", "Module '{}' already loaded, reusing existing", name);
-                // Still add to local if not present
-                if !self.loaded_modules.iter().any(|m| m.name == name) {
-                    // For local, we can create a dummy or just add name, but to keep API, create LoadedModule with None or something
-                    // For simplicity, since global has it, we can skip local addition or create with Arc from global, but that's complex
-                    // Let's create a new library for local, but that's not optimal, but for now to minimize changes
-                    let library = unsafe { Library::new(&module_path)? };
-                    let loaded_module = LoadedModule {
-                        name: name.to_string(),
-                        library: Arc::new(library),
-                        path: module_path.clone(),
-                    };
-                    self.loaded_modules.push(loaded_module);
-                }
+                info!(target: "module_load_manager", "Module '{}' already loaded in global storage", name);
                 return Ok(());
             }
         }
@@ -148,14 +138,6 @@ impl MiddlewareModuleLoadManager {
             error!(target: "module_load_manager", "Failed to add module to global storage: {}", e);
             e
         })?;
-
-        // Keep local reference
-        let loaded_module = LoadedModule {
-            name: name.to_string(),
-            library: lib,
-            path: module_path.clone(),
-        };
-        self.loaded_modules.push(loaded_module);
         
         info!(target: "module_load_manager", 
               "Successfully loaded and stored middleware module: {}", name);
@@ -183,30 +165,9 @@ impl MiddlewareModuleLoadManager {
         Ok(module_path)
     }
     
-    /// Get reference to loaded modules
-    pub fn loaded_modules(&self) -> &[LoadedModule] {
-        &self.loaded_modules
-    }
-    
-    /// Get loaded module by name
-    pub fn get_module(&self, name: &str) -> Option<&LoadedModule> {
-        self.loaded_modules.iter().find(|m| m.name == name)
-    }
-    
-    /// Get middleware instance by name from global storage
-    pub fn get_middleware_instance(&self, name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
-        use super::middleware_global_module_storage::get_middleware_instance;
-        get_middleware_instance(name)
-    }
-    
-    /// Check if module is loaded (either locally or in global storage)
+    /// Check if module is loaded in global storage
     pub fn is_module_loaded(&self, name: &str) -> bool {
-        // Check local storage first
-        if self.loaded_modules.iter().any(|m| m.name == name) {
-            return true;
-        }
-        
-        // Check global storage
+        // Check global storage only
         if let Ok(guard) = super::middleware_global_module_storage::with_global_storage(|storage| {
             storage.has_module(name)
         }) {
@@ -216,20 +177,23 @@ impl MiddlewareModuleLoadManager {
         }
     }
     
-    /// Get count of loaded modules
-    pub fn module_count(&self) -> usize {
-        self.loaded_modules.len()
+    /// Get the current modules directory path
+    pub fn modules_dir(&self) -> &PathBuf {
+        &self.modules_dir
     }
     
-    /// Get all loaded module names
-    pub fn module_names(&self) -> Vec<String> {
-        self.loaded_modules.iter().map(|m| m.name.clone()).collect()
+    /// Set a new modules directory path
+    pub fn set_modules_dir<P: AsRef<Path>>(&mut self, modules_dir: P) {
+        let old_dir = self.modules_dir.clone();
+        self.modules_dir = modules_dir.as_ref().to_path_buf();
+        info!(target: "module_load_manager", 
+              "Changed modules directory from '{}' to '{}'", 
+              old_dir.display(), self.modules_dir.display());
     }
     
     /// Create manager with custom modules directory
     pub fn with_modules_dir<P: AsRef<Path>>(modules_dir: P) -> Self {
         Self {
-            loaded_modules: Vec::new(),
             modules_dir: modules_dir.as_ref().to_path_buf(),
         }
     }
@@ -253,27 +217,46 @@ impl MiddlewareModuleLoadManager {
         Ok(manager)
     }
     
-    /// Reload a specific module
+    /// Get middleware instance by name from global storage
+    pub fn get_middleware_instance(&self, name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
+        use super::middleware_global_module_storage::get_middleware_instance;
+        get_middleware_instance(name)
+    }
+    
+    /// Get count of loaded modules from global storage
+    pub fn module_count(&self) -> usize {
+        if let Ok(count) = super::middleware_global_module_storage::with_global_storage(|storage| {
+            storage.module_count()
+        }) {
+            count
+        } else {
+            0
+        }
+    }
+    
+    /// Get all loaded module names from global storage
+    pub fn module_names(&self) -> Vec<String> {
+        if let Ok(names) = super::middleware_global_module_storage::with_global_storage(|storage| {
+            storage.module_names()
+        }) {
+            names
+        } else {
+            Vec::new()
+        }
+    }
+    
+    /// Reload a specific module in global storage
     pub fn reload_module(&mut self, name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Remove existing module if it exists
-        self.loaded_modules.retain(|m| m.name != name);
-        
-        // Load it again and add to global storage
+        // Note: GlobalModuleStorage doesn't support removal, so we just load it again
+        // This will replace the existing module if it exists
+        info!(target: "module_load_manager", "Reloading module '{}' in global storage", name);
         self.load_module_by_name_and_add_to_global(name)
     }
     
-    /// Unload a specific module
+    /// Unload a specific module from global storage
     pub fn unload_module(&mut self, name: &str) -> bool {
-        let initial_len = self.loaded_modules.len();
-        self.loaded_modules.retain(|m| m.name != name);
-        let removed = self.loaded_modules.len() < initial_len;
-        
-        if removed {
-            info!(target: "module_load_manager", "Unloaded module: {}", name);
-        } else {
-            warn!(target: "module_load_manager", "Module '{}' was not loaded", name);
-        }
-        
-        removed
+        // Note: GlobalModuleStorage doesn't support removal, so this is a no-op
+        warn!(target: "module_load_manager", "Module unloading not supported - module '{}' remains in global storage", name);
+        false
     }
 }

@@ -12,9 +12,7 @@ pub use request_enricher::RequestEnricherLayer;
 pub use response_enricher::ResponseEnricherLayer;
 pub use error_handler::ErrorHandlerLayer;
 pub use dynamic_module_loader::DynamicModuleLoaderLayer;
-pub use middleware_module_load_manager::{
-    MiddlewareModuleLoadManager, LoadedModule
-};
+pub use middleware_module_load_manager::MiddlewareModuleLoadManager;
 pub use middleware_global_module_storage::ModuleRecord;
 // Internal global storage - not exported
 // pub use middleware_global_module_storage::{
