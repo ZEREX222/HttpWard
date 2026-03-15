@@ -87,7 +87,7 @@ impl DynamicModuleLoaderLayer {
         // Safety: Plugin loading via libloading is unsafe. We do it in an isolated helper.
         unsafe {
             let lib = Library::new(path)?;
-            let loaded = MiddlewareModuleInstance::create_middleware_instance(lib)?;
+            let loaded = MiddlewareModuleInstance::create_middleware_instance(Arc::new(lib))?;
             let boxed = loaded.into_boxed_middleware();
             // Register into pipe
             self.middleware_pipe = self.middleware_pipe.add_boxed_layer(boxed);

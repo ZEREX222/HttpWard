@@ -9,6 +9,7 @@ use libloading::Library;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use httpward_core::httpward_middleware::pipe::MiddlewareFatPtr;
 use httpward_core::module_logging::host_functions::*;
+use tracing::warn;
 
 /// C-ABI types exported by module
 type CreateFn = unsafe extern "C" fn() -> MiddlewareFatPtr;
@@ -25,7 +26,7 @@ type SetLoggerFn = unsafe extern "C" fn(
 /// A middleware module instance.
 /// Keeps the `Library` alive as long as module is used.
 pub struct MiddlewareModuleInstance {
-    lib: Option<Library>,
+    lib: Option<Arc<Library>>,
     destroy: Option<DestroyFn>,
     ptr: Option<MiddlewareFatPtr>,
 }
@@ -33,22 +34,43 @@ pub struct MiddlewareModuleInstance {
 impl MiddlewareModuleInstance {
     /// Create middleware instance from loaded library.
     /// Safety: host and module must be built with the same Rust toolchain and matching core crate types.
-    pub unsafe fn create_middleware_instance(lib: Library) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub unsafe fn create_middleware_instance(lib: Arc<Library>) -> Result<Self, Box<dyn Error + Send + Sync>> {
         tracing::info!(target: "module_loader", "Creating middleware instance from loaded library");
         tracing::info!(target: "module_loader", "Getting function symbols from library");
+        
+        // We need to get symbols from the library. Since Library doesn't implement Clone,
+        // we need to work with the Arc. We can use Arc::into_inner if we have the only reference,
+        // but that's not guaranteed. Instead, let's use a different approach.
+        
+        // For now, let's try to extract the Library from Arc, but fall back to reloading if needed
+        let library = match Arc::try_unwrap(lib) {
+            Ok(lib) => lib,
+            Err(arc_lib) => {
+                // If we can't unwrap (multiple references), we need to reload
+                warn!(target: "module_loader", "Cannot unwrap Arc, reloading library");
+                return Err("Cannot create instance from shared Arc<Library>".into());
+            }
+        };
+        
         // Set host loggers in the module
-        let set_logger: libloading::Symbol<SetLoggerFn> = unsafe { lib.get(b"module_set_logger")? };
+        let set_logger: libloading::Symbol<SetLoggerFn> = unsafe { library.get(b"module_set_logger")? };
         unsafe { set_logger(host_log_error, host_log_warn, host_log_info, host_log_debug, host_log_trace) };
         tracing::info!(target: "module_loader", "Module loggers set");
+        
         // get symbols
-        let create: libloading::Symbol<CreateFn> = unsafe { lib.get(b"create_middleware")? };
-        let destroy: libloading::Symbol<DestroyFn> = unsafe { lib.get(b"destroy_middleware")? };
+        let create: libloading::Symbol<CreateFn> = unsafe { library.get(b"create_middleware")? };
+        let destroy: libloading::Symbol<DestroyFn> = unsafe { library.get(b"destroy_middleware")? };
         tracing::info!(target: "module_loader", "Function symbols obtained, creating middleware instance");
         let ptr = unsafe { create() };
         tracing::info!(target: "module_loader", "Middleware instance created successfully");
+        
         // Copy the function pointers before moving lib
         let destroy_fn = *destroy;
-        Ok(Self { lib: Some(lib), destroy: Some(destroy_fn), ptr: Some(ptr) })
+        
+        // Wrap the library back in Arc
+        let lib_arc = Arc::new(library);
+        
+        Ok(Self { lib: Some(lib_arc), destroy: Some(destroy_fn), ptr: Some(ptr) })
     }
 
     /// Manually destroy the module and free resources.

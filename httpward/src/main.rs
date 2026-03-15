@@ -4,11 +4,12 @@ mod core;
 
 use httpward_core::config::load;
 
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
 use tracing_subscriber::{EnvFilter};
 use runtime::server_plan::build_server_plan;
 use server::http_server::HttpWardServer;
 use crate::server::manager::HttpWardServerManager;
+use crate::core::middleware::basic::MiddlewareModuleLoadManager;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -24,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("HttpWard starting...");
 
     let server_plans = build_server_plan(&config);
-
+    
     for server in &server_plans {
         let total_tls_mappings: usize = server.site_managers.iter()
             .map(|sm| sm.tls_mappings().len())
@@ -64,14 +65,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         debug!(""); // Empty line for readability
     }
 
+    // Load middleware modules before creating server instances
+    /*match MiddlewareModuleLoadManager::from_server_instances(&server_plans) {
+        Ok(manager) => {
+            info!("Successfully loaded {} middleware modules", manager.module_count());
+
+            // Display loaded modules
+            for module_name in manager.module_names() {
+                info!("  Loaded module: {}", module_name);
+            }
+
+            Some(manager)
+        }
+        Err(e) => {
+            panic!("Failed to load middleware modules: {}", e);
+        }
+    };*/
+
     let mut instances = vec![];
 
+    // Now create server instances from plans
     for plan in server_plans {
         // Create the HttpWardServer
         let server = HttpWardServer::new(plan);
         instances.push(server);
     }
-
+    
     // 4. Run all servers concurrently
     HttpWardServerManager::start_all(instances).await?;
 

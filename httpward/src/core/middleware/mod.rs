@@ -1,4 +1,4 @@
-mod basic;
+pub mod basic;
 mod route;
 
 pub use crate::core::middleware::basic::{LogLayer, RequestEnricherLayer, ResponseEnricherLayer, ErrorHandlerLayer, DynamicModuleLoaderLayer};
