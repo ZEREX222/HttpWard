@@ -13,9 +13,3 @@ pub use response_enricher::ResponseEnricherLayer;
 pub use error_handler::ErrorHandlerLayer;
 pub use dynamic_module_loader::DynamicModuleLoaderLayer;
 pub use middleware_module_load_manager::MiddlewareModuleLoadManager;
-pub use middleware_global_module_storage::ModuleRecord;
-// Internal global storage - not exported
-// pub use middleware_global_module_storage::{
-//     GlobalModuleStorage, get_middleware_instance, initialize_global_storage,
-//     with_global_storage, is_global_storage_initialized, get_global_storage_stats
-// };

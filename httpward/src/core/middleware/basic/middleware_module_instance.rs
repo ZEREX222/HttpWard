@@ -3,13 +3,15 @@
 // Comments/in-code text in English.
 
 use std::sync::Arc;
-use std::error::Error;
 use std::os::raw::c_char;
+use std::sync::Mutex;
 use libloading::Library;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use httpward_core::httpward_middleware::pipe::MiddlewareFatPtr;
 use httpward_core::module_logging::host_functions::*;
-use tracing::warn;
+
+/// Global mutex for thread-safe library loading
+static LIBRARY_LOADING_MUTEX: Mutex<()> = Mutex::new(());
 
 /// C-ABI types exported by module
 type CreateFn = unsafe extern "C" fn() -> MiddlewareFatPtr;
@@ -35,6 +37,9 @@ impl MiddlewareModuleInstance {
     /// Create middleware instance from Arc<Library>.
     /// Safety: host and module must agree on ABI.
     pub unsafe fn create_from_arc(lib: Arc<Library>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        // Ensure thread-safe library loading
+        let _guard = LIBRARY_LOADING_MUTEX.lock().unwrap();
+        
         tracing::info!(target: "module_loader", "Creating middleware instance from shared library");
         tracing::info!(target: "module_loader", "Getting function symbols from library");
         

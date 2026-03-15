@@ -1,11 +1,12 @@
 use std::collections::HashMap;
-use std::sync::{RwLock, Arc};
-use tracing::{info, error, warn};
+use std::sync::{Arc, Mutex, OnceLock};
+use tracing::{info, warn};
 use libloading::Library;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 
 /// Global storage for loaded middleware modules
-static GLOBAL_MODULE_STORAGE: RwLock<Option<GlobalModuleStorage>> = RwLock::new(None);
+/// Thread-safe initialization with OnceLock + Mutex
+static GLOBAL_MODULE_STORAGE: OnceLock<Mutex<GlobalModuleStorage>> = OnceLock::new();
 
 /// ModuleRecord: single library + single middleware instance
 pub struct ModuleRecord {
@@ -63,30 +64,14 @@ impl GlobalModuleStorage {
 
 /// Get global middleware instance by name
 pub fn get_middleware_instance(name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
-    if let Ok(storage) = GLOBAL_MODULE_STORAGE.read() {
-        if let Some(ref global_storage) = *storage {
-            global_storage.get_middleware_instance(name)
-        } else {
-            warn!(target: "global_module_storage", "Global module storage not initialized");
-            None
-        }
-    } else {
-        error!(target: "global_module_storage", "Failed to acquire global module storage lock");
-        None
-    }
+    let storage = GLOBAL_MODULE_STORAGE.get()?;
+    let guard = storage.lock().ok()?;
+    guard.get_middleware_instance(name)
 }
 
 /// Initialize global module storage
 pub fn initialize_global_storage() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut guard = GLOBAL_MODULE_STORAGE.write()
-        .map_err(|e| format!("Failed to acquire global storage lock: {}", e))?;
-    
-    if guard.is_some() {
-        warn!(target: "global_module_storage", "Global module storage already initialized");
-        return Ok(());
-    }
-    
-    *guard = Some(GlobalModuleStorage::new());
+    let _storage = GLOBAL_MODULE_STORAGE.get_or_init(|| Mutex::new(GlobalModuleStorage::new()));
     info!(target: "global_module_storage", "Global module storage initialized");
     Ok(())
 }
@@ -96,34 +81,20 @@ pub fn with_global_storage<F, R>(f: F) -> Result<R, Box<dyn std::error::Error + 
 where
     F: FnOnce(&mut GlobalModuleStorage) -> R,
 {
-    let mut guard = GLOBAL_MODULE_STORAGE.write()
+    let storage = GLOBAL_MODULE_STORAGE.get_or_init(|| Mutex::new(GlobalModuleStorage::new()));
+    let mut guard = storage.lock()
         .map_err(|e| format!("Failed to acquire global storage lock: {}", e))?;
-    
-    if let Some(ref mut global_storage) = *guard {
-        Ok(f(global_storage))
-    } else {
-        Err("Global module storage not initialized".into())
-    }
+    Ok(f(&mut guard))
 }
 
 /// Check if global storage is initialized
 pub fn is_global_storage_initialized() -> bool {
-    if let Ok(guard) = GLOBAL_MODULE_STORAGE.read() {
-        guard.is_some()
-    } else {
-        false
-    }
+    GLOBAL_MODULE_STORAGE.get().is_some()
 }
 
 /// Get global storage statistics
 pub fn get_global_storage_stats() -> Option<(usize, Vec<String>)> {
-    if let Ok(guard) = GLOBAL_MODULE_STORAGE.read() {
-        if let Some(ref global_storage) = *guard {
-            Some((global_storage.module_count(), global_storage.module_names()))
-        } else {
-            None
-        }
-    } else {
-        None
-    }
+    let storage = GLOBAL_MODULE_STORAGE.get()?;
+    let guard = storage.lock().ok()?;
+    Some((guard.module_count(), guard.module_names()))
 }
