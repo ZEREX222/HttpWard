@@ -1,4 +1,4 @@
-// httpward-plugins/httpward_log_plugin/src/lib.rs
+// httpward-modules/httpward_log_module/src/lib.rs
 use std::os::raw::c_void;
 use std::boxed::Box;
 use std::sync::Arc;

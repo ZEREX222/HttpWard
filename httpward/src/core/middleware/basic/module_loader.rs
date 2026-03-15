@@ -1,4 +1,4 @@
-// httpward/src/core/middleware/basic/plugin_loader.rs
+// httpward/src/core/middleware/basic/module_loader
 // Plugin loader using libloading and raw pointers.
 // Comments/in-code text in English.
 

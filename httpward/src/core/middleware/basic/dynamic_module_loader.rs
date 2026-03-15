@@ -15,7 +15,7 @@ use httpward_core::httpward_middleware::pipe::HttpWardMiddlewarePipeBuilder;
 use std::fs;
 
 /// Re-export the plugin loader
-use super::plugin_loader::LoadedPlugin;
+use super::module_loader::LoadedPlugin;
 
 /// Layer that dynamically loads and applies HttpWard middleware modules
 /// This layer integrates the abstract middleware pipe with Rama's layer system

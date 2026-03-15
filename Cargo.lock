@@ -1028,8 +1028,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "httpward_log_plugin"
-version = "0.1.0"
+name = "httpward_log_module"
+version = "0.0.1"
 dependencies = [
  "async-trait",
  "httpward-core",

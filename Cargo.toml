@@ -6,7 +6,7 @@ members = [
     "httpward",
     "httpward-docs",
     "httpward-core",
-    "httpward-plugins/httpward_log_plugin"
+    "httpward-modules/httpward_log_module"
 ]
 
 [workspace.dependencies]
