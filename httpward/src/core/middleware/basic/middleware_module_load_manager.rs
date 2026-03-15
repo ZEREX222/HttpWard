@@ -4,9 +4,10 @@ use std::sync::Arc;
 use libloading::Library;
 use httpward_core::core::server_models::{ServerInstance, SiteManager};
 use httpward_core::config::strategy::MiddlewareConfig;
+use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use tracing::{info, error, warn};
 use super::middleware_module_instance::MiddlewareModuleInstance;
-use super::middleware_global_module_storage::{initialize_global_storage, with_global_storage};
+use super::middleware_global_module_storage::{initialize_global_storage, with_global_storage, ModuleRecord};
 
 /// Manager for dynamic loading of middleware modules based on strategy configuration
 #[derive(Debug)]
@@ -103,34 +104,57 @@ impl MiddlewareModuleLoadManager {
         info!(target: "module_load_manager", 
               "Loading middleware module '{}' from: {}", name, module_path.display());
         
-        // Safety: Dynamic library loading is unsafe by nature
-        let library = unsafe { Library::new(&module_path)? };
-        
-        let loaded_module = LoadedModule {
+        // Check if already loaded in global storage
+        if let Ok(has_module) = with_global_storage(|storage| storage.has_module(name)) {
+            if has_module {
+                info!(target: "module_load_manager", "Module '{}' already loaded, reusing existing", name);
+                // Still add to local if not present
+                if !self.loaded_modules.iter().any(|m| m.name == name) {
+                    // For local, we can create a dummy or just add name, but to keep API, create LoadedModule with None or something
+                    // For simplicity, since global has it, we can skip local addition or create with Arc from global, but that's complex
+                    // Let's create a new library for local, but that's not optimal, but for now to minimize changes
+                    let library = unsafe { Library::new(&module_path)? };
+                    let loaded_module = LoadedModule {
+                        name: name.to_string(),
+                        library: Arc::new(library),
+                        path: module_path.clone(),
+                    };
+                    self.loaded_modules.push(loaded_module);
+                }
+                return Ok(());
+            }
+        }
+
+        // Load library once
+        let lib = Arc::new(unsafe { Library::new(&module_path)? });
+
+        // Create middleware instance
+        let instance = unsafe { MiddlewareModuleInstance::create_from_arc(lib.clone()) }?;
+        let boxed_middleware = instance.into_boxed_middleware();
+
+        // Create ModuleRecord
+        let module_record = ModuleRecord {
             name: name.to_string(),
-            library: Arc::new(library),
+            library: lib.clone(),
+            instance: boxed_middleware,
             path: module_path.clone(),
         };
-        
+
         // Add to global storage
         with_global_storage(|global_storage| {
-            // Create a new LoadedModule for global storage (need to reload library)
-            if let Ok(global_library) = unsafe { Library::new(&module_path) } {
-                let global_module = LoadedModule {
-                    name: name.to_string(),
-                    library: Arc::new(global_library),
-                    path: module_path.clone(),
-                };
-                global_storage.add_module(global_module);
-                info!(target: "module_load_manager", "Added module '{}' to global storage", name);
-            } else {
-                warn!(target: "module_load_manager", "Failed to create global library instance for '{}'", name);
-            }
-        }).unwrap_or_else(|e| {
+            global_storage.add_module(module_record);
+            info!(target: "module_load_manager", "Added module '{}' to global storage", name);
+        }).map_err(|e| {
             error!(target: "module_load_manager", "Failed to add module to global storage: {}", e);
-        });
-        
+            e
+        })?;
+
         // Keep local reference
+        let loaded_module = LoadedModule {
+            name: name.to_string(),
+            library: lib,
+            path: module_path.clone(),
+        };
         self.loaded_modules.push(loaded_module);
         
         info!(target: "module_load_manager", 
@@ -170,15 +194,9 @@ impl MiddlewareModuleLoadManager {
     }
     
     /// Get middleware instance by name from global storage
-    pub fn get_middleware_instance(&self, name: &str) -> Option<MiddlewareModuleInstance> {
-        if let Ok(guard) = super::middleware_global_module_storage::with_global_storage(|storage| {
-            storage.get_middleware_instance(name)
-        }) {
-            guard
-        } else {
-            error!(target: "module_load_manager", "Failed to access global storage for middleware '{}'", name);
-            None
-        }
+    pub fn get_middleware_instance(&self, name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
+        use super::middleware_global_module_storage::get_middleware_instance;
+        get_middleware_instance(name)
     }
     
     /// Check if module is loaded (either locally or in global storage)

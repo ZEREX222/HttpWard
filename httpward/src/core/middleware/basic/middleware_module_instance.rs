@@ -32,34 +32,20 @@ pub struct MiddlewareModuleInstance {
 }
 
 impl MiddlewareModuleInstance {
-    /// Create middleware instance from loaded library.
-    /// Safety: host and module must be built with the same Rust toolchain and matching core crate types.
-    pub unsafe fn create_middleware_instance(lib: Arc<Library>) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        tracing::info!(target: "module_loader", "Creating middleware instance from loaded library");
+    /// Create middleware instance from Arc<Library>.
+    /// Safety: host and module must agree on ABI.
+    pub unsafe fn create_from_arc(lib: Arc<Library>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        tracing::info!(target: "module_loader", "Creating middleware instance from shared library");
         tracing::info!(target: "module_loader", "Getting function symbols from library");
         
-        // We need to get symbols from the library. Since Library doesn't implement Clone,
-        // we need to work with the Arc. Instead of trying to unwrap, we'll reload the library
-        // to get a fresh instance that we can own exclusively.
-        
-        // For now, let's try to extract the Library from Arc, but fall back to reloading if needed
-        let library = match Arc::try_unwrap(lib) {
-            Ok(lib) => lib,
-            Err(arc_lib) => {
-                // If we can't unwrap (multiple references), we need to reload
-                warn!(target: "module_loader", "Cannot unwrap Arc, need to reload library from global storage");
-                return Err("Cannot create instance from shared Arc<Library> - need to reload from global storage".into());
-            }
-        };
-        
-        // Set host loggers in the module
-        let set_logger: libloading::Symbol<SetLoggerFn> = unsafe { library.get(b"module_set_logger")? };
+        // Get symbols from the library reference
+        let set_logger: libloading::Symbol<SetLoggerFn> = unsafe { (&*lib).get(b"module_set_logger")? };
         unsafe { set_logger(host_log_error, host_log_warn, host_log_info, host_log_debug, host_log_trace) };
         tracing::info!(target: "module_loader", "Module loggers set");
         
         // get symbols
-        let create: libloading::Symbol<CreateFn> = unsafe { library.get(b"create_middleware")? };
-        let destroy: libloading::Symbol<DestroyFn> = unsafe { library.get(b"destroy_middleware")? };
+        let create: libloading::Symbol<CreateFn> = unsafe { (&*lib).get(b"create_middleware")? };
+        let destroy: libloading::Symbol<DestroyFn> = unsafe { (&*lib).get(b"destroy_middleware")? };
         tracing::info!(target: "module_loader", "Function symbols obtained, creating middleware instance");
         let ptr = unsafe { create() };
         tracing::info!(target: "module_loader", "Middleware instance created successfully");
@@ -67,10 +53,7 @@ impl MiddlewareModuleInstance {
         // Copy the function pointers before moving lib
         let destroy_fn = *destroy;
         
-        // Wrap the library back in Arc
-        let lib_arc = Arc::new(library);
-        
-        Ok(Self { lib: Some(lib_arc), destroy: Some(destroy_fn), ptr: Some(ptr) })
+        Ok(Self { lib: Some(lib), destroy: Some(destroy_fn), ptr: Some(ptr) })
     }
 
     /// Manually destroy the module and free resources.
@@ -85,8 +68,7 @@ impl MiddlewareModuleInstance {
 
     /// Convert internal pointer into BoxedMiddleware (Arc<dyn HttpWardMiddleware>).
     /// This consumes self but intentionally *does not* call destroy() here because we've converted
-    /// the Box into an Arc and we want Rust to manage the lifetime. However we still keep the library
-    /// alive by moving `lib` into the returned Arc's drop guard if needed.
+    /// the Box into an Arc and we want Rust to manage the lifetime.
     ///
     /// Implementation approach:
     /// - Reconstruct Box<dyn HttpWardMiddleware> from raw pointer
@@ -102,10 +84,7 @@ impl MiddlewareModuleInstance {
             let boxed: Box<dyn HttpWardMiddleware + Send + Sync> = Box::from_raw(raw);
             let arc: Arc<dyn HttpWardMiddleware + Send + Sync> = Arc::from(boxed);
 
-            // Forget the lib to keep it loaded
-            if let Some(lib) = self.lib.take() {
-                std::mem::forget(lib);
-            }
+            // Library lifetime is managed by ModuleRecord
             arc
         }
     }

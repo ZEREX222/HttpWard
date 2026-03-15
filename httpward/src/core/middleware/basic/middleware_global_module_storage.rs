@@ -1,18 +1,23 @@
 use std::collections::HashMap;
-use std::sync::{Mutex, Arc};
-use std::path::Path;
+use std::sync::{RwLock, Arc};
 use tracing::{info, error, warn};
 use libloading::Library;
-use super::middleware_module_instance::MiddlewareModuleInstance;
-use super::middleware_module_load_manager::LoadedModule;
+use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 
 /// Global storage for loaded middleware modules
-static GLOBAL_MODULE_STORAGE: Mutex<Option<GlobalModuleStorage>> = Mutex::new(None);
+static GLOBAL_MODULE_STORAGE: RwLock<Option<GlobalModuleStorage>> = RwLock::new(None);
+
+/// ModuleRecord: single library + single middleware instance
+pub struct ModuleRecord {
+    pub name: String,
+    pub library: Arc<Library>,
+    pub instance: Arc<dyn HttpWardMiddleware + Send + Sync>,
+    pub path: std::path::PathBuf,
+}
 
 /// Global module storage that holds all loaded middleware instances
-#[derive(Debug)]
 pub struct GlobalModuleStorage {
-    modules: HashMap<String, LoadedModule>,
+    modules: HashMap<String, ModuleRecord>,
 }
 
 impl GlobalModuleStorage {
@@ -24,37 +29,16 @@ impl GlobalModuleStorage {
     }
     
     /// Add a module to storage
-    pub fn add_module(&mut self, module: LoadedModule) {
+    pub fn add_module(&mut self, module: ModuleRecord) {
         info!(target: "global_module_storage", "Adding module '{}' to global storage", module.name);
         self.modules.insert(module.name.clone(), module);
     }
     
     /// Get middleware instance by name
-    pub fn get_middleware_instance(&self, name: &str) -> Option<MiddlewareModuleInstance> {
-        if let Some(module) = self.modules.get(name) {
-            info!(target: "global_module_storage", "Creating middleware instance for '{}'", name);
-            // Safety: Module loading is unsafe by nature
-            unsafe {
-                // Reload the library from the stored path to get a fresh instance
-                match Library::new(&module.path) {
-                    Ok(library) => {
-                        match MiddlewareModuleInstance::create_middleware_instance(Arc::new(library)) {
-                            Ok(instance) => {
-                                info!(target: "global_module_storage", "Successfully created middleware instance for '{}'", name);
-                                Some(instance)
-                            }
-                            Err(e) => {
-                                error!(target: "global_module_storage", "Failed to create middleware instance '{}': {}", name, e);
-                                None
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!(target: "global_module_storage", "Failed to reload library for '{}': {}", name, e);
-                        None
-                    }
-                }
-            }
+    pub fn get_middleware_instance(&self, name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
+        if let Some(record) = self.modules.get(name) {
+            info!(target: "global_module_storage", "Returning middleware instance for '{}'", name);
+            Some(record.instance.clone())
         } else {
             warn!(target: "global_module_storage", "Module '{}' not found in global storage", name);
             None
@@ -78,8 +62,8 @@ impl GlobalModuleStorage {
 }
 
 /// Get global middleware instance by name
-pub fn get_middleware_instance(name: &str) -> Option<MiddlewareModuleInstance> {
-    if let Ok(storage) = GLOBAL_MODULE_STORAGE.lock() {
+pub fn get_middleware_instance(name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
+    if let Ok(storage) = GLOBAL_MODULE_STORAGE.read() {
         if let Some(ref global_storage) = *storage {
             global_storage.get_middleware_instance(name)
         } else {
@@ -94,7 +78,7 @@ pub fn get_middleware_instance(name: &str) -> Option<MiddlewareModuleInstance> {
 
 /// Initialize global module storage
 pub fn initialize_global_storage() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut guard = GLOBAL_MODULE_STORAGE.lock()
+    let mut guard = GLOBAL_MODULE_STORAGE.write()
         .map_err(|e| format!("Failed to acquire global storage lock: {}", e))?;
     
     if guard.is_some() {
@@ -112,7 +96,7 @@ pub fn with_global_storage<F, R>(f: F) -> Result<R, Box<dyn std::error::Error + 
 where
     F: FnOnce(&mut GlobalModuleStorage) -> R,
 {
-    let mut guard = GLOBAL_MODULE_STORAGE.lock()
+    let mut guard = GLOBAL_MODULE_STORAGE.write()
         .map_err(|e| format!("Failed to acquire global storage lock: {}", e))?;
     
     if let Some(ref mut global_storage) = *guard {
@@ -124,7 +108,7 @@ where
 
 /// Check if global storage is initialized
 pub fn is_global_storage_initialized() -> bool {
-    if let Ok(guard) = GLOBAL_MODULE_STORAGE.lock() {
+    if let Ok(guard) = GLOBAL_MODULE_STORAGE.read() {
         guard.is_some()
     } else {
         false
@@ -133,7 +117,7 @@ pub fn is_global_storage_initialized() -> bool {
 
 /// Get global storage statistics
 pub fn get_global_storage_stats() -> Option<(usize, Vec<String>)> {
-    if let Ok(guard) = GLOBAL_MODULE_STORAGE.lock() {
+    if let Ok(guard) = GLOBAL_MODULE_STORAGE.read() {
         if let Some(ref global_storage) = *guard {
             Some((global_storage.module_count(), global_storage.module_names()))
         } else {
