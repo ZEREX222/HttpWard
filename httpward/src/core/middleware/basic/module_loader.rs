@@ -5,13 +5,68 @@
 use std::path::Path;
 use std::sync::Arc;
 use std::error::Error;
+use std::ffi::CStr;
+use std::os::raw::c_char;
 use libloading::Library;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use httpward_core::httpward_middleware::pipe::MiddlewareFatPtr;
 
+// Host logging functions for plugins with different levels
+#[unsafe(no_mangle)]
+pub extern "C" fn host_log_error(ptr: *const c_char) {
+    let msg = unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned();
+
+    tracing::error!(target: "plugin", "[PLUGIN] {}", msg);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn host_log_warn(ptr: *const c_char) {
+    let msg = unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned();
+
+    tracing::warn!(target: "plugin", "[PLUGIN] {}", msg);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn host_log_info(ptr: *const c_char) {
+    let msg = unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned();
+
+    tracing::info!(target: "plugin", "[PLUGIN] {}", msg);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn host_log_debug(ptr: *const c_char) {
+    let msg = unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned();
+
+    tracing::debug!(target: "plugin", "[PLUGIN] {}", msg);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn host_log_trace(ptr: *const c_char) {
+    let msg = unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned();
+
+    tracing::trace!(target: "plugin", "[PLUGIN] {}", msg);
+}
+
 /// C-ABI types exported by plugin
 type CreateFn = unsafe extern "C" fn() -> MiddlewareFatPtr;
 type DestroyFn = unsafe extern "C" fn(MiddlewareFatPtr);
+type SetLoggerFn = unsafe extern "C" fn(
+    extern "C" fn(*const c_char),  // error
+    extern "C" fn(*const c_char),  // warn
+    extern "C" fn(*const c_char),  // info
+    extern "C" fn(*const c_char),  // debug
+    extern "C" fn(*const c_char),  // trace
+);
 
 
 /// A loaded plugin.
@@ -29,6 +84,10 @@ impl LoadedPlugin {
         tracing::info!(target: "plugin_loader", "Loading plugin library from: {}", path.display());
         let lib = unsafe { Library::new(path)? };
         tracing::info!(target: "plugin_loader", "Library loaded, getting function symbols");
+        // Set host loggers in the plugin
+        let set_logger: libloading::Symbol<SetLoggerFn> = unsafe { lib.get(b"plugin_set_logger")? };
+        unsafe { set_logger(host_log_error, host_log_warn, host_log_info, host_log_debug, host_log_trace) };
+        tracing::info!(target: "plugin_loader", "Plugin loggers set");
         // get symbols
         let create: libloading::Symbol<CreateFn> = unsafe { lib.get(b"create_middleware")? };
         let destroy: libloading::Symbol<DestroyFn> = unsafe { lib.get(b"destroy_middleware")? };
