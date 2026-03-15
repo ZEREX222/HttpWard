@@ -39,16 +39,16 @@ impl MiddlewareModuleInstance {
         tracing::info!(target: "module_loader", "Getting function symbols from library");
         
         // We need to get symbols from the library. Since Library doesn't implement Clone,
-        // we need to work with the Arc. We can use Arc::into_inner if we have the only reference,
-        // but that's not guaranteed. Instead, let's use a different approach.
+        // we need to work with the Arc. Instead of trying to unwrap, we'll reload the library
+        // to get a fresh instance that we can own exclusively.
         
         // For now, let's try to extract the Library from Arc, but fall back to reloading if needed
         let library = match Arc::try_unwrap(lib) {
             Ok(lib) => lib,
             Err(arc_lib) => {
                 // If we can't unwrap (multiple references), we need to reload
-                warn!(target: "module_loader", "Cannot unwrap Arc, reloading library");
-                return Err("Cannot create instance from shared Arc<Library>".into());
+                warn!(target: "module_loader", "Cannot unwrap Arc, need to reload library from global storage");
+                return Err("Cannot create instance from shared Arc<Library> - need to reload from global storage".into());
             }
         };
         

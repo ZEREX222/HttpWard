@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     // Load middleware modules before creating server instances
-    /*match MiddlewareModuleLoadManager::from_server_instances(&server_plans) {
+    match MiddlewareModuleLoadManager::from_server_instances(&server_plans) {
         Ok(manager) => {
             info!("Successfully loaded {} middleware modules", manager.module_count());
 
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Err(e) => {
             panic!("Failed to load middleware modules: {}", e);
         }
-    };*/
+    };
 
     let mut instances = vec![];
 

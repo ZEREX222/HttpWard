@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, Arc};
+use std::path::Path;
 use tracing::{info, error, warn};
+use libloading::Library;
 use super::middleware_module_instance::MiddlewareModuleInstance;
 use super::middleware_module_load_manager::LoadedModule;
 
@@ -33,15 +35,25 @@ impl GlobalModuleStorage {
             info!(target: "global_module_storage", "Creating middleware instance for '{}'", name);
             // Safety: Module loading is unsafe by nature
             unsafe {
-                // Clone the Arc<Library> to create a new instance
-                let library_arc = Arc::clone(&module.library);
-                
-                MiddlewareModuleInstance::create_middleware_instance(library_arc)
-                    .map_err(|e| {
-                        error!(target: "global_module_storage", "Failed to create middleware instance '{}': {}", name, e);
-                        e
-                    })
-                    .ok()
+                // Reload the library from the stored path to get a fresh instance
+                match Library::new(&module.path) {
+                    Ok(library) => {
+                        match MiddlewareModuleInstance::create_middleware_instance(Arc::new(library)) {
+                            Ok(instance) => {
+                                info!(target: "global_module_storage", "Successfully created middleware instance for '{}'", name);
+                                Some(instance)
+                            }
+                            Err(e) => {
+                                error!(target: "global_module_storage", "Failed to create middleware instance '{}': {}", name, e);
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(target: "global_module_storage", "Failed to reload library for '{}': {}", name, e);
+                        None
+                    }
+                }
             }
         } else {
             warn!(target: "global_module_storage", "Module '{}' not found in global storage", name);
