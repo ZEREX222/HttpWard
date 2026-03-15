@@ -29,7 +29,7 @@ impl DynamicModuleLoaderLayer {
         };
 
         // Load log middleware directly from global storage
-        match get_middleware_instance("log") {
+        match get_middleware_instance("httpward_log_module") {
             Some(middleware_instance) => {
                 loader.middleware_pipe = loader.middleware_pipe.add_boxed_layer(middleware_instance);
                 tracing::info!(target: "dynamic_module_loader", "Successfully loaded log middleware");
