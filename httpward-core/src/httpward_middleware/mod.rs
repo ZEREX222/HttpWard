@@ -4,7 +4,6 @@ pub mod middleware_trait;
 pub mod next;
 pub mod pipe;
 pub mod adapter;
-pub mod layers;
 
 #[cfg(test)]
 mod tests;

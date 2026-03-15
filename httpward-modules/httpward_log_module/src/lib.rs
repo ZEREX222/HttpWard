@@ -1,63 +1,14 @@
 // httpward-modules/httpward_log_module/src/lib.rs
 use std::os::raw::c_void;
 use std::boxed::Box;
-use async_trait::async_trait;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
-use httpward_core::httpward_middleware::types::BoxError;
-use httpward_core::httpward_middleware::next::Next;
 use httpward_core::httpward_middleware::pipe::MiddlewareFatPtr;
 use httpward_core::module_logging::{HostLogErrorFn, HostLogWarnFn, HostLogInfoFn, HostLogDebugFn, HostLogTraceFn, ModuleLogger};
 use httpward_core::module_logging::module_setup;
-use rama::http::{Body, Request, Response};
-use rama::Context;
-use std::fmt;
 
-#[derive(Clone)]
-struct DummyLogMiddleware {
-    tag: Option<String>,
-}
-
-impl DummyLogMiddleware {
-    fn new() -> Self {
-        Self { tag: Some("plugin-dummy".to_string()) }
-    }
-}
-
-impl fmt::Debug for DummyLogMiddleware {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DummyLogMiddleware").field("tag", &self.tag).finish()
-    }
-}
-
-#[async_trait]
-impl HttpWardMiddleware for DummyLogMiddleware {
-    async fn handle(&self, ctx: Context<()>, req: Request<Body>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
-        let logger = module_setup::get_logger();
-        logger.info(&format!("incoming: {}", req.uri()));
-        logger.debug(&format!("request headers: {:?}", req.headers()));
-        logger.trace(&format!("request method: {}", req.method()));
-        
-        // Example of warning condition
-        if req.uri().path().contains("/admin") {
-            logger.warn("Admin access detected");
-        }
-        
-        // Example of error condition
-        if req.uri().path().contains("/error") {
-            logger.error("Error endpoint accessed - this is a test error");
-        }
-        
-        let res = next.run(ctx, req).await?;
-        logger.info(&format!("outgoing: {}", res.status()));
-        logger.debug(&format!("response headers: {:?}", res.headers()));
-        logger.trace(&format!("response version: {:?}", res.version()));
-        Ok(res)
-    }
-
-    fn name(&self) -> Option<&'static str> {
-        Some("DummyLogMiddleware")
-    }
-}
+// Import our custom middleware
+mod httpward_log_layer;
+use httpward_log_layer::HttpWardLogLayer;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn module_set_logger(
@@ -76,8 +27,8 @@ pub extern "C" fn module_set_logger(
 pub extern "C" fn create_middleware() -> MiddlewareFatPtr {
     let logger = module_setup::get_logger();
     logger.info("create_middleware called");
-    logger.debug("creating new DummyLogMiddleware instance");
-    let boxed: Box<dyn HttpWardMiddleware + Send + Sync> = Box::new(DummyLogMiddleware::new());
+    logger.debug("creating new HttpWardLogLayer instance");
+    let boxed: Box<dyn HttpWardMiddleware + Send + Sync> = Box::new(HttpWardLogLayer::new());
     let raw = Box::into_raw(boxed);
     let (data, vtable) = unsafe { std::mem::transmute::<*mut (dyn HttpWardMiddleware + Send + Sync), (*mut c_void, *mut c_void)>(raw) };
     logger.info("middleware created successfully");
