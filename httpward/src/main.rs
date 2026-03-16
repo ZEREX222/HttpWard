@@ -94,14 +94,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let manager_result = load_middleware_manager(&server_plans);
 
     if let Ok(manager) = manager_result {
-        info!("Successfully loaded {} middleware modules", manager.module_count());
+        debug!("Successfully loaded {} middleware modules", manager.module_count());
 
         // Display loaded modules
         for module_name in manager.module_names() {
-            info!("  Loaded module: {}", module_name);
+            debug!("  Loaded module: {}", module_name);
         }
     } else if let Err(e) = manager_result {
-        warn!("Failed to load middleware modules: {}", e);
+        panic!("Failed to load middleware modules: {}", e);
     }
 
     let mut instances = vec![];

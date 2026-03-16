@@ -71,8 +71,13 @@ pub fn get_middleware_instance(name: &str) -> Option<Arc<dyn HttpWardMiddleware 
 
 /// Initialize global module storage
 pub fn initialize_global_storage() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let was_already_initialized = GLOBAL_MODULE_STORAGE.get().is_some();
     let _storage = GLOBAL_MODULE_STORAGE.get_or_init(|| Mutex::new(GlobalModuleStorage::new()));
-    info!(target: "global_module_storage", "Global module storage initialized");
+    
+    if !was_already_initialized {
+        info!(target: "global_module_storage", "Global module storage initialized");
+    }
+    
     Ok(())
 }
 

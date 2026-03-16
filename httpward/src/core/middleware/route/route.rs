@@ -113,7 +113,6 @@ where
                 )
             });
 
-        debug!(?httpward_ctx, "HttpWard context retrieved");
         let current_site = if let Some(site_manager) = &httpward_ctx.current_site {
             site_manager.clone()
         } else {
@@ -122,8 +121,6 @@ where
         };
 
         let path = request.uri().path().to_string();
-        tracing::debug!("Trying to match route for path: {}", path);
-        tracing::debug!("Available routes: {:?}", current_site.routes());
         
         // Try to match route using SiteManager
         match current_site.get_route(&path) {

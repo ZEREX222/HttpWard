@@ -70,9 +70,9 @@ impl HttpWardServer {
         let http_svc = HttpServer::auto(exec.clone()).service(
             (
                 ErrorHandlerLayer::new(),
-                RequestEnricherLayer::new(server_instance_arc),
+                RequestEnricherLayer::new(server_instance_arc.clone()),
                 LogLayer::new(),
-                DynamicModuleLoaderLayer::new(),
+                DynamicModuleLoaderLayer::new(&server_instance_arc),
                 ResponseEnricherLayer::new(),
                 RouteLayer::new(),
             ).into_layer(base_service)

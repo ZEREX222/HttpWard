@@ -262,6 +262,11 @@ impl SiteManager {
         self.routes_with_strategy.iter().map(|rws| rws.route.clone()).collect()
     }
 
+    /// Get all routes with their resolved strategies (for middleware loading)
+    pub fn routes_with_strategy(&self) -> &[RouteWithStrategy] {
+        &self.routes_with_strategy
+    }
+
     /// Get all unique active middleware names used by strategies in this site (excludes Off middleware)
     pub fn get_active_middleware_names(&self) -> Vec<String> {
         use std::collections::HashSet;
