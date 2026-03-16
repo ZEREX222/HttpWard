@@ -9,10 +9,7 @@ use rama::http::{Body, Request, Response};
 use rama::Context;
 use httpward_core::core::HttpWardContext;
 use httpward_core::module_logging::ModuleLogger;
-use httpward_core::middleware_config_ext::get_config_from_ctx_for_module;
-
-// Import the custom logging macros
-use httpward_core::{module_log_error, module_log_warn, module_log_info, module_log_debug};
+use httpward_core::{get_config_from_current_crate, module_log_error, module_log_warn, module_log_info, module_log_debug};
 
 // Import for configuration
 use serde::Deserialize;
@@ -67,8 +64,8 @@ impl HttpWardMiddleware for HttpWardLogLayer {
         module_log_debug!("HttpWardLogLayer.handle called");
         
         // Get configuration from context using universal function (1 line!)
-        // Module name = package name = "httpward_log_module"
-        let config = get_config_from_ctx_for_module::<HttpWardLogConfig>(&ctx, &req, "httpward_log_module")
+        // Automatically uses current crate name = "httpward_log_module"
+        let config = get_config_from_current_crate!(HttpWardLogConfig, &ctx, &req)
             .unwrap_or_default();
         
         // Log the configuration for debugging

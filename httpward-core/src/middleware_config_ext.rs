@@ -110,6 +110,32 @@ where
     get_config_from_ctx::<T>(ctx, req, module_name)
 }
 
+/// Macro to get config using current module name automatically
+/// Usage: get_config_from_current_module!(MyConfig, ctx, req)
+#[macro_export]
+macro_rules! get_config_from_current_module {
+    ($config_type:ty, $ctx:expr, $req:expr) => {
+        $crate::middleware_config_ext::get_config_from_ctx_for_module::<$config_type>(
+            $ctx,
+            $req,
+            module_path!().split("::").last().unwrap_or("unknown")
+        )
+    };
+}
+
+/// Macro to get config using current crate name automatically
+/// Usage: get_config_from_current_crate!(MyConfig, ctx, req)
+#[macro_export]
+macro_rules! get_config_from_current_crate {
+    ($config_type:ty, $ctx:expr, $req:expr) => {
+        $crate::middleware_config_ext::get_config_from_ctx_for_module::<$config_type>(
+            $ctx,
+            $req,
+            env!("CARGO_PKG_NAME")
+        )
+    };
+}
+
 /// Convenient function for getting middleware configuration from context
 pub fn get_middleware_config_from_ctx(
     ctx: &Context<()>,
