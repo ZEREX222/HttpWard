@@ -1,8 +1,65 @@
-site_name: My Docs
-site_url: https://mydomain.org/mysite
+site_name: "HttpWard Documentation"
+site_url: "https://httpward.org/docs"
+
+# Use docs/index.md as the site index
+docs_dir: "docs"
+site_dir: "site"
+
 theme:
-  name: material
+  name: "material"
+  logo: "assets/hw.png"
+  palette:
+    - scheme: "slate"
+      primary: "black"
+      accent: "grey"
+      toggle:
+        icon: "material/brightness-4"
+        name: "Switch to light mode"
+    - scheme: "default"
+      primary: "black"
+      accent: "grey"
+      toggle:
+        icon: "material/brightness-7"
+        name: "Switch to dark mode"
+  font:
+    text: "Inter"
+    code: "JetBrains Mono"
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - search.highlight
+    - search.share
+
+extra_css:
+  - "stylesheets/extra.css"
+
+extra:
+  social:
+    - icon: "fontawesome/brands/github"
+      link: "https://github.com/ZEREX222/HttpWard"
 
 plugins:
-  - json-schema:
-json_schema: "docs/config.schema.json"
+  - search:
+      lang: "en"
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - codehilite:
+      css_class: "highlight"
+      use_pygments: true
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      use_pygments: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
