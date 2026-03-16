@@ -126,7 +126,7 @@ macro_rules! get_config_from_current_module {
 /// Macro to get config using current crate name automatically
 /// Usage: get_config_from_current_crate!(MyConfig, ctx, req)
 #[macro_export]
-macro_rules! get_config_from_current_crate {
+macro_rules! get_module_config_from_current_crate {
     ($config_type:ty, $ctx:expr, $req:expr) => {
         $crate::middleware_config_ext::get_config_from_ctx_for_module::<$config_type>(
             $ctx,
