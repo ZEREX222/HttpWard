@@ -184,7 +184,7 @@ where
                         }
                     }
                     Route::Redirect { redirect, .. } => {
-                        match self.handle_redirect(request, &redirect).await {
+                        match self.handle_redirect(request, &redirect, &matched_route.params).await {
                             Ok(response) => return Ok(response),
                             Err(e) => {
                                 error!("Redirect error: {}", e);
@@ -219,10 +219,21 @@ impl<S> RouteService<S> {
     /// Handle redirects
     async fn handle_redirect(
         &self,
-        _request: RamaRequest<RamaBody>,
+        request: RamaRequest<RamaBody>,
         redirect: &Redirect,
+        params: &std::collections::HashMap<String, String>,
     ) -> Result<RamaResponse<RamaBody>, RouteError> {
-        let location = redirect.to.clone();
+        // Substitute parameters in redirect URL
+        let mut location = redirect.to.clone();
+        for (key, value) in params {
+            // Handle regular parameters like {param}
+            let placeholder = format!("{{{}}}", key);
+            location = location.replace(&placeholder, value);
+            
+            // Also handle wildcard parameters {*param}
+            let wildcard_placeholder = format!("{{*{}}}", key);
+            location = location.replace(&wildcard_placeholder, value);
+        }
         
         Ok(RamaResponse::builder()
             .status(StatusCode::from_u16(redirect.code).unwrap_or(StatusCode::FOUND))
@@ -302,5 +313,153 @@ mod tests {
         // Test non-matching path
         let result3 = site_manager.get_route("/other");
         assert!(result3.is_err(), "Should not match /other path");
+    }
+
+    #[tokio::test]
+    async fn test_redirect_parameter_substitution() {
+        // Create global config with default strategy
+        let global_config = httpward_core::config::GlobalConfig {
+            strategy: Some(httpward_core::config::StrategyRef::Named("default".to_string())),
+            strategies: {
+                let mut strategies = std::collections::HashMap::new();
+                strategies.insert("default".to_string(), vec![]);
+                strategies
+            },
+            ..Default::default()
+        };
+        
+        // Create site config with redirect route
+        let site_config = SiteConfig {
+            domain: "test-site".to_string(),
+            domains: vec![],
+            listeners: vec![],
+            routes: vec![
+                Route::Redirect {
+                    r#match: Match {
+                        path: Some("/search/{*request}".to_string()),
+                        path_regex: None,
+                    },
+                    redirect: httpward_core::config::Redirect {
+                        to: "https://www.google.com/search?q={*request}".to_string(),
+                        code: 301,
+                    },
+                    strategy: None,
+                    strategies: None,
+                },
+            ],
+            strategy: None,
+            strategies: std::collections::HashMap::new(),
+        };
+        
+        // Create SiteManager with global config
+        let site_manager = SiteManager::new(std::sync::Arc::new(site_config), Some(&global_config)).unwrap();
+        
+        // Test matching redirect route
+        let result = site_manager.get_route("/search/httpward+rust");
+        assert!(result.is_ok(), "Failed to match /search/httpward+rust route");
+        
+        let matched_route = result.unwrap();
+        assert!(matches!(&*matched_route.route, &Route::Redirect { .. }));
+        assert_eq!(matched_route.params.get("request"), Some(&"httpward+rust".to_string()));
+        
+        // Test with complex query including URL-encoded characters
+        let result2 = site_manager.get_route("/search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8");
+        assert!(result2.is_ok(), "Failed to match /search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8 route");
+        
+        let matched_route2 = result2.unwrap();
+        assert_eq!(matched_route2.params.get("request"), Some(&"%D0%BA%D0%BE%D1%88%D0%BA%D0%B8".to_string()));
+        
+        // Test with space encoded
+        let result3 = site_manager.get_route("/search/what%20is%20httpward");
+        assert!(result3.is_ok(), "Failed to match /search/what%20is%20httpward route");
+        
+        let matched_route3 = result3.unwrap();
+        assert_eq!(matched_route3.params.get("request"), Some(&"what%20is%20httpward".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_redirect_url_generation_with_wildcard() {
+        // Create global config with default strategy
+        let global_config = httpward_core::config::GlobalConfig {
+            strategy: Some(httpward_core::config::StrategyRef::Named("default".to_string())),
+            strategies: {
+                let mut strategies = std::collections::HashMap::new();
+                strategies.insert("default".to_string(), vec![]);
+                strategies
+            },
+            ..Default::default()
+        };
+        
+        // Create site config with redirect route using wildcard
+        let site_config = SiteConfig {
+            domain: "test-site".to_string(),
+            domains: vec![],
+            listeners: vec![],
+            routes: vec![
+                Route::Redirect {
+                    r#match: Match {
+                        path: Some("/search/{*query}".to_string()),
+                        path_regex: None,
+                    },
+                    redirect: httpward_core::config::Redirect {
+                        to: "https://www.google.com/search?q={*query}".to_string(),
+                        code: 301,
+                    },
+                    strategy: None,
+                    strategies: None,
+                },
+            ],
+            strategy: None,
+            strategies: std::collections::HashMap::new(),
+        };
+        
+        // Create SiteManager with global config
+        let site_manager = SiteManager::new(std::sync::Arc::new(site_config), Some(&global_config)).unwrap();
+        
+        // Create RouteService to test redirect URL generation
+        let route_service = RouteService::new(());
+        
+        // Test redirect URL generation with URL-encoded Cyrillic characters
+        let result = site_manager.get_route("/search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8");
+        assert!(result.is_ok(), "Failed to match /search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8 route");
+        
+        let matched_route = result.unwrap();
+        if let Route::Redirect { redirect, .. } = &*matched_route.route {
+            // Create a dummy request for the redirect handler
+            let dummy_request = RamaRequest::builder()
+                .method("GET")
+                .uri("/search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8")
+                .body(RamaBody::empty())
+                .unwrap();
+            
+            // Test redirect URL generation
+            let redirect_response = route_service.handle_redirect(dummy_request, redirect, &matched_route.params).await.unwrap();
+            
+            // Check that Location header contains the substituted URL
+            let location = redirect_response.headers().get("Location").unwrap().to_str().unwrap();
+            assert_eq!(location, "https://www.google.com/search?q=%D0%BA%D0%BE%D1%88%D0%BA%D0%B8");
+        } else {
+            panic!("Expected Redirect route");
+        }
+        
+        // Test with regular text
+        let result2 = site_manager.get_route("/search/rust+programming");
+        assert!(result2.is_ok(), "Failed to match /search/rust+programming route");
+        
+        let matched_route2 = result2.unwrap();
+        if let Route::Redirect { redirect, .. } = &*matched_route2.route {
+            let dummy_request2 = RamaRequest::builder()
+                .method("GET")
+                .uri("/search/rust+programming")
+                .body(RamaBody::empty())
+                .unwrap();
+            
+            let redirect_response2 = route_service.handle_redirect(dummy_request2, redirect, &matched_route2.params).await.unwrap();
+            
+            let location2 = redirect_response2.headers().get("Location").unwrap().to_str().unwrap();
+            assert_eq!(location2, "https://www.google.com/search?q=rust+programming");
+        } else {
+            panic!("Expected Redirect route");
+        }
     }
 }
