@@ -309,6 +309,15 @@ impl SiteManager {
     pub fn get_tls_list(&self) -> Vec<TlsMapping> {
         self.tls_mappings.clone()
     }
+
+    /// Get active strategy middleware config by name for the given path
+    pub fn get_active_strategy_config_by_route(&self, path: &str, middleware_name: &str) -> Result<Option<crate::config::strategy::MiddlewareConfig>, SiteManagerError> {
+        let matched_route = self.get_route(path)?;
+        let middleware = matched_route.active_strategy.middleware.iter()
+            .find(|m| m.name() == middleware_name)
+            .cloned();
+        Ok(middleware)
+    }
 }
 
 #[cfg(test)]
@@ -509,6 +518,34 @@ mod tests {
             assert!(middleware_names.contains(&"rate_limit".to_string()));
             assert!(middleware_names.contains(&"cors".to_string()));
             assert!(!middleware_names.contains(&"logging".to_string())); // Should be excluded
+        }
+
+        #[test]
+        fn test_get_active_strategy_config_by_route() {
+            let global_config = create_test_global_config();
+            let site_config = Arc::new(create_test_site_config_with_strategies());
+            let site_manager = SiteManager::new(site_config, Some(&global_config)).unwrap();
+
+            // Test finding specific middleware by name
+            let rate_limit_config = site_manager.get_active_strategy_config_by_route("/api", "rate_limit").unwrap();
+            assert!(rate_limit_config.is_some());
+            assert_eq!(rate_limit_config.unwrap().name(), "rate_limit");
+
+            let auth_config = site_manager.get_active_strategy_config_by_route("/api", "auth").unwrap();
+            assert!(auth_config.is_some());
+            assert_eq!(auth_config.unwrap().name(), "auth");
+
+            let logging_config = site_manager.get_active_strategy_config_by_route("/api", "logging").unwrap();
+            assert!(logging_config.is_some());
+            assert_eq!(logging_config.unwrap().name(), "logging");
+
+            // Test non-existent middleware
+            let non_existent = site_manager.get_active_strategy_config_by_route("/api", "non_existent").unwrap();
+            assert!(non_existent.is_none());
+
+            // Should return error for non-existent route
+            let result = site_manager.get_active_strategy_config_by_route("/nonexistent", "rate_limit");
+            assert!(matches!(result, Err(SiteManagerError::NoMatch)));
         }
     }
 }

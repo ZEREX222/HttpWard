@@ -445,6 +445,53 @@ impl MiddlewareConfig {
         let json_val = self.config_as_json()?;
         serde_json::from_value(json_val).map_err(Into::into)
     }
+
+    /// Create middleware config from any serializable struct (super convenient!)
+    /// 
+    /// Usage:
+    /// ```rust
+    /// let config = MyConfig { level: "warn".to_string() };
+    /// let middleware = MiddlewareConfig::from_serializable("httpward_log_module", config);
+    /// ```
+    pub fn from_serializable<T: Serialize>(name: impl Into<String>, config: T) -> Result<Self> {
+        let json_val = serde_json::to_value(config)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize config: {}", e))?;
+        Ok(MiddlewareConfig::new_named_json(name.into(), json_val))
+    }
+
+    /// Create middleware config from YAML string (1-liner friendly)
+    /// 
+    /// Usage:
+    /// ```rust
+    /// let middleware = MiddlewareConfig::from_yaml_str("httpward_log_module", "level: warn");
+    /// ```
+    pub fn from_yaml_str(name: impl Into<String>, yaml_str: impl AsRef<str>) -> Result<Self> {
+        let yaml_val = serde_yaml::from_str(yaml_str.as_ref())
+            .map_err(|e| anyhow::anyhow!("Failed to parse YAML: {}", e))?;
+        Ok(MiddlewareConfig::new_named_yaml(name.into(), yaml_val))
+    }
+
+    /// Create middleware config from JSON string (1-liner friendly)
+    /// 
+    /// Usage:
+    /// ```rust
+    /// let middleware = MiddlewareConfig::from_json_str("httpward_log_module", r#"{"level": "warn"}"#);
+    /// ```
+    pub fn from_json_str(name: impl Into<String>, json_str: impl AsRef<str>) -> Result<Self> {
+        let json_val = serde_json::from_str(json_str.as_ref())
+            .map_err(|e| anyhow::anyhow!("Failed to parse JSON: {}", e))?;
+        Ok(MiddlewareConfig::new_named_json(name.into(), json_val))
+    }
+
+    /// Parse config into specific type with elegant error handling
+    /// 
+    /// Usage:
+    /// ```rust
+    /// let config: MyConfig = middleware.parse_config()?;
+    /// ```
+    pub fn parse_config<T: for<'de> Deserialize<'de>>(&self) -> Result<T> {
+        self.config_into()
+    }
 }
 
 impl<'de> Deserialize<'de> for MiddlewareConfig {
@@ -1062,6 +1109,111 @@ max_size: 1000
         assert_eq!(resolved.middleware.len(), 2);
         assert_eq!(resolved.middleware[0].name(), "rate_limit");
         assert_eq!(resolved.middleware[1].name(), "logging");
+    }
+
+    #[test]
+    fn test_from_yaml_str_convenience() {
+        let middleware = MiddlewareConfig::from_yaml_str(
+            "httpward_log_module", 
+            "level: warn"
+        ).unwrap();
+
+        assert_eq!(middleware.name(), "httpward_log_module");
+        assert!(!middleware.is_off());
+
+        let config: serde_json::Value = middleware.config_as_json().unwrap();
+        assert_eq!(config["level"], "warn");
+    }
+
+    #[test]
+    fn test_from_json_str_convenience() {
+        let middleware = MiddlewareConfig::from_json_str(
+            "httpward_log_module", 
+            r#"{"level": "info", "tag": "api"}"#
+        ).unwrap();
+
+        assert_eq!(middleware.name(), "httpward_log_module");
+        assert!(!middleware.is_off());
+
+        let config: serde_json::Value = middleware.config_as_json().unwrap();
+        assert_eq!(config["level"], "info");
+        assert_eq!(config["tag"], "api");
+    }
+
+    #[test]
+    fn test_from_serializable_convenience() {
+        #[derive(Serialize)]
+        struct LogConfig {
+            level: String,
+            tag: Option<String>,
+        }
+
+        let config = LogConfig {
+            level: "debug".to_string(),
+            tag: Some("test".to_string()),
+        };
+
+        let middleware = MiddlewareConfig::from_serializable(
+            "httpward_log_module", 
+            config
+        ).unwrap();
+
+        assert_eq!(middleware.name(), "httpward_log_module");
+        assert!(!middleware.is_off());
+
+        let parsed_config: serde_json::Value = middleware.config_as_json().unwrap();
+        assert_eq!(parsed_config["level"], "debug");
+        assert_eq!(parsed_config["tag"], "test");
+    }
+
+    #[test]
+    fn test_parse_config_convenience() {
+        #[derive(Deserialize, PartialEq, Debug)]
+        struct LogConfig {
+            level: String,
+            tag: Option<String>,
+        }
+
+        let middleware = MiddlewareConfig::from_yaml_str(
+            "httpward_log_module", 
+            "level: warn\ntag: test"
+        ).unwrap();
+
+        let config: LogConfig = middleware.parse_config().unwrap();
+        assert_eq!(config.level, "warn");
+        assert_eq!(config.tag, Some("test".to_string()));
+    }
+
+    #[test]
+    fn test_yaml_round_trip_convenience() {
+        let original = MiddlewareConfig::from_yaml_str(
+            "test_middleware", 
+            "level: warn\ntag: test"
+        ).unwrap();
+
+        let yaml_string = original.config_to_yaml_string().unwrap();
+        let restored = MiddlewareConfig::from_yaml_str("test_middleware", &yaml_string).unwrap();
+
+        let original_config: serde_json::Value = original.config_as_json().unwrap();
+        let restored_config: serde_json::Value = restored.config_as_json().unwrap();
+        
+        assert_eq!(original_config, restored_config);
+    }
+
+    #[test]
+    fn test_json_round_trip_convenience() {
+        let original = MiddlewareConfig::from_json_str(
+            "test_middleware", 
+            r#"{"level": "warn", "tag": "test"}"#
+        ).unwrap();
+
+        let json_string = original.config_to_json_string().unwrap();
+        let restored = MiddlewareConfig::from_json_str("test_middleware", &json_string).unwrap();
+
+        let original_config: serde_json::Value = original.config_as_json().unwrap();
+        let restored_config: serde_json::Value = restored.config_as_json().unwrap();
+        
+        assert_eq!(original_config, restored_config);
     }
 }
 

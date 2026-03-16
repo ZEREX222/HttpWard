@@ -7,8 +7,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 httpward-core = { path = "../../httpward-core" }
 async-trait = "0.1"
 rama = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
