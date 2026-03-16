@@ -24,13 +24,16 @@ thiserror = "2.0"
 base64 = "0.22"
 sha1 = "0.10"
 http = "1.4"
-libloading = "0.8"
+libloading = "0.9"
+httpward_log_module = { path = "../httpward-modules/httpward_log_module", optional = true }
 
 
 [dev-dependencies]
 
 [features]
 default = []
+static_modules = ["httpward_log_module"]
+dynamic_modules = []
 
 [profile.dev]
 debug = true

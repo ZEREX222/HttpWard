@@ -3,6 +3,7 @@ mod server;
 mod core;
 
 use httpward_core::config::load;
+use std::sync::Arc;
 
 use tracing::{info, debug, warn};
 use tracing_subscriber::{EnvFilter};
@@ -10,6 +11,31 @@ use runtime::server_plan::build_server_plan;
 use server::http_server::HttpWardServer;
 use crate::server::manager::HttpWardServerManager;
 use crate::core::middleware::basic::MiddlewareModuleLoadManager;
+use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
+use httpward_core::core::server_models::server_instance::ServerInstance;
+
+// !!! STATIC MODULES ONLY FOR DEBUG!!!
+// Import static modules ONLY FOR DEBUG
+#[cfg(feature = "static_modules")]
+use httpward_log_module::HttpWardLogLayer;
+
+fn load_middleware_manager(server_plans: &[ServerInstance]) -> Result<MiddlewareModuleLoadManager, Box<dyn std::error::Error + Send + Sync>> {
+    // !!! STATIC MODULES ONLY FOR DEBUG IF YOU WANT TO DEBUG YOUR MIDDLEWARE MODULE!!!
+    if cfg!(feature = "static_modules") {
+        info!("Using static module loading");
+
+        let static_modules = vec![
+            // !!! ADD YOUR MIDDLEWARE MODULE HERE FOR LOCAL DEBUG !!!
+            #[cfg(feature = "static_modules")]
+            ("httpward_log_module", Arc::new(HttpWardLogLayer::new()) as Arc<dyn HttpWardMiddleware + Send + Sync>)
+        ];
+
+        MiddlewareModuleLoadManager::from_server_instances_statically(server_plans, static_modules)
+    } else {
+        info!("Using dynamic module loading");
+        MiddlewareModuleLoadManager::from_server_instances(server_plans)
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -65,22 +91,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         debug!(""); // Empty line for readability
     }
 
-    // Load middleware modules before creating server instances
-    match MiddlewareModuleLoadManager::from_server_instances(&server_plans) {
-        Ok(manager) => {
-            info!("Successfully loaded {} middleware modules", manager.module_count());
+    let manager_result = load_middleware_manager(&server_plans);
 
-            // Display loaded modules
-            for module_name in manager.module_names() {
-                info!("  Loaded module: {}", module_name);
-            }
+    if let Ok(manager) = manager_result {
+        info!("Successfully loaded {} middleware modules", manager.module_count());
 
-            Some(manager)
+        // Display loaded modules
+        for module_name in manager.module_names() {
+            info!("  Loaded module: {}", module_name);
         }
-        Err(e) => {
-            panic!("Failed to load middleware modules: {}", e);
-        }
-    };
+    } else if let Err(e) = manager_result {
+        warn!("Failed to load middleware modules: {}", e);
+    }
 
     let mut instances = vec![];
 

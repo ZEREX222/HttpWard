@@ -11,7 +11,7 @@ static GLOBAL_MODULE_STORAGE: OnceLock<Mutex<GlobalModuleStorage>> = OnceLock::n
 /// ModuleRecord: single library + single middleware instance
 pub struct ModuleRecord {
     pub name: String,
-    pub library: Arc<Library>,
+    pub library: Option<Arc<Library>>,
     pub instance: Arc<dyn HttpWardMiddleware + Send + Sync>,
     pub path: std::path::PathBuf,
 }
