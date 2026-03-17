@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::core::server_models::SiteManager;
 use crate::core::server_models::server_instance::ServerInstance;
 use rama::http::headers::ContentType;
+use rama::http::HeaderMap;
 use crate::core::context::ExtensionsMap;
 
 
@@ -10,13 +11,14 @@ use crate::core::context::ExtensionsMap;
 #[derive(Debug, Clone)]
 pub struct HttpWardContext {
     pub client_ip: IpAddr,
-    pub score: u32,
     pub current_site: Option<Arc<SiteManager>>,
     pub server_instance: Arc<ServerInstance>,
     pub request_content_type: ContentType,
     pub response_content_type: ContentType,
     pub header_fp: Option<String>,
     pub ja4_fp: Option<String>,
+    /// Request headers that can be modified by middleware during pipe processing
+    pub request_headers: HeaderMap,
     /// Extensions map for storing arbitrary data during request lifetime.
     /// Allows middleware to share serialized objects without modifying context structure.
     pub extensions: ExtensionsMap,
@@ -27,13 +29,13 @@ impl HttpWardContext {
         let client_ip = client_addr.ip();
         Self {
             client_ip,
-            score: 0,
             request_content_type: ContentType::text(),
             response_content_type: ContentType::text(),
             current_site: None,
             server_instance,
             header_fp: None,
             ja4_fp: None,
+            request_headers: HeaderMap::new(),
             extensions: ExtensionsMap::new(),
         }
     }

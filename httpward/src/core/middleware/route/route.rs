@@ -135,7 +135,7 @@ where
                         if is_websocket {
                             match WebSocketHandler::http_to_ws_url(&backend) {
                                 Ok(ws_url) => {
-                                    match self.websocket_handler.proxy_websocket(request, &ws_url).await {
+                                    match self.websocket_handler.proxy_websocket(request, &ws_url, Some(&httpward_ctx.request_headers)).await {
                                         Ok(response) => return Ok(response),
                                         Err(e) => {
                                             tracing::error!("WebSocket proxy error: {}", e);
@@ -157,7 +157,7 @@ where
                                 }
                             }
                         } else {
-                            match self.proxy_handler.proxy_request(request, &backend, &matched_route.params).await {
+                            match self.proxy_handler.proxy_request(request, &backend, &matched_route.params, Some(httpward_ctx.request_headers.clone())).await {
                                 Ok(response) => return Ok(response),
                                 Err(e) => {
                                     tracing::error!("Proxy error: {}", e);

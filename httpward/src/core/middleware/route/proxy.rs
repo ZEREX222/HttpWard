@@ -132,11 +132,13 @@ impl ProxyHandler {
     }
     
     /// Proxy HTTP request to upstream
+    /// If httpward_headers is provided, they will be used instead of request headers (allowing middleware to modify them)
     pub async fn proxy_request(
         &self,
         mut req: RamaRequest<RamaBody>,
         backend: &str,
         params: &HashMap<String, String>,
+        httpward_headers: Option<HeaderMap>,
     ) -> Result<RamaResponse<RamaBody>, ProxyError> {
         // Process backend URL with matcher parameters
         let processed_backend = Self::process_backend_url_with_params(backend, params)?;
@@ -145,11 +147,18 @@ impl ProxyHandler {
         let new_uri = Self::build_upstream_url(&processed_backend, req.uri())?;
         *req.uri_mut() = new_uri;
 
+        // Use headers from HttpWardContext if provided (allows middleware modifications)
+        let mut headers = if let Some(ctx_headers) = httpward_headers {
+            ctx_headers
+        } else {
+            req.headers().clone()
+        };
+
         // Ensure Host header for upstream
         let authority = req.uri().authority().map(|a| a.to_string());
-        if !req.headers().contains_key(header::HOST) {
+        if !headers.contains_key(header::HOST) {
             if let Some(authority_str) = authority {
-                req.headers_mut().insert(
+                headers.insert(
                     header::HOST,
                     HeaderValue::from_str(&authority_str)
                         .map_err(|e| ProxyError::Upstream(format!("Invalid host header: {}", e)))?,
@@ -169,8 +178,8 @@ impl ProxyHandler {
         let proto = "http";   // or "https"
 
         // Normalize headers before sending upstream
-        let headers = normalize_request_headers(
-            req.headers().clone(),
+        let normalized_headers = normalize_request_headers(
+            headers,
             client_ip,
             upstream_host,
             proto,
@@ -179,7 +188,7 @@ impl ProxyHandler {
         // Send request using Rama HTTP client
         let resp = self.client
             .request(req.method().clone(), req.uri().clone())
-            .headers(headers)
+            .headers(normalized_headers)
             .body(req.into_body())
             .send(rama::Context::default())
             .await

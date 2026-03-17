@@ -27,18 +27,21 @@ impl WebSocketHandler {
     }
     
     /// Proxy WebSocket connection to upstream
+    /// If httpward_headers is provided, they will be used instead of request headers (allowing middleware to modify them)
     pub async fn proxy_websocket(
         &self,
         req: RamaRequest<RamaBody>,
         _upstream_ws_url: &str,
+        httpward_headers: Option<&HeaderMap>,
     ) -> Result<RamaResponse<RamaBody>, WebSocketError> {
         // TODO: Implement actual WebSocket upgrade handling
         // For now, return a basic 101 response to indicate upgrade acceptance
+        let headers = httpward_headers.unwrap_or_else(|| req.headers());
         let resp = Response::builder()
             .status(101)
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
-            .header("Sec-WebSocket-Accept", self.generate_accept_key(req.headers()))
+            .header("Sec-WebSocket-Accept", self.generate_accept_key(headers))
             .body(RamaBody::empty())
             .map_err(|e| WebSocketError::ConnectionFailed(format!("Failed to build response: {}", e)))?;
             

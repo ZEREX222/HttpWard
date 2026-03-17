@@ -231,15 +231,15 @@ where
         let site_domain = site.as_ref().map(|sm| sm.site_name());
 
         // Create and insert HttpWardContext into the context
-        let enriched_context = HttpWardContext {
+        let mut enriched_context = HttpWardContext {
             client_ip,
-            score: 0,
             request_content_type: request_content_type.clone(),
             response_content_type: ContentType::text(), // Will be set by ResponseEnricher
             current_site: site.clone(),
             server_instance: self.server_instance.clone(),
             ja4_fp,
             header_fp,
+            request_headers: request.headers().clone(),
             extensions: httpward_core::core::context::ExtensionsMap::new(),
         };
 
