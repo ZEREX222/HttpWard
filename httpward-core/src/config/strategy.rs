@@ -167,6 +167,12 @@ pub fn supplement_middleware_configs(
                 (MiddlewareConfig::Named { config: existing_config, .. }, MiddlewareConfig::Named { config, .. }) => {
                     merge_universal_missing_only(existing_config, config.clone())?;
                 }
+                (current_on @ MiddlewareConfig::On { .. }, MiddlewareConfig::Named { name, config }) => {
+                    *current_on = MiddlewareConfig::Named {
+                        name: name.clone(),
+                        config: config.clone(),
+                    };
+                }
                 // Handle cases where one or both are Off - don't merge configs for Off middleware
                 _ => {
                     // Do nothing - either current or incoming is Off, so no config merging needed
@@ -213,7 +219,7 @@ pub fn filter_disabled_middleware(
                     result.push(middleware.clone());
                 }
             }
-            MiddlewareConfig::Named { .. } => {
+            MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. } => {
                 // Current middleware is enabled - always keep it
                 result.push(middleware.clone());
             }
@@ -229,7 +235,7 @@ pub fn filter_disabled_middleware(
         
         if !exists_in_current {
             match middleware {
-                MiddlewareConfig::Named { .. } => {
+                MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. } => {
                     // Parent has it enabled and current doesn't have it - add it
                     result.push(middleware.clone());
                 }
@@ -267,18 +273,31 @@ pub fn supplement_middleware(
                     // Both are enabled - merge configurations
                     merge_universal_missing_only(existing_config, config.clone())?;
                 }
-                (MiddlewareConfig::Off { .. }, MiddlewareConfig::Named { .. }) => {
+                (current_on @ MiddlewareConfig::On { .. }, MiddlewareConfig::Named { name, config }) => {
+                    // Explicitly enabled without config - inherit missing config from parent.
+                    *current_on = MiddlewareConfig::Named {
+                        name: name.clone(),
+                        config: config.clone(),
+                    };
+                }
+                (MiddlewareConfig::Off { .. }, MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. }) => {
                     // Current is disabled but incoming is enabled - DON'T enable it
                     // Current (inline/off) takes precedence over incoming (site/global)
                     // Do nothing - keep it disabled
                 }
-                (MiddlewareConfig::Named { .. }, MiddlewareConfig::Off { .. }) => {
+                (MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. }, MiddlewareConfig::Off { .. }) => {
                     // Current is enabled but incoming is disabled - keep current enabled (takes precedence)
                     // Do nothing
                 }
                 (MiddlewareConfig::Off { .. }, MiddlewareConfig::Off { .. }) => {
                     // Both are disabled - keep disabled
                     // Do nothing
+                }
+                (MiddlewareConfig::Named { .. }, MiddlewareConfig::On { .. }) => {
+                    // Current already has explicit config - keep it as-is.
+                }
+                (MiddlewareConfig::On { .. }, MiddlewareConfig::On { .. }) => {
+                    // Already explicitly enabled without config.
                 }
             }
         } else {
@@ -368,6 +387,9 @@ pub enum MiddlewareConfig {
         #[schemars(with = "serde_json::Value")]
         config: UniversalValue,
     },
+    On {
+        name: String,
+    },
     Off {
         name: String,
     },
@@ -389,7 +411,12 @@ impl MiddlewareConfig {
             config: UniversalValue::from_yaml(config),
         }
     }
-    
+
+    /// Create new enabled middleware without explicit configuration
+    pub fn new_on(name: String) -> Self {
+        MiddlewareConfig::On { name }
+    }
+
     /// Create new disabled middleware
     pub fn new_off(name: String) -> Self {
         MiddlewareConfig::Off { name }
@@ -404,6 +431,7 @@ impl MiddlewareConfig {
     pub fn name(&self) -> &str {
         match self {
             MiddlewareConfig::Named { name, .. } => name,
+            MiddlewareConfig::On { name } => name,
             MiddlewareConfig::Off { name } => name,
         }
     }
@@ -412,6 +440,7 @@ impl MiddlewareConfig {
     pub fn config_as_json(&self) -> Result<serde_json::Value> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.as_json(),
+            MiddlewareConfig::On { .. } => Ok(serde_json::Value::Object(serde_json::Map::new())),
             MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
         }
     }
@@ -420,6 +449,7 @@ impl MiddlewareConfig {
     pub fn config_as_yaml(&self) -> Result<serde_yaml::Value> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.as_yaml(),
+            MiddlewareConfig::On { .. } => Ok(serde_yaml::Value::Mapping(serde_yaml::Mapping::new())),
             MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
         }
     }
@@ -428,6 +458,7 @@ impl MiddlewareConfig {
     pub fn config_to_json_string(&self) -> Result<String> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.to_json_string(),
+            MiddlewareConfig::On { .. } => serde_json::to_string_pretty(&serde_json::Value::Object(serde_json::Map::new())).map_err(Into::into),
             MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
         }
     }
@@ -436,6 +467,7 @@ impl MiddlewareConfig {
     pub fn config_to_yaml_string(&self) -> Result<String> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.to_yaml_string(),
+            MiddlewareConfig::On { .. } => serde_yaml::to_string(&serde_yaml::Value::Mapping(serde_yaml::Mapping::new())).map_err(Into::into),
             MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
         }
     }
@@ -450,8 +482,12 @@ impl MiddlewareConfig {
     /// 
     /// Usage:
     /// ```rust
+    /// # use httpward_core::config::MiddlewareConfig;
+    /// # use serde::Serialize;
+    /// # #[derive(Serialize)]
+    /// # struct MyConfig { level: String }
     /// let config = MyConfig { level: "warn".to_string() };
-    /// let middleware = MiddlewareConfig::from_serializable("httpward_log_module", config);
+    /// let middleware = MiddlewareConfig::from_serializable("httpward_log_module", config).unwrap();
     /// ```
     pub fn from_serializable<T: Serialize>(name: impl Into<String>, config: T) -> Result<Self> {
         let json_val = serde_json::to_value(config)
@@ -463,7 +499,8 @@ impl MiddlewareConfig {
     /// 
     /// Usage:
     /// ```rust
-    /// let middleware = MiddlewareConfig::from_yaml_str("httpward_log_module", "level: warn");
+    /// # use httpward_core::config::MiddlewareConfig;
+    /// let middleware = MiddlewareConfig::from_yaml_str("httpward_log_module", "level: warn").unwrap();
     /// ```
     pub fn from_yaml_str(name: impl Into<String>, yaml_str: impl AsRef<str>) -> Result<Self> {
         let yaml_val = serde_yaml::from_str(yaml_str.as_ref())
@@ -475,7 +512,8 @@ impl MiddlewareConfig {
     /// 
     /// Usage:
     /// ```rust
-    /// let middleware = MiddlewareConfig::from_json_str("httpward_log_module", r#"{"level": "warn"}"#);
+    /// # use httpward_core::config::MiddlewareConfig;
+    /// let middleware = MiddlewareConfig::from_json_str("httpward_log_module", r#"{"level": "warn"}"#).unwrap();
     /// ```
     pub fn from_json_str(name: impl Into<String>, json_str: impl AsRef<str>) -> Result<Self> {
         let json_val = serde_json::from_str(json_str.as_ref())
@@ -487,7 +525,12 @@ impl MiddlewareConfig {
     /// 
     /// Usage:
     /// ```rust
-    /// let config: MyConfig = middleware.parse_config()?;
+    /// # use httpward_core::config::MiddlewareConfig;
+    /// # use serde::Deserialize;
+    /// # #[derive(Deserialize)]
+    /// # struct MyConfig { level: String }
+    /// let middleware = MiddlewareConfig::from_json_str("httpward_log_module", r#"{"level": "warn"}"#).unwrap();
+    /// let config: MyConfig = middleware.parse_config().unwrap();
     /// ```
     pub fn parse_config<T: for<'de> Deserialize<'de>>(&self) -> Result<T> {
         self.config_into()
@@ -510,13 +553,19 @@ impl<'de> Deserialize<'de> for MiddlewareConfig {
 
         let (name, yaml_value) = map.into_iter().next().unwrap();
 
-        // Check if the value is "off" (string or boolean false)
+        // Check if the value is an explicit on/off toggle.
         match &yaml_value {
-            serde_yaml::Value::String(s) if s == "off" => {
+            serde_yaml::Value::String(s) if s.eq_ignore_ascii_case("off") => {
                 return Ok(MiddlewareConfig::Off { name });
             }
             serde_yaml::Value::Bool(b) if !b => {
                 return Ok(MiddlewareConfig::Off { name });
+            }
+            serde_yaml::Value::String(s) if s.eq_ignore_ascii_case("on") => {
+                return Ok(MiddlewareConfig::On { name });
+            }
+            serde_yaml::Value::Bool(b) if *b => {
+                return Ok(MiddlewareConfig::On { name });
             }
             _ => {
                 // Normal middleware configuration
@@ -546,32 +595,11 @@ impl Strategy {
         let mut result = self.clone();
 
         for middleware in other.middleware.iter() {
-            match middleware {
-                MiddlewareConfig::Named { name, .. } => {
-                    if let Some(pos) = Arc::get_mut(&mut result.middleware).unwrap_or(&mut Vec::new()).iter().position(|m| {
-                        matches!(
-                            m,
-                            MiddlewareConfig::Named { name: existing, .. }
-                            if existing == name
-                        )
-                    }) {
-                        Arc::get_mut(&mut result.middleware).unwrap()[pos] = middleware.clone();
-                    } else {
-                        Arc::get_mut(&mut result.middleware).unwrap().push(middleware.clone());
-                    }
-                }
-                MiddlewareConfig::Off { name } => {
-                    // Handle Off middleware - remove if exists, or add as Off
-                    if let Some(pos) = Arc::get_mut(&mut result.middleware).unwrap_or(&mut Vec::new()).iter().position(|m| {
-                        m.name() == name
-                    }) {
-                        // Update existing middleware to Off state
-                        Arc::get_mut(&mut result.middleware).unwrap()[pos] = middleware.clone();
-                    } else {
-                        // Add new Off middleware
-                        Arc::get_mut(&mut result.middleware).unwrap().push(middleware.clone());
-                    }
-                }
+            let merged = Arc::make_mut(&mut result.middleware);
+            if let Some(pos) = merged.iter().position(|existing| existing.name() == middleware.name()) {
+                merged[pos] = middleware.clone();
+            } else {
+                merged.push(middleware.clone());
             }
         }
 

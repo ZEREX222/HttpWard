@@ -275,7 +275,8 @@ impl SiteManager {
         for route_with_strategy in &self.routes_with_strategy {
             for middleware_config in route_with_strategy.active_strategy.middleware.iter() {
                 match middleware_config {
-                    crate::config::strategy::MiddlewareConfig::Named { name, .. } => {
+                    crate::config::strategy::MiddlewareConfig::Named { name, .. }
+                    | crate::config::strategy::MiddlewareConfig::On { name } => {
                         middleware_names.insert(name.clone());
                     },
                     crate::config::strategy::MiddlewareConfig::Off { name: _ } => {
@@ -518,6 +519,51 @@ mod tests {
             assert!(middleware_names.contains(&"rate_limit".to_string()));
             assert!(middleware_names.contains(&"cors".to_string()));
             assert!(!middleware_names.contains(&"logging".to_string())); // Should be excluded
+        }
+
+        #[test]
+        fn test_get_active_middleware_names_includes_on() {
+            use crate::config::strategy::{MiddlewareConfig, StrategyRef};
+            use crate::config::StrategyCollection;
+
+            let global_config = create_test_global_config();
+
+            let mut strategies = StrategyCollection::new();
+            strategies.insert(
+                "mixed_strategy".to_string(),
+                vec![
+                    MiddlewareConfig::new_on("httpward_log_module".to_string()),
+                    MiddlewareConfig::new_named_json(
+                        "rate_limit".to_string(),
+                        json!({"requests": 100})
+                    ),
+                    MiddlewareConfig::new_off("logging".to_string()),
+                ]
+            );
+
+            let site_config = SiteConfig {
+                domain: "test.example.com".to_string(),
+                domains: vec![],
+                listeners: vec![],
+                routes: vec![
+                    Route::Proxy {
+                        r#match: Match { path: Some("/api".to_string()), ..Default::default() },
+                        backend: "http://backend".to_string(),
+                        strategy: Some(StrategyRef::Named("mixed_strategy".to_string())),
+                        strategies: None,
+                    }
+                ],
+                strategy: Some(StrategyRef::Named("mixed_strategy".to_string())),
+                strategies,
+            };
+
+            let site_manager = SiteManager::new(Arc::new(site_config), Some(&global_config)).unwrap();
+            let middleware_names = site_manager.get_active_middleware_names();
+
+            assert_eq!(middleware_names.len(), 2);
+            assert!(middleware_names.contains(&"httpward_log_module".to_string()));
+            assert!(middleware_names.contains(&"rate_limit".to_string()));
+            assert!(!middleware_names.contains(&"logging".to_string()));
         }
 
         #[test]

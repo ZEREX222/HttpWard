@@ -2,7 +2,6 @@
 mod off_tests {
     use crate::config::strategy::{MiddlewareConfig, supplement_middleware, filter_disabled_middleware};
     use serde_json::json;
-    use std::collections::HashMap;
 
     #[test]
     fn test_middleware_config_off_deserialization() {
@@ -285,5 +284,73 @@ mod off_tests {
         assert!(strategies2[1].is_off()); // logging: false
 
         println!("✅ YAML parsing strategies with off works correctly");
+    }
+
+    #[test]
+    fn test_middleware_config_on_deserialization() {
+        let yaml = r#"
+        httpward_log_module: on
+        "#;
+        let config: MiddlewareConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.name(), "httpward_log_module");
+        assert!(!config.is_off());
+        assert_eq!(config.config_as_json().unwrap(), json!({}));
+
+        let yaml = r#"
+        httpward_log_module: true
+        "#;
+        let config: MiddlewareConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.name(), "httpward_log_module");
+        assert!(!config.is_off());
+        assert_eq!(config.config_as_json().unwrap(), json!({}));
+
+        println!("✅ MiddlewareConfig on deserialization works correctly");
+    }
+
+    #[test]
+    fn test_supplement_middleware_with_on_inherits_parent_config() {
+        let mut current = vec![
+            MiddlewareConfig::new_on("httpward_log_module".to_string()),
+        ];
+
+        let incoming = vec![
+            MiddlewareConfig::new_named_json(
+                "httpward_log_module".to_string(),
+                json!({"level": "info", "format": "json"})
+            ),
+        ];
+
+        supplement_middleware(&mut current, &incoming).unwrap();
+
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].name(), "httpward_log_module");
+        assert!(!current[0].is_off());
+        assert_eq!(current[0].config_as_json().unwrap(), json!({
+            "level": "info",
+            "format": "json"
+        }));
+
+        println!("✅ MiddlewareConfig on inherits parent config correctly");
+    }
+
+    #[test]
+    fn test_yaml_parsing_strategies_with_on() {
+        let yaml = r#"
+        - httpward_log_module: on
+        - rate_limit:
+            requests: 100
+        - auth: true
+        "#;
+
+        let strategies: Vec<MiddlewareConfig> = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(strategies.len(), 3);
+        assert_eq!(strategies[0].name(), "httpward_log_module");
+        assert_eq!(strategies[0].config_as_json().unwrap(), json!({}));
+        assert_eq!(strategies[1].name(), "rate_limit");
+        assert_eq!(strategies[2].name(), "auth");
+        assert_eq!(strategies[2].config_as_json().unwrap(), json!({}));
+
+        println!("✅ YAML parsing strategies with on works correctly");
     }
 }

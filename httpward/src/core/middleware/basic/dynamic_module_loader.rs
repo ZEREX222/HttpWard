@@ -62,7 +62,8 @@ impl DynamicModuleLoaderLayer {
                 for middleware_config in route_with_strategy.active_strategy.middleware.iter() {
                     // Only include enabled middleware (skip Off middleware)
                     match middleware_config {
-                        httpward_core::config::strategy::MiddlewareConfig::Named { name, .. } => {
+                        httpward_core::config::strategy::MiddlewareConfig::Named { name, .. }
+                        | httpward_core::config::strategy::MiddlewareConfig::On { name } => {
                             middleware_names.insert(name.clone());
                         }
                         httpward_core::config::strategy::MiddlewareConfig::Off { .. } => {
@@ -266,6 +267,49 @@ mod tests {
         Arc::new(server_instance)
     }
 
+    fn create_test_server_instance_with_on() -> Arc<ServerInstance> {
+        let mut strategies = StrategyCollection::new();
+        strategies.insert(
+            "test_strategy".to_string(),
+            vec![
+                MiddlewareConfig::new_on("enabled_without_config".to_string()),
+                MiddlewareConfig::new_off("disabled_middleware".to_string()),
+            ],
+        );
+
+        let route = Route::Proxy {
+            r#match: Match {
+                path: Some("/test".to_string()),
+                path_regex: None,
+            },
+            backend: "http://example.com".to_string(),
+            strategy: Some(StrategyRef::Named("test_strategy".to_string())),
+            strategies: None,
+        };
+
+        let site_config = SiteConfig {
+            domain: "test.com".to_string(),
+            routes: vec![route],
+            strategy: None,
+            strategies,
+            ..Default::default()
+        };
+
+        let site_manager = SiteManager::new(
+            Arc::new(site_config),
+            Some(&GlobalConfig::default()),
+        ).unwrap();
+
+        Arc::new(ServerInstance {
+            bind: ListenerKey {
+                host: "127.0.0.1".to_string(),
+                port: 8080,
+            },
+            site_managers: vec![Arc::new(site_manager)],
+            global: GlobalConfig::default(),
+        })
+    }
+
     #[test]
     fn test_dynamic_module_loader_layer_creation() {
         let server_instance = create_test_server_instance();
@@ -293,6 +337,18 @@ mod tests {
         assert_eq!(unique_names.len(), 0);
         
         println!("Unique middleware names: {:?}", unique_names);
+    }
+
+    #[test]
+    fn test_collect_unique_middleware_names_includes_on() {
+        let server_instance = create_test_server_instance_with_on();
+        let layer = DynamicModuleLoaderLayer::new(&server_instance);
+
+        let unique_names = layer.collect_unique_middleware_names(&server_instance);
+
+        assert!(unique_names.contains(&"enabled_without_config".to_string()));
+        assert!(!unique_names.contains(&"disabled_middleware".to_string()));
+        assert_eq!(unique_names.len(), 1);
     }
 
     #[test]

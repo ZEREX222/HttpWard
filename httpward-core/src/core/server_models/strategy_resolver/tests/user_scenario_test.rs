@@ -96,4 +96,56 @@ mod user_scenario_test {
         println!("✅ User exact scenario works correctly - rate_limit is completely removed");
         println!("   This matches the expected behavior: inline 'rate_limit: off' removes it completely");
     }
+
+    #[test]
+    fn test_strategy_resolver_keeps_on_middleware_with_empty_config() {
+        let global = GlobalConfig {
+            domain: "global.local".to_string(),
+            domains: vec![],
+            listeners: vec![],
+            routes: vec![],
+            log: crate::config::global::LogConfig::default(),
+            sites_enabled: PathBuf::from("./sites-enabled"),
+            strategy: None,
+            strategies: Default::default(),
+        };
+
+        let site = SiteConfig {
+            domain: "test.local".to_string(),
+            domains: vec!["test.local".to_string()],
+            listeners: vec![],
+            routes: vec![Route::Static {
+                r#match: Match {
+                    path: Some("/site".to_string()),
+                    path_regex: None,
+                },
+                static_dir: PathBuf::from("/myprojects/html"),
+                strategy: None,
+                strategies: None,
+            }],
+            strategy: Some(StrategyRef::Named("default3".to_string())),
+            strategies: {
+                let mut strategies = std::collections::HashMap::new();
+                strategies.insert(
+                    "default3".to_string(),
+                    vec![MiddlewareConfig::new_on("httpward_log_module".to_string())],
+                );
+                strategies
+            },
+        };
+
+        let resolver = StrategyResolver::new(&site, &global).unwrap();
+
+        let site_strategy = resolver.resolve_for_site(&site).unwrap().unwrap();
+        assert_eq!(site_strategy.middleware.len(), 1);
+        assert_eq!(site_strategy.middleware[0].name(), "httpward_log_module");
+        assert_eq!(site_strategy.middleware[0].config_as_json().unwrap(), json!({}));
+
+        let route_strategy = resolver.resolve_for_route(0).unwrap();
+        assert_eq!(route_strategy.middleware.len(), 1);
+        assert_eq!(route_strategy.middleware[0].name(), "httpward_log_module");
+        assert_eq!(route_strategy.middleware[0].config_as_json().unwrap(), json!({}));
+
+        println!("✅ StrategyResolver keeps 'on' middleware with empty config");
+    }
 }
