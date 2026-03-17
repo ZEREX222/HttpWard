@@ -22,6 +22,7 @@ async-trait = "0.1"
 matchit = "0.9"
 regex = "1.12"
 thiserror = "2.0"
+parking_lot = { workspace = true }
 
 
 

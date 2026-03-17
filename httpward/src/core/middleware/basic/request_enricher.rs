@@ -239,7 +239,8 @@ where
             current_site: site.clone(),
             server_instance: self.server_instance.clone(),
             ja4_fp,
-            header_fp
+            header_fp,
+            extensions: httpward_core::core::context::ExtensionsMap::new(),
         };
 
         ctx.insert(enriched_context);

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::core::server_models::SiteManager;
 use crate::core::server_models::server_instance::ServerInstance;
 use rama::http::headers::ContentType;
+use crate::core::context::ExtensionsMap;
 
 
 
@@ -15,7 +16,10 @@ pub struct HttpWardContext {
     pub request_content_type: ContentType,
     pub response_content_type: ContentType,
     pub header_fp: Option<String>,
-    pub ja4_fp: Option<String>
+    pub ja4_fp: Option<String>,
+    /// Extensions map for storing arbitrary data during request lifetime.
+    /// Allows middleware to share serialized objects without modifying context structure.
+    pub extensions: ExtensionsMap,
 }
 
 impl HttpWardContext {
@@ -29,7 +33,8 @@ impl HttpWardContext {
             current_site: None,
             server_instance,
             header_fp: None,
-            ja4_fp: None
+            ja4_fp: None,
+            extensions: ExtensionsMap::new(),
         }
     }
     
