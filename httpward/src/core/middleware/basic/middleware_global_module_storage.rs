@@ -16,6 +16,46 @@ pub struct ModuleRecord {
     pub path: std::path::PathBuf,
 }
 
+impl ModuleRecord {
+    /// Build a dynamic module record backed by a shared library.
+    pub fn dynamic(
+        name: impl Into<String>,
+        library: Arc<Library>,
+        instance: Arc<dyn HttpWardMiddleware + Send + Sync>,
+        path: std::path::PathBuf,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            library: Some(library),
+            instance,
+            path,
+        }
+    }
+
+    /// Build a static module record with no backing library.
+    pub fn static_module(
+        name: impl Into<String>,
+        instance: Arc<dyn HttpWardMiddleware + Send + Sync>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            library: None,
+            instance,
+            path: std::path::PathBuf::from("<static>"),
+        }
+    }
+}
+
+/// Common registry API for module lookup and lifecycle operations.
+pub trait ModuleRegistry {
+    fn add_module(&mut self, module: ModuleRecord);
+    fn get_middleware_instance(&self, name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>>;
+    fn has_module(&self, name: &str) -> bool;
+    fn remove_module(&mut self, name: &str) -> Option<ModuleRecord>;
+    fn module_names(&self) -> Vec<String>;
+    fn module_count(&self) -> usize;
+}
+
 /// Global module storage that holds all loaded middleware instances
 pub struct GlobalModuleStorage {
     modules: HashMap<String, ModuleRecord>,
@@ -50,7 +90,12 @@ impl GlobalModuleStorage {
     pub fn has_module(&self, name: &str) -> bool {
         self.modules.contains_key(name)
     }
-    
+
+    /// Remove module from storage.
+    pub fn remove_module(&mut self, name: &str) -> Option<ModuleRecord> {
+        self.modules.remove(name)
+    }
+
     /// Get all module names
     pub fn module_names(&self) -> Vec<String> {
         self.modules.keys().cloned().collect()
@@ -59,6 +104,32 @@ impl GlobalModuleStorage {
     /// Get module count
     pub fn module_count(&self) -> usize {
         self.modules.len()
+    }
+}
+
+impl ModuleRegistry for GlobalModuleStorage {
+    fn add_module(&mut self, module: ModuleRecord) {
+        GlobalModuleStorage::add_module(self, module);
+    }
+
+    fn get_middleware_instance(&self, name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
+        GlobalModuleStorage::get_middleware_instance(self, name)
+    }
+
+    fn has_module(&self, name: &str) -> bool {
+        GlobalModuleStorage::has_module(self, name)
+    }
+
+    fn remove_module(&mut self, name: &str) -> Option<ModuleRecord> {
+        GlobalModuleStorage::remove_module(self, name)
+    }
+
+    fn module_names(&self) -> Vec<String> {
+        GlobalModuleStorage::module_names(self)
+    }
+
+    fn module_count(&self) -> usize {
+        GlobalModuleStorage::module_count(self)
     }
 }
 

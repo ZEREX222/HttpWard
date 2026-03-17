@@ -8,6 +8,8 @@ use tracing::{info, error, warn};
 use super::middleware_module_instance::MiddlewareModuleInstance;
 use super::middleware_global_module_storage::{initialize_global_storage, with_global_storage, ModuleRecord};
 
+const DEFAULT_MODULES_DIR: &str = "modules";
+
 /// Manager for dynamic loading of middleware modules based on strategy configuration
 /// Works only with GlobalModuleStorage, doesn't store any local data
 #[derive(Debug)]
@@ -20,7 +22,7 @@ impl MiddlewareModuleLoadManager {
     /// Create new module load manager from multiple server instances with dynamic loading (default)
     /// This is the recommended method for most use cases
     pub fn from_server_instances(server_instances: &[ServerInstance]) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::from_server_instances_with_dir(server_instances, Path::new("modules"))
+        Self::from_server_instances_with_dir(server_instances, Path::new(DEFAULT_MODULES_DIR))
     }
     
     /// Create new module load manager from multiple server instances with static modules
@@ -75,7 +77,7 @@ impl MiddlewareModuleLoadManager {
     
     /// Create new module load manager from single server instance (for backward compatibility)
     pub fn from_server_instance(server_instance: &ServerInstance) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::from_server_instances(&[server_instance.clone()])
+        Self::from_server_instances(std::slice::from_ref(server_instance))
     }
     
     /// Create new module load manager from single server instance with custom modules directory
@@ -83,7 +85,7 @@ impl MiddlewareModuleLoadManager {
         server_instance: &ServerInstance,
         modules_dir: P
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        Self::from_server_instances_with_dir(&[server_instance.clone()], modules_dir)
+        Self::from_server_instances_with_dir(std::slice::from_ref(server_instance), modules_dir)
     }
     
     /// Extract unique middleware names from multiple server instances
@@ -112,48 +114,62 @@ impl MiddlewareModuleLoadManager {
     
     /// Extract unique middleware names from server instance (backward compatibility)
     fn extract_middleware_names(server_instance: &ServerInstance) -> Vec<String> {
-        Self::extract_middleware_names_from_instances(&[server_instance.clone()])
+        Self::extract_middleware_names_from_instances(std::slice::from_ref(server_instance))
     }
-    
-    /// Load module by name and add to global storage
-    fn load_module_by_name_and_add_to_global(&mut self, name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let module_path = self.get_module_path(name)?;
-        
-        info!(target: "module_load_manager", 
-              "Loading middleware module '{}' from: {}", name, module_path.display());
-        
-        // Check if already loaded in global storage
-        if let Ok(has_module) = with_global_storage(|storage| storage.has_module(name)) {
-            if has_module {
-                info!(target: "module_load_manager", "Module '{}' already loaded in global storage", name);
-                return Ok(());
-            }
-        }
 
-        // Load library once
-        let lib = Arc::new(unsafe { Library::new(&module_path)? });
+    /// Ensure global storage is available before any operation.
+    fn ensure_storage() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        initialize_global_storage()
+    }
 
-        // Create middleware instance
-        let instance = unsafe { MiddlewareModuleInstance::create_from_arc(lib.clone()) }?;
-        let boxed_middleware = instance.into_boxed_middleware();
+    /// Check if a module already exists in global storage.
+    fn is_module_registered(name: &str) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        with_global_storage(|storage| storage.has_module(name))
+    }
 
-        // Create ModuleRecord
-        let module_record = ModuleRecord {
-            name: name.to_string(),
-            library: Some(lib.clone()),
-            instance: boxed_middleware,
-            path: module_path.clone(),
-        };
-
-        // Add to global storage
+    /// Store module record in global storage.
+    fn store_module_record(module_record: ModuleRecord) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let module_name = module_record.name.clone();
         with_global_storage(|global_storage| {
             global_storage.add_module(module_record);
-            info!(target: "module_load_manager", "Added module '{}' to global storage", name);
+            info!(target: "module_load_manager", "Added module '{}' to global storage", module_name);
         }).map_err(|e| {
             error!(target: "module_load_manager", "Failed to add module to global storage: {}", e);
             e
-        })?;
-        
+        })
+    }
+
+    /// Build a dynamic module record by loading a shared library module.
+    fn load_dynamic_record(&self, name: &str) -> Result<ModuleRecord, Box<dyn std::error::Error + Send + Sync>> {
+        let module_path = self.get_module_path(name)?;
+
+        info!(target: "module_load_manager",
+              "Loading middleware module '{}' from: {}", name, module_path.display());
+
+        let lib = Arc::new(unsafe { Library::new(&module_path)? });
+        let instance = unsafe { MiddlewareModuleInstance::create_from_arc(lib.clone()) }?;
+        let boxed_middleware = instance.into_boxed_middleware();
+
+        Ok(ModuleRecord::dynamic(
+            name.to_string(),
+            lib,
+            boxed_middleware,
+            module_path,
+        ))
+    }
+
+    /// Load module by name and add to global storage
+    fn load_module_by_name_and_add_to_global(&mut self, name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Self::ensure_storage()?;
+
+        if Self::is_module_registered(name)? {
+            info!(target: "module_load_manager", "Module '{}' already loaded in global storage", name);
+            return Ok(());
+        }
+
+        let module_record = self.load_dynamic_record(name)?;
+        Self::store_module_record(module_record)?;
+
         info!(target: "module_load_manager", 
               "Successfully loaded and stored middleware module: {}", name);
         
@@ -219,7 +235,8 @@ impl MiddlewareModuleLoadManager {
         modules_dir: P
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let mut manager = Self::with_modules_dir(modules_dir);
-        
+        Self::ensure_storage()?;
+
         let middleware_names = Self::extract_middleware_names(server_instance);
         
         for name in middleware_names {
@@ -270,9 +287,21 @@ impl MiddlewareModuleLoadManager {
     
     /// Unload a specific module from global storage
     pub fn unload_module(&mut self, name: &str) -> bool {
-        // Note: GlobalModuleStorage doesn't support removal, so this is a no-op
-        warn!(target: "module_load_manager", "Module unloading not supported - module '{}' remains in global storage", name);
-        false
+        let result = with_global_storage(|global_storage| global_storage.remove_module(name));
+        match result {
+            Ok(Some(_)) => {
+                info!(target: "module_load_manager", "Module '{}' removed from global storage", name);
+                true
+            }
+            Ok(None) => {
+                warn!(target: "module_load_manager", "Module '{}' not found in global storage", name);
+                false
+            }
+            Err(e) => {
+                error!(target: "module_load_manager", "Failed to remove module '{}': {}", name, e);
+                false
+            }
+        }
     }
     
     /// Load modules dynamically from DLL files based on server instances
@@ -311,27 +340,13 @@ impl MiddlewareModuleLoadManager {
         info!(target: "module_load_manager", "Loading {} static modules", module_count);
         
         // Initialize global storage if not already done
-        initialize_global_storage()?;
-        
+        Self::ensure_storage()?;
+
         for (module_name, middleware) in static_modules {
             info!(target: "module_load_manager", "Loading static module: {}", module_name);
-            
-            // Create ModuleRecord without library (static module)
-            let module_record = ModuleRecord {
-                name: module_name.to_string(),
-                library: None, // Static module has no library
-                instance: middleware,
-                path: PathBuf::from("<static>"), // Indicate static module
-            };
-            
-            // Add to global storage
-            with_global_storage(|global_storage| {
-                global_storage.add_module(module_record);
-                info!(target: "module_load_manager", "Added static module '{}' to global storage", module_name);
-            }).map_err(|e| {
-                error!(target: "module_load_manager", "Failed to add static module to global storage: {}", e);
-                e
-            })?;
+
+            let module_record = ModuleRecord::static_module(module_name.to_string(), middleware);
+            Self::store_module_record(module_record)?;
         }
         
         info!(target: "module_load_manager", 
