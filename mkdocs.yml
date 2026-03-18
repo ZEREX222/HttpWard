@@ -63,3 +63,11 @@ markdown_extensions:
   - md_in_html
   - toc:
       permalink: true
+
+nav:
+  - Home: index.md
+  - Configuration: configuration.md
+  - Guides:
+    - Configuration Examples: configuration-examples.md
+    - Extensions Guide: extensions-guide.md
+    - Extensions Migration Guide: extensions-migration-guide.md

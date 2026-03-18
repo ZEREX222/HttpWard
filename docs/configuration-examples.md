@@ -117,14 +117,14 @@ strategy:
 ### Current `httpward.yaml`
 
 ```yaml
-# httpward.yaml - Global settings (applied to all sites unless overridden)
+# httpward.yaml - Fixed version with correct YAML indentation
 
 log:
   level: "debug"
 
 domain: global.local
 
-strategy: "default"
+strategy: default2
 
 listeners:
   - port: 444
@@ -135,20 +135,22 @@ routes:
   - match:
       path: "/my/{*any}"
     backend: "http://zerex222.ru:8080/{*any}"
-    strategy:
-      - block_ip:
-          ips: [ "127.0.0.1"]
 
   - match:
       path: "/site/{*path}"
     static_dir: "C:/myprojects/html/{*path}"
 
   - match:
-      path: "/redirect"
+      path: "/search/{request}"
     redirect:
-      to: "https://google.com"
+      to: "https://www.google.com/search?q={request}"
 
 sites_enabled: "./sites-enabled"
+
+strategies:
+  default2:
+    - httpward_log_module:
+        level: warn
 ```
 
 ### Current `strategies.yml`
@@ -174,16 +176,18 @@ super-safe:
       level: info
 ```
 
-### Current `sites-enabled/test.local.yml`
+### Current `sites-enabled/example.com.yaml`
 
 ```yaml
 domains: ["test.local", "*.test2.local"]
 
 listeners:
-  - port: 777
-  - port: 443
-    tls:
+   - port: 777
+   - port: 443
+     tls:
       self_signed: true
+
+strategy: default55
 
 routes:
   - match:
@@ -191,11 +195,17 @@ routes:
     backend: "http://127.0.0.1:8080"
 
   - match:
-      path: "/static"
-    static_dir: "/var/www/example.com/static"
+      path: "/site/{*path}"
+    static_dir: "C:/myprojects/html/{*path}"
 
   - match:
       path: "/aaa/{id}"
     backend: "http://127.0.0.1:3000/api/{id}"
+
+strategies:
+  default55:
+    - httpward_log_module:
+        level: error
+        format: crazy
 ```
 
