@@ -1,7 +1,7 @@
-use httpward_core::error::ErrorHandler;
-use crate::core::middleware::{DynamicModuleLoaderLayer, ErrorHandlerLayer, LogLayer, RequestEnricherLayer, ResponseEnricherLayer, RouteLayer};
+use crate::core::middleware::{DynamicModuleLoaderLayer, ErrorHandlerLayer, RequestEnricherLayer, ResponseEnricherLayer, RouteLayer};
 use crate::server::tls::tls::TlsConfigBuilder;
 use httpward_core::core::server_models::server_instance::ServerInstance;
+use httpward_core::error::ErrorHandler;
 use rama::{graceful::Shutdown, http::{
     server::HttpServer, Body, Request, Response,
     StatusCode,
@@ -71,7 +71,6 @@ impl HttpWardServer {
             (
                 ErrorHandlerLayer::new(),
                 RequestEnricherLayer::new(server_instance_arc.clone()),
-                LogLayer::new(),
                 DynamicModuleLoaderLayer::new(&server_instance_arc),
                 ResponseEnricherLayer::new(),
                 RouteLayer::new(),
