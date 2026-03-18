@@ -280,44 +280,25 @@ impl ProxyHandler {
         proxy_id: &str,
         client_ip: Option<&str>,
     ) -> Result<RamaResponse<RamaBody>, ProxyError> {
-        // Build upstream URL using matcher parameters and original request query.
+        // Use headers from HttpWardContext if provided (allows middleware modifications)
+        let headers = httpward_headers.unwrap_or_else(|| req.headers().clone());
+
+        // Build upstream URL using matcher parameters and original request query
         let new_uri = Self::build_proxy_uri(backend, params, req.uri())?;
         *req.uri_mut() = new_uri;
 
-        // Use headers from HttpWardContext if provided (allows middleware modifications)
-        let mut headers = if let Some(ctx_headers) = httpward_headers {
-            ctx_headers
-        } else {
-            req.headers().clone()
-        };
-
-        // Ensure Host header for upstream
-        let authority = req.uri().authority().map(|a| a.to_string());
-        if !headers.contains_key(header::HOST) {
-            if let Some(authority_str) = authority {
-                headers.insert(
-                    header::HOST,
-                    HeaderValue::from_str(&authority_str)
-                        .map_err(|e| ProxyError::Upstream(format!("Invalid host header: {}", e)))?,
-                );
-            }
-        }
-
-        // Extract upstream authority (host:port)
-        let upstream_host = req
-            .uri()
-            .authority()
+        // Extract upstream authority and protocol from the already processed URI
+        let upstream_host = req.uri().authority()
             .map(|a| a.as_str())
-            .ok_or_else(|| ProxyError::Upstream("Missing upstream authority".into()))?;
-
-        // Example values (normally from connection context)
-        let proto = "http";   // or "https"
+            .ok_or_else(|| ProxyError::InvalidUrl("Missing upstream authority in processed URI".to_string()))?;
+        
+        let proto = req.uri().scheme().map(|s| s.as_str()).unwrap_or("http");
 
         // Normalize headers before sending upstream
         let normalized_headers = normalize_request_headers(
             headers,
             client_ip,
-            upstream_host,
+            &upstream_host,
             proto,
             request_kind,
             proxy_id,
@@ -344,17 +325,24 @@ impl ProxyHandler {
         backend: &str,
         orig: &Uri,
     ) -> Result<Uri, ProxyError> {
-        let backend_url = Url::parse(backend)
+        let mut backend_url = Url::parse(backend)
             .map_err(|e| ProxyError::InvalidUrl(format!("invalid backend URL: {}", e)))?;
 
-        // Preserve original query string if present
-        let mut final_url = backend_url;
+        // Preserve original path and query if backend doesn't specify them
+        if backend_url.path().is_empty() || backend_url.path() == "/" {
+            // Use original request path
+            backend_url.set_path(orig.path());
+        }
+        
+        // Preserve original query string if present and backend doesn't have one
         if let Some(query) = orig.query() {
-            final_url.set_query(Some(query));
+            if backend_url.query().is_none() {
+                backend_url.set_query(Some(query));
+            }
         }
 
         // Convert back to http::Uri
-        final_url.as_str().parse()
+        backend_url.as_str().parse()
             .map_err(|e| ProxyError::InvalidUrl(format!("failed to parse final URI: {}", e)))
     }
     
