@@ -9,6 +9,44 @@ use httpward_core::core::server_models::{MatchedRoute, MatcherType};
 use crate::core::middleware::route::RouteError;
 use rama::http::dep::mime_guess;
 
+/// Validate that the file path is within the allowed static directory
+/// Prevents directory traversal attacks
+fn validate_file_path(file_path: &std::path::Path, static_dir: &std::path::Path) -> Result<(), RouteError> {
+    use std::path::Component;
+    
+    // Canonicalize both paths to resolve symlinks and relative components
+    let canonical_file_path = match file_path.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Err(RouteError::Static("File path does not exist".to_string())),
+    };
+    
+    let canonical_static_dir = match static_dir.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Err(RouteError::Static("Static directory does not exist".to_string())),
+    };
+    
+    // Check if the file path starts with the static directory path
+    if !canonical_file_path.starts_with(&canonical_static_dir) {
+        return Err(RouteError::Static("Path traversal detected".to_string()));
+    }
+    
+    // Additional check: ensure no path components contain suspicious patterns
+    for component in file_path.components() {
+        match component {
+            Component::ParentDir => {
+                return Err(RouteError::Static("Parent directory reference not allowed".to_string()));
+            }
+            Component::CurDir => {
+                // Current directory is fine, but we can be strict
+                continue;
+            }
+            _ => continue,
+        }
+    }
+    
+    Ok(())
+}
+
 /// Process static directory path with matcher parameters
 /// Replaces placeholders like {param}, {*any}, and {1}, {2} (regex groups) with actual values from params
 pub fn process_static_dir_with_params(
@@ -101,8 +139,9 @@ pub async fn handle_static(
         let clean_path = relative_path.trim_start_matches('/');
         debug!("Relative path after removing prefix: '{}'", clean_path);
         
-        // Prevent directory traversal
-        if clean_path.contains("..") {
+        // Prevent directory traversal and other dangerous patterns
+        if clean_path.contains("..") || clean_path.contains("\\") || clean_path.starts_with('/') {
+            tracing::warn!("Suspicious path pattern detected: '{}'", clean_path);
             return Ok(RamaResponse::builder()
                 .status(StatusCode::FORBIDDEN)
                 .body(RamaBody::from("Forbidden"))
@@ -119,6 +158,15 @@ pub async fn handle_static(
     };
     
     debug!("Trying to serve file: {:?}", file_path);
+    
+    // Validate file path is within static directory (path traversal protection)
+    if let Err(e) = validate_file_path(&file_path, &processed_static_dir) {
+        tracing::warn!("Path traversal attempt detected: file_path={:?}, error={}", file_path, e);
+        return Ok(RamaResponse::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(RamaBody::from("Forbidden"))
+            .unwrap());
+    }
     
     // Check if file exists and is within static_dir
     match fs::metadata(&file_path).await {
@@ -232,7 +280,7 @@ mod tests {
         
         match result {
             Ok(response) => {
-                assert_eq!(response.status(), StatusCode::NOT_FOUND);
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
             }
             Err(_) => {
                 // Also acceptable
@@ -273,7 +321,7 @@ mod tests {
         
         match result2 {
             Ok(response) => {
-                assert_eq!(response.status(), StatusCode::NOT_FOUND);
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
             }
             Err(_) => {
                 // Also acceptable

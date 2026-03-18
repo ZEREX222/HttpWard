@@ -95,26 +95,21 @@ where
         request: RamaRequest<RamaBody>,
     ) -> Result<Self::Response, Self::Error> {
         // Extract HttpWardContext from the main context
-        let httpward_ctx = ctx.get::<HttpWardContext>()
-            .cloned()
-            .unwrap_or_else(|| {
-                // Fallback context if not present
-                let server_instance = ServerInstance {
-                    bind: ListenerKey {
-                        host: "127.0.0.1".to_string(),
-                        port: 8080,
-                    },
-                    site_managers: vec![],
-                    global: GlobalConfig::default(),
-                };
-                HttpWardContext::new(
-                    std::net::SocketAddr::from(([127, 0, 0, 1], 8080)),
-                    Arc::new(server_instance),
-                )
-            });
+        let httpward_ctx = match ctx.get::<HttpWardContext>().cloned() {
+            Some(ctx) => ctx,
+            None => {
+                // Log warning and return 404 if no context available
+                tracing::warn!("No HttpWardContext found in request context");
+                return Ok(self.error_handler.create_error_response_with_code(StatusCode::NOT_FOUND)
+                    .unwrap_or_else(|_| RamaResponse::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(RamaBody::from("Service not available"))
+                        .unwrap()));
+            }
+        };
 
         let current_site = if let Some(site_manager) = &httpward_ctx.current_site {
-            site_manager.clone()
+            site_manager // Use reference instead of clone
         } else {
             // No site config, pass to inner service
             return self.inner.serve(ctx, request).await;
@@ -151,31 +146,19 @@ where
                                                         WebSocketError::InvalidUrl(_) => StatusCode::INTERNAL_SERVER_ERROR,
                                                     };
 
-                                                    return Ok(self.error_handler.create_error_response_with_code(status)
-                                                        .unwrap_or_else(|_| RamaResponse::builder()
-                                                            .status(status)
-                                                            .body(RamaBody::from("WebSocket proxy error"))
-                                                            .unwrap()));
+                                                    return Ok(self.create_error_response(status, "WebSocket proxy error"));
                                                 }
                                             }
                                         }
                                         Err(e) => {
                                             tracing::error!(error = %e, backend = %upstream_uri_string, "Failed to convert backend URL to WebSocket URL");
-                                            return Ok(self.error_handler.create_error_response_with_code(StatusCode::INTERNAL_SERVER_ERROR)
-                                                .unwrap_or_else(|_| RamaResponse::builder()
-                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                                    .body(RamaBody::from("Invalid WebSocket URL"))
-                                                    .unwrap()));
+                                            return Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Invalid WebSocket URL"));
                                         }
                                     }
                                 }
                                 Err(e) => {
                                     tracing::error!(error = %e, backend = %backend, "Failed to build WebSocket upstream URL");
-                                    return Ok(self.error_handler.create_error_response_with_code(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .unwrap_or_else(|_| RamaResponse::builder()
-                                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                            .body(RamaBody::from("Invalid WebSocket URL"))
-                                            .unwrap()));
+                                    return Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Invalid WebSocket URL"));
                                 }
                             }
                         } else if is_grpc {
@@ -183,11 +166,7 @@ where
                                 Ok(response) => return Ok(response),
                                 Err(e) => {
                                     tracing::error!("gRPC proxy error: {}", e);
-                                    return Ok(self.error_handler.create_error_response_with_code(StatusCode::BAD_GATEWAY)
-                                        .unwrap_or_else(|_| RamaResponse::builder()
-                                            .status(StatusCode::BAD_GATEWAY)
-                                            .body(RamaBody::from("gRPC proxy error"))
-                                            .unwrap()));
+                                    return Ok(self.create_error_response(StatusCode::BAD_GATEWAY, "gRPC proxy error"));
                                 }
                             }
                         } else {
@@ -200,11 +179,7 @@ where
                                 Ok(response) => return Ok(response),
                                 Err(e) => {
                                     tracing::error!("Proxy error: {}", e);
-                                    return Ok(self.error_handler.create_error_response_with_code(StatusCode::BAD_GATEWAY)
-                                        .unwrap_or_else(|_| RamaResponse::builder()
-                                            .status(StatusCode::BAD_GATEWAY)
-                                            .body(RamaBody::from("Proxy error"))
-                                            .unwrap()));
+                                    return Ok(self.create_error_response(StatusCode::BAD_GATEWAY, "Proxy error"));
                                 }
                             }
                         }
@@ -214,11 +189,7 @@ where
                             Ok(response) => return Ok(response),
                             Err(e) => {
                                 error!("Static file error: {}", e);
-                                return Ok(self.error_handler.create_error_response_with_code(StatusCode::INTERNAL_SERVER_ERROR)
-                                    .unwrap_or_else(|_| RamaResponse::builder()
-                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .body(RamaBody::from("Static file error"))
-                                        .unwrap()));
+                                return Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Static file error"));
                             }
                         }
                     }
@@ -227,11 +198,7 @@ where
                             Ok(response) => return Ok(response),
                             Err(e) => {
                                 error!("Redirect error: {}", e);
-                                return Ok(self.error_handler.create_error_response_with_code(StatusCode::INTERNAL_SERVER_ERROR)
-                                    .unwrap_or_else(|_| RamaResponse::builder()
-                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .body(RamaBody::from("Redirect error"))
-                                        .unwrap()));
+                                return Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Redirect error"));
                             }
                         }
                     }
@@ -244,17 +211,23 @@ where
             }
             Err(e) => {
                 error!("Route matching error: {}", e);
-                return Ok(self.error_handler.create_error_response_with_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    .unwrap_or_else(|_| RamaResponse::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(RamaBody::from("Routing error"))
-                        .unwrap()));
+                return Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Routing error"));
             }
         }
     }
 }
 
 impl<S> RouteService<S> {
+    /// Helper method to create error responses with consistent format
+    fn create_error_response(&self, status: StatusCode, message: &str) -> RamaResponse<RamaBody> {
+        let message_owned = message.to_string();
+        self.error_handler.create_error_response_with_code(status)
+            .unwrap_or_else(|_| RamaResponse::builder()
+                .status(status)
+                .body(RamaBody::from(message_owned))
+                .unwrap())
+    }
+
     /// Handle redirects
     async fn handle_redirect(
         &self,
