@@ -113,6 +113,41 @@ fn normalize_request_headers(
     Ok(headers)
 }
 
+/// Remove hop-by-hop response headers and headers listed in Connection.
+fn normalize_response_headers(
+    mut headers: HeaderMap,
+) -> HeaderMap {
+    let mut hop_by_hop = vec![
+        header::CONNECTION.clone(),
+        header::KEEP_ALIVE.clone(),
+        header::PROXY_AUTHENTICATE.clone(),
+        header::PROXY_AUTHORIZATION.clone(),
+        header::TE.clone(),
+        header::TRAILER.clone(),
+        header::TRANSFER_ENCODING.clone(),
+        header::UPGRADE.clone(),
+        HeaderName::from_static("proxy-connection"),
+    ].into_iter().collect::<HashSet<_>>();
+
+    if let Some(conn_val) = headers.get(header::CONNECTION) {
+        if let Ok(s) = conn_val.to_str() {
+            for token in s.split(',').map(|t| t.trim()) {
+                if !token.is_empty() {
+                    if let Ok(hname) = HeaderName::from_lowercase(token.to_lowercase().as_bytes()) {
+                        hop_by_hop.insert(hname);
+                    }
+                }
+            }
+        }
+    }
+
+    for name in hop_by_hop {
+        headers.remove(name);
+    }
+
+    headers
+}
+
 /// HTTP/HTTPS proxy handler
 #[derive(Clone, Debug)]
 pub struct ProxyHandler {
@@ -159,7 +194,7 @@ impl ProxyHandler {
     /// If httpward_headers is provided, they will be used instead of request headers (allowing middleware to modify them)
     pub async fn proxy_request(
         &self,
-        mut req: RamaRequest<RamaBody>,
+        req: RamaRequest<RamaBody>,
         backend: &str,
         params: &HashMap<String, String>,
         httpward_headers: Option<HeaderMap>,
@@ -249,7 +284,11 @@ impl ProxyHandler {
             .send(rama::Context::default())
             .await
             .map_err(|e| ProxyError::Http(Box::new(e)))?;
-        
+
+        let mut resp = resp;
+        let normalized_response_headers = normalize_response_headers(resp.headers().clone());
+        *resp.headers_mut() = normalized_response_headers;
+
         Ok(resp)
     }
     
@@ -446,6 +485,53 @@ mod tests {
             normalized.get(header::TE).unwrap(),
             &HeaderValue::from_static("trailers")
         );
+    }
+
+    #[test]
+    fn test_normalize_response_headers_removes_hop_by_hop() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONNECTION, HeaderValue::from_static("keep-alive, x-hop"));
+        headers.insert(header::KEEP_ALIVE.clone(), HeaderValue::from_static("timeout=5"));
+        headers.insert(header::TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+        headers.insert(header::TRAILER, HeaderValue::from_static("x-trailer"));
+        headers.insert(header::UPGRADE, HeaderValue::from_static("h2c"));
+        headers.insert(header::TE, HeaderValue::from_static("trailers"));
+        headers.insert(HeaderName::from_static("x-hop"), HeaderValue::from_static("1"));
+
+        let normalized = normalize_response_headers(headers);
+
+        assert!(!normalized.contains_key(header::CONNECTION));
+        assert!(!normalized.contains_key(header::KEEP_ALIVE.clone()));
+        assert!(!normalized.contains_key(header::TRANSFER_ENCODING));
+        assert!(!normalized.contains_key(header::TRAILER));
+        assert!(!normalized.contains_key(header::UPGRADE));
+        assert!(!normalized.contains_key(header::TE));
+        assert!(!normalized.contains_key("x-hop"));
+    }
+
+    #[test]
+    fn test_normalize_response_headers_preserves_grpc_metadata() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/grpc"));
+        headers.insert(HeaderName::from_static("grpc-status"), HeaderValue::from_static("0"));
+        headers.insert(HeaderName::from_static("grpc-message"), HeaderValue::from_static("ok"));
+        headers.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+
+        let normalized = normalize_response_headers(headers);
+
+        assert_eq!(
+            normalized.get(header::CONTENT_TYPE).unwrap(),
+            &HeaderValue::from_static("application/grpc")
+        );
+        assert_eq!(
+            normalized.get("grpc-status").unwrap(),
+            &HeaderValue::from_static("0")
+        );
+        assert_eq!(
+            normalized.get("grpc-message").unwrap(),
+            &HeaderValue::from_static("ok")
+        );
+        assert!(!normalized.contains_key(header::CONNECTION));
     }
 
     #[test]
