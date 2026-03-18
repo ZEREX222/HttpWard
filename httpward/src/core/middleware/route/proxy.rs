@@ -1,5 +1,5 @@
 use rama::{
-    http::{Request as RamaRequest, Response as RamaResponse, Body as RamaBody, header, HeaderValue, Version},
+    http::{Request as RamaRequest, Response as RamaResponse, Body as RamaBody, header, HeaderValue},
     http::client::EasyHttpWebClient,
     http::service::client::HttpClientExt,
 };
@@ -7,6 +7,12 @@ use http::{HeaderMap, HeaderName, Uri};
 use thiserror::Error;
 use url::Url;
 use std::collections::{HashMap, HashSet};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProxyRequestKind {
+    Http,
+    Grpc,
+}
 
 #[derive(Error, Debug)]
 pub enum ProxyError {
@@ -25,6 +31,7 @@ fn normalize_request_headers(
     client_ip: Option<&str>,
     upstream_host: &str,
     incoming_proto: &str, // "http" or "https"
+    request_kind: ProxyRequestKind,
 ) -> Result<HeaderMap, Box<dyn std::error::Error>> {
     // Hop-by-hop headers per RFC: always remove these.
     let mut hop_by_hop = vec![
@@ -32,11 +39,14 @@ fn normalize_request_headers(
         header::KEEP_ALIVE.clone(),
         header::PROXY_AUTHENTICATE.clone(),
         header::PROXY_AUTHORIZATION.clone(),
-        header::TE.clone(),
         header::TRAILER.clone(),
         header::TRANSFER_ENCODING.clone(),
         header::UPGRADE.clone(),
     ].into_iter().collect::<HashSet<_>>();
+
+    if request_kind == ProxyRequestKind::Http {
+        hop_by_hop.insert(header::TE.clone());
+    }
 
     // If Connection header exists, its comma-separated tokens name additional hop-by-hop headers.
     if let Some(conn_val) = headers.get(header::CONNECTION) {
@@ -54,6 +64,11 @@ fn normalize_request_headers(
     // Remove hop-by-hop headers
     for name in hop_by_hop {
         headers.remove(name);
+    }
+
+    // gRPC over HTTP/2 relies on TE: trailers.
+    if request_kind == ProxyRequestKind::Grpc {
+        headers.insert(header::TE, HeaderValue::from_static("trailers"));
     }
 
     // Ensure Host header equals upstream authority
@@ -149,6 +164,40 @@ impl ProxyHandler {
         params: &HashMap<String, String>,
         httpward_headers: Option<HeaderMap>,
     ) -> Result<RamaResponse<RamaBody>, ProxyError> {
+        self.proxy_request_with_kind(
+            req,
+            backend,
+            params,
+            httpward_headers,
+            ProxyRequestKind::Http,
+        ).await
+    }
+
+    /// Proxy gRPC request to upstream preserving gRPC-required headers.
+    pub async fn proxy_grpc_request(
+        &self,
+        req: RamaRequest<RamaBody>,
+        backend: &str,
+        params: &HashMap<String, String>,
+        httpward_headers: Option<HeaderMap>,
+    ) -> Result<RamaResponse<RamaBody>, ProxyError> {
+        self.proxy_request_with_kind(
+            req,
+            backend,
+            params,
+            httpward_headers,
+            ProxyRequestKind::Grpc,
+        ).await
+    }
+
+    async fn proxy_request_with_kind(
+        &self,
+        mut req: RamaRequest<RamaBody>,
+        backend: &str,
+        params: &HashMap<String, String>,
+        httpward_headers: Option<HeaderMap>,
+        request_kind: ProxyRequestKind,
+    ) -> Result<RamaResponse<RamaBody>, ProxyError> {
         // Build upstream URL using matcher parameters and original request query.
         let new_uri = Self::build_proxy_uri(backend, params, req.uri())?;
         *req.uri_mut() = new_uri;
@@ -189,6 +238,7 @@ impl ProxyHandler {
             client_ip,
             upstream_host,
             proto,
+            request_kind,
         ).map_err(|e| ProxyError::Upstream(e.to_string()))?;
 
         // Send request using Rama HTTP client
@@ -242,7 +292,7 @@ impl ProxyHandler {
     
     /// Check if request is gRPC
     pub fn is_grpc(req: &RamaRequest<RamaBody>) -> bool {
-        // Check content-type for gRPC
+        // gRPC requests always use application/grpc* content types.
         if let Some(content_type) = req.headers().get(header::CONTENT_TYPE) {
             if let Ok(ct_str) = content_type.to_str() {
                 if ct_str.starts_with("application/grpc") {
@@ -250,8 +300,7 @@ impl ProxyHandler {
                 }
             }
         }
-        // HTTP/2 requests are candidates for gRPC
-        req.version() == Version::HTTP_2
+        false
     }
 }
 
@@ -264,8 +313,8 @@ impl Default for ProxyHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rama::http::{Method, Uri};
-    
+    use rama::http::{Method, Uri, Version};
+
     #[test]
     fn test_process_backend_url_with_params() {
         let mut params = HashMap::new();
@@ -351,7 +400,54 @@ mod tests {
             
         assert!(ProxyHandler::is_grpc(&req));
     }
-    
+
+    #[test]
+    fn test_grpc_detection_does_not_match_plain_http2() {
+        let req = RamaRequest::builder()
+            .method(Method::GET)
+            .uri("/api")
+            .version(Version::HTTP_2)
+            .body(RamaBody::empty())
+            .unwrap();
+
+        assert!(!ProxyHandler::is_grpc(&req));
+    }
+
+    #[test]
+    fn test_normalize_http_headers_removes_te() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::TE, HeaderValue::from_static("trailers"));
+
+        let normalized = normalize_request_headers(
+            headers,
+            None,
+            "backend.local:8080",
+            "http",
+            ProxyRequestKind::Http,
+        ).unwrap();
+
+        assert!(!normalized.contains_key(header::TE));
+    }
+
+    #[test]
+    fn test_normalize_grpc_headers_preserves_te_trailers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::TE, HeaderValue::from_static("gzip, trailers"));
+
+        let normalized = normalize_request_headers(
+            headers,
+            None,
+            "backend.local:8080",
+            "http",
+            ProxyRequestKind::Grpc,
+        ).unwrap();
+
+        assert_eq!(
+            normalized.get(header::TE).unwrap(),
+            &HeaderValue::from_static("trailers")
+        );
+    }
+
     #[test]
     fn test_full_matcher_functionality() {
         // Test the example from user: "/my/{*any}" -> "http://zerex222.ru:8080/{*any}"

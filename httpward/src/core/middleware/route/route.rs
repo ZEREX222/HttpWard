@@ -131,7 +131,8 @@ where
                     Route::Proxy { backend, .. } => {
                         // Check if WebSocket upgrade
                         let is_websocket = ProxyHandler::is_websocket_upgrade(&request);
-                        
+                        let is_grpc = ProxyHandler::is_grpc(&request);
+
                         if is_websocket {
                             match ProxyHandler::build_proxy_uri(&backend, &matched_route.params, request.uri()) {
                                 Ok(upstream_uri) => {
@@ -174,6 +175,18 @@ where
                                         .unwrap_or_else(|_| RamaResponse::builder()
                                             .status(StatusCode::INTERNAL_SERVER_ERROR)
                                             .body(RamaBody::from("Invalid WebSocket URL"))
+                                            .unwrap()));
+                                }
+                            }
+                        } else if is_grpc {
+                            match self.proxy_handler.proxy_grpc_request(request, &backend, &matched_route.params, Some(httpward_ctx.request_headers.clone())).await {
+                                Ok(response) => return Ok(response),
+                                Err(e) => {
+                                    tracing::error!("gRPC proxy error: {}", e);
+                                    return Ok(self.error_handler.create_error_response_with_code(StatusCode::BAD_GATEWAY)
+                                        .unwrap_or_else(|_| RamaResponse::builder()
+                                            .status(StatusCode::BAD_GATEWAY)
+                                            .body(RamaBody::from("gRPC proxy error"))
                                             .unwrap()));
                                 }
                             }
