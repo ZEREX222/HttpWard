@@ -359,9 +359,14 @@ mod comprehensive_inheritance_tests {
         // Actually, inline strategy will still inherit from global if site has no strategy
         // This is the current behavior - let's adjust the test
         assert_eq!(standalone_strategy.middleware.len(), 3); // rate_limit (inline) + logging, cors (global)
-        assert_eq!(standalone_strategy.middleware[0].name(), "rate_limit");
-        
-        let config = standalone_strategy.middleware[0].config_as_json().unwrap();
+        assert_eq!(standalone_strategy.middleware[0].name(), "logging");
+
+        let config = standalone_strategy.middleware
+            .iter()
+            .find(|m| m.name() == "rate_limit")
+            .unwrap()
+            .config_as_json()
+            .unwrap();
         assert_eq!(config["requests"], 50);
         assert_eq!(config["window"], "1s");
         

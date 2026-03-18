@@ -449,8 +449,10 @@ mod tests {
             let matched = site_manager.get_route("/api").unwrap();
 
             // Check rate_limit middleware inherited "window" from global
-            let rate_limit = &matched.active_strategy.middleware[0];
-            assert_eq!(rate_limit.name(), "rate_limit");
+            let rate_limit = matched.active_strategy.middleware
+                .iter()
+                .find(|m| m.name() == "rate_limit")
+                .unwrap();
             let config = rate_limit.config_as_json().unwrap();
             assert_eq!(config["requests"], 500); // Site value
             assert_eq!(config["window"], "1m"); // Inherited from global

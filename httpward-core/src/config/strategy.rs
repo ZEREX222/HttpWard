@@ -263,6 +263,10 @@ pub fn supplement_middleware(
         index.insert(name.to_string(), i);
     }
 
+    // Collect inherited middleware missing in `current` and prepend once at the end.
+    // This keeps inheritance order as parent -> child without O(n^2) front inserts.
+    let mut inherited_prefix: Vec<MiddlewareConfig> = Vec::new();
+
     for new_middleware in incoming {
         let name = new_middleware.name();
         
@@ -301,12 +305,18 @@ pub fn supplement_middleware(
                 }
             }
         } else {
-            // Middleware doesn't exist in current - add if not disabled
+            // Middleware doesn't exist in current - inherit if not disabled.
             if !new_middleware.is_off() {
-                current.push(new_middleware.clone());
-                index.insert(name.to_string(), current.len() - 1);
+                inherited_prefix.push(new_middleware.clone());
             }
         }
+    }
+
+    if !inherited_prefix.is_empty() {
+        let mut merged = Vec::with_capacity(inherited_prefix.len() + current.len());
+        merged.extend(inherited_prefix);
+        merged.append(current);
+        *current = merged;
     }
 
     Ok(())
@@ -933,10 +943,12 @@ middleware:
 
         supplement_middleware(&mut current, &incoming).unwrap();
 
-        assert_eq!(current.len(), 3); // rate_limit, logging, cors
+        assert_eq!(current.len(), 3); // cors (inherited), rate_limit, logging
+
+        assert_eq!(current[0].name(), "cors");
 
         // Check rate_limit was supplemented (not merged)
-        let rate_limit = &current[0];
+        let rate_limit = current.iter().find(|m| m.name() == "rate_limit").unwrap();
         assert_eq!(rate_limit.name(), "rate_limit");
         let config = rate_limit.config_as_json().unwrap();
         assert_eq!(config["requests"], 1000);  // NOT updated
@@ -945,14 +957,14 @@ middleware:
         assert_eq!(config["timeout"], "30s");  // Added (was missing)
 
         // Check logging was preserved
-        let logging = &current[1];
+        let logging = current.iter().find(|m| m.name() == "logging").unwrap();
         assert_eq!(logging.name(), "logging");
         let config = logging.config_as_json().unwrap();
         assert_eq!(config["level"], "info");
         assert_eq!(config["format"], "text");
 
-        // Check cors was added
-        let cors = &current[2];
+        // Check cors was inherited and prepended
+        let cors = current.iter().find(|m| m.name() == "cors").unwrap();
         assert_eq!(cors.name(), "cors");
         let config = cors.config_as_json().unwrap();
         assert_eq!(config["origins"][0], "*");
@@ -994,7 +1006,7 @@ middleware:
         assert_eq!(strategy.middleware.len(), 2);
 
         // Check auth was supplemented (not merged)
-        let auth = &strategy.middleware[0];
+        let auth = strategy.middleware.iter().find(|m| m.name() == "auth").unwrap();
         assert_eq!(auth.name(), "auth");
         let config = auth.config_as_json().unwrap();
         assert_eq!(config["type"], "basic");      // NOT updated
@@ -1002,8 +1014,9 @@ middleware:
         assert_eq!(config["timeout"], 300);       // Added (was missing)
         assert_eq!(config["max_attempts"], 5);     // Added (was missing)
 
-        // Check rate_limit was added
-        let rate_limit = &strategy.middleware[1];
+        // Check rate_limit was inherited and prepended
+        assert_eq!(strategy.middleware[0].name(), "rate_limit");
+        let rate_limit = &strategy.middleware[0];
         assert_eq!(rate_limit.name(), "rate_limit");
         let config = rate_limit.config_as_json().unwrap();
         assert_eq!(config["requests"], 100);

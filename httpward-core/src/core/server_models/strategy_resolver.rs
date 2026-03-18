@@ -373,10 +373,10 @@ mod tests {
         // Route 0: /api with explicit "api" strategy
         let api_strategy = resolver.resolve_for_route(0).unwrap();
         assert_eq!(api_strategy.name, "api");
-        assert_eq!(api_strategy.middleware.len(), 3); // auth, rate_limit from site + logging from global default
-        assert_eq!(api_strategy.middleware[0].name(), "auth");
-        assert_eq!(api_strategy.middleware[1].name(), "rate_limit");
-        assert_eq!(api_strategy.middleware[2].name(), "logging");
+        assert_eq!(api_strategy.middleware.len(), 3); // logging (global) + auth, rate_limit (site)
+        assert_eq!(api_strategy.middleware[0].name(), "logging");
+        assert_eq!(api_strategy.middleware[1].name(), "auth");
+        assert_eq!(api_strategy.middleware[2].name(), "rate_limit");
 
         // Route 1: /static with no explicit strategy (should use site strategy)
         let static_strategy = resolver.resolve_for_route(1);
@@ -392,10 +392,10 @@ mod tests {
 
         let site_strategy = resolver.resolve_for_site(&site).unwrap().unwrap();
         assert_eq!(site_strategy.name, "site_default");
-        assert_eq!(site_strategy.middleware.len(), 3); // rate_limit, cors from site + logging from global default
-        assert_eq!(site_strategy.middleware[0].name(), "rate_limit");
-        assert_eq!(site_strategy.middleware[1].name(), "cors");
-        assert_eq!(site_strategy.middleware[2].name(), "logging");
+        assert_eq!(site_strategy.middleware.len(), 3); // logging (global) + rate_limit, cors (site)
+        assert_eq!(site_strategy.middleware[0].name(), "logging");
+        assert_eq!(site_strategy.middleware[1].name(), "rate_limit");
+        assert_eq!(site_strategy.middleware[2].name(), "cors");
     }
 
     #[test]
@@ -441,14 +441,19 @@ mod tests {
         let site_strategy = resolver.resolve_for_site(&site).unwrap().unwrap();
         
         // Check that rate_limit was supplemented (not merged) with global default
-        let rate_limit_config = site_strategy.middleware[0].config_as_json().unwrap();
+        let rate_limit_config = site_strategy.middleware
+            .iter()
+            .find(|m| m.name() == "rate_limit")
+            .unwrap()
+            .config_as_json()
+            .unwrap();
         assert_eq!(rate_limit_config["requests"], 500);  // Site override preserved
         assert_eq!(rate_limit_config["window"], "1m");   // Supplemented from global
         assert_eq!(rate_limit_config["burst"], 200);    // Supplemented from global
 
         // Check that logging was added from global default
         assert_eq!(site_strategy.middleware.len(), 3);
-        assert_eq!(site_strategy.middleware[2].name(), "logging");
+        assert_eq!(site_strategy.middleware[0].name(), "logging");
     }
 
     #[test]
@@ -482,16 +487,16 @@ mod tests {
         let redirect_strategy = resolver.resolve_for_route(2).unwrap();
 
         assert_eq!(redirect_strategy.name, "inline");
-        assert_eq!(redirect_strategy.middleware.len(), 3); // rate_limit (inline) + rate_limit + cors (from site) OR logging (from global default)
-        assert_eq!(redirect_strategy.middleware[0].name(), "rate_limit"); // From inline
+        assert_eq!(redirect_strategy.middleware.len(), 3); // logging (global) + cors (site) + rate_limit (inline)
+        assert_eq!(redirect_strategy.middleware[2].name(), "rate_limit"); // From inline
 
-        let rate_limit_config = redirect_strategy.middleware[0].config_as_json().unwrap();
+        let rate_limit_config = redirect_strategy.middleware[2].config_as_json().unwrap();
         assert_eq!(rate_limit_config["requests"], 10); // From inline (takes precedence)
         assert_eq!(rate_limit_config["window"], "1s"); // From inline (takes precedence)
 
         // Check that site middleware is present
+        assert_eq!(redirect_strategy.middleware[0].name(), "logging"); // From global default
         assert_eq!(redirect_strategy.middleware[1].name(), "cors"); // From site strategy
-        assert_eq!(redirect_strategy.middleware[2].name(), "logging"); // From global default
     }
 
     #[test]
@@ -535,12 +540,22 @@ mod tests {
         assert_eq!(admin_strategy.middleware.len(), 3); // auth (route) + audit (route) + rate_limit (global)
 
         // Check that route auth overrides global auth
-        let auth_config = admin_strategy.middleware[0].config_as_json().unwrap();
+        let auth_config = admin_strategy.middleware
+            .iter()
+            .find(|m| m.name() == "auth")
+            .unwrap()
+            .config_as_json()
+            .unwrap();
         assert_eq!(auth_config["type"], "basic");
         assert_eq!(auth_config["realm"], "Admin Area");
 
         // Check that rate_limit was supplemented from global strict strategy
-        let rate_limit_config = admin_strategy.middleware[2].config_as_json().unwrap();
+        let rate_limit_config = admin_strategy.middleware
+            .iter()
+            .find(|m| m.name() == "rate_limit")
+            .unwrap()
+            .config_as_json()
+            .unwrap();
         assert_eq!(rate_limit_config["requests"], 100);
         assert_eq!(rate_limit_config["window"], "1m");
     }
@@ -652,17 +667,32 @@ mod tests {
         assert_eq!(enhanced_strategy.middleware.len(), 3); // rate_limit + auth + logging (from global base)
 
         // Check rate_limit: site override + global default supplementation  
-        let rate_limit_config = enhanced_strategy.middleware[0].config_as_json().unwrap();
+        let rate_limit_config = enhanced_strategy.middleware
+            .iter()
+            .find(|m| m.name() == "rate_limit")
+            .unwrap()
+            .config_as_json()
+            .unwrap();
         assert_eq!(rate_limit_config["requests"], 500);  // Site override
         assert_eq!(rate_limit_config["window"], "1m");   // From global default
         // Note: burst field doesn't exist because global default doesn't have it
 
         // Check auth: site only
-        let auth_config = enhanced_strategy.middleware[1].config_as_json().unwrap();
+        let auth_config = enhanced_strategy.middleware
+            .iter()
+            .find(|m| m.name() == "auth")
+            .unwrap()
+            .config_as_json()
+            .unwrap();
         assert_eq!(auth_config["type"], "oauth2");
 
         // Check logging: from global base
-        let logging_config = enhanced_strategy.middleware[2].config_as_json().unwrap();
+        let logging_config = enhanced_strategy.middleware
+            .iter()
+            .find(|m| m.name() == "logging")
+            .unwrap()
+            .config_as_json()
+            .unwrap();
         assert_eq!(logging_config["level"], "info");
         assert_eq!(logging_config["format"], "json");
     }
@@ -804,11 +834,11 @@ mod tests {
         assert_eq!(inline_strategy.name, "inline");
         
         // Should have inline middleware + site strategy + global default middleware
-        assert_eq!(inline_strategy.middleware.len(), 4); // auth (inline) + rate_limit + cors (from site) + logging (from global default)
-        assert_eq!(inline_strategy.middleware[0].name(), "auth"); // From inline
+        assert_eq!(inline_strategy.middleware.len(), 4); // logging (global) + rate_limit,cors (site) + auth (inline)
+        assert_eq!(inline_strategy.middleware[0].name(), "logging"); // From global default
         assert_eq!(inline_strategy.middleware[1].name(), "rate_limit"); // From site strategy
         assert_eq!(inline_strategy.middleware[2].name(), "cors"); // From site strategy
-        assert_eq!(inline_strategy.middleware[3].name(), "logging"); // From global default
+        assert_eq!(inline_strategy.middleware[3].name(), "auth"); // From inline
 
         println!("✅ Inline strategy correctly inherits from site and global default");
     }
@@ -844,10 +874,10 @@ mod tests {
         assert_eq!(inline_strategy.name, "inline");
         
         // Should have inline middleware + site strategy middleware (no global default)
-        assert_eq!(inline_strategy.middleware.len(), 3); // auth (inline) + rate_limit + cors (from site strategy)
-        assert_eq!(inline_strategy.middleware[0].name(), "auth"); // From inline
-        assert_eq!(inline_strategy.middleware[1].name(), "rate_limit"); // From site strategy
-        assert_eq!(inline_strategy.middleware[2].name(), "cors"); // From site strategy
+        assert_eq!(inline_strategy.middleware.len(), 3); // rate_limit,cors (site strategy) + auth (inline)
+        assert_eq!(inline_strategy.middleware[0].name(), "rate_limit"); // From site strategy
+        assert_eq!(inline_strategy.middleware[1].name(), "cors"); // From site strategy
+        assert_eq!(inline_strategy.middleware[2].name(), "auth"); // From inline
 
         println!("✅ Inline strategy correctly inherits from site strategy");
     }

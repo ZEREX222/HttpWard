@@ -55,12 +55,12 @@ mod off_tests {
         supplement_middleware(&mut current, &incoming).unwrap();
 
         // Rate limit should stay enabled (current takes precedence over off)
-        // Logging should be added
+        // Logging should be inherited and prepended
         assert_eq!(current.len(), 2);
-        assert_eq!(current[0].name(), "rate_limit");
-        assert!(!current[0].is_off());
-        assert_eq!(current[1].name(), "logging");
-        assert!(!current[1].is_off());
+        let rate_limit = current.iter().find(|m| m.name() == "rate_limit").unwrap();
+        assert!(!rate_limit.is_off());
+        assert_eq!(current[0].name(), "logging");
+        assert_eq!(current[1].name(), "rate_limit");
 
         println!("✅ Supplement middleware with off works correctly");
     }
