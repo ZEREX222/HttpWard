@@ -735,12 +735,12 @@ fn main() -> io::Result<()> {
     println!("Schema successfully written -> {}", schema_path.display());
 
     let configuration_md = render_configuration_markdown(&schema_value, &workspace_root);
-    let configuration_path = docs_dir.join("configuration.md");
+    let configuration_path = docs_dir.join("configuration/configuration.md");
     fs::write(&configuration_path, configuration_md)?;
     println!("Configuration reference successfully written -> {}", configuration_path.display());
 
     let examples_md = render_examples_markdown(&workspace_root);
-    let examples_path = docs_dir.join("configuration-examples.md");
+    let examples_path = docs_dir.join("configuration/configuration-examples.md");
     fs::write(&examples_path, examples_md)?;
     println!("Configuration examples successfully written -> {}", examples_path.display());
 

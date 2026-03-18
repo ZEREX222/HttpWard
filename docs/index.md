@@ -76,8 +76,8 @@ httpward --config httpward.yaml
 
 ## Documentation
 
-- **[Configuration Guide](configuration.md)** - Complete configuration reference
-- **[Configuration Examples](guides/configuration-examples.md)** - Practical examples and use cases
+- **[Configuration Guide](configuration/configuration.md)** - Complete configuration reference
+- **[Configuration Examples](configuration/configuration-examples.md)** - Practical examples and use cases
 - **[Extensions Guide](guides/extensions-guide.md)** - Building and using extensions
 - **[Extensions Migration Guide](guides/extensions-migration-guide.md)** - Migrating between extension versions
 

@@ -320,6 +320,26 @@
         {
           "type": "object",
           "properties": {
+            "On": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          },
+          "required": [
+            "On"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
             "Off": {
               "type": "object",
               "properties": {
