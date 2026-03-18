@@ -126,7 +126,7 @@ sites_enabled: ./sites-enabled
 # httpward.yaml - Fixed version with correct YAML indentation
 
 log:
-  level: "debug"
+  level: "info"
 
 domain: global.local
 
@@ -156,7 +156,11 @@ sites_enabled: "./sites-enabled"
 strategies:
   default2:
     - httpward_log_module:
-        level: warn
+        show_request: true
+        log_client_ip: true
+        log_current_site: true
+        log_route_info: true
+        log_response_status: true
 ```
 
 [↑ Back to top](#table-of-contents)
