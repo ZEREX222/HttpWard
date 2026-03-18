@@ -1,55 +1,140 @@
 ![hw.png](resources/hw.png)
+
 # HttpWard
-HttpWard is a lightweight, high-performance L7 reverse proxy written in Rust, focused on strong security (WAF, rate limiting, DDoS mitigation), intelligent caching, flexible virtual host routing, and extremely low resource usage.
+
+HttpWard is a lightweight, high-performance L7 reverse proxy written in Rust, designed for modern web applications and microservices architecture. It provides strong security features, intelligent routing, flexible middleware system, and extremely low resource usage.
 
 ## Features
 
-- **Middleware Pipeline System**: Clean and flexible middleware chaining
-- **Request Enrichment**: Automatic context enrichment with client info and content type
-- **Structured Logging**: Comprehensive request/response logging
-- **Type Safety**: Compile-time guaranteed middleware combinations
-- **Easy Integration**: Multiple ways to build middleware pipelines
+### Core Capabilities
+- **High Performance**: Built with Rust for maximum speed and reliability
+- **Protocol Support**: HTTP/1.1, HTTP/2, and WebSocket protocols
+- **TLS/SSL Support**: Automatic certificate management with SNI-based routing
+- **Flexible Configuration**: YAML-based configuration with advanced routing
+
+### Advanced Routing
+- **Path-based Routing**: Regex support for complex path patterns
+- **Domain-based Virtual Hosting**: Multiple domains with per-site configuration
+- **HTTP Method Matching**: Route based on GET, POST, PUT, DELETE, etc.
+- **Header & Query Routing**: Route based on request headers and query parameters
+
+### Security & Protection
+- **Web Application Firewall (WAF)**: Request filtering and validation
+- **Rate Limiting**: Configurable request rate limits per route or globally
+- **DDoS Mitigation**: Built-in protection against common attack vectors
+- **Authentication & Authorization**: JWT and custom auth middleware support
+
+### Middleware System
+- **Strategy-based Configuration**: Hierarchical middleware strategies (global → site → route)
+- **Dynamic Module Loading**: Runtime loading of custom middleware modules
+- **Built-in Middleware**: Rate limiting, logging, CORS, authentication, and more
+- **Custom Middleware**: Easy development of custom middleware extensions
+
+### Monitoring & Operations
+- **Structured Logging**: Comprehensive request/response logging with multiple levels
+- **Performance Metrics**: Built-in monitoring and health check endpoints
+- **Error Handling**: Professional HTML error pages with proper status codes
+- **Hot Configuration Reload**: Runtime configuration updates without service restart
 
 ## Quick Start
 
-### Using the Middleware Pipeline
+### Installation
 
-```rust
-use httpward_core::middleware::PrebuiltPipelines;
-use rama::service::service_fn;
-
-// Standard pipeline: Enricher -> Log
-let service = PrebuiltPipelines::standard(service_fn(handler));
-
-// Or build custom pipelines
-use httpward_core::middleware::MiddlewarePipe;
-let service = MiddlewarePipe::new()
-    .add_enricher()
-    .add_log()
-    .build(service_fn(handler));
+```bash
+cargo install httpward
 ```
 
-### Migration from Nested Layers
+### Basic Configuration
 
-**Before:**
-```rust
-let service = EnricherLayer::new().layer(
-    LogLayer::new().layer(
-        service_fn(handler)
-    )
-);
+Create a `httpward.yaml` file:
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+  tls: false
+
+sites:
+  - name: "example"
+    domains:
+      - "example.com"
+      - "www.example.com"
+    routes:
+      - match:
+          path: "/"
+        backend: "http://localhost:3000"
 ```
 
-**After:**
-```rust
-let service = PrebuiltPipelines::standard(service_fn(handler));
+### Advanced Configuration with Strategies
+
+```yaml
+# Global strategy
+strategy: "default"
+strategies:
+  default:
+    - rate_limit:
+        requests: 1000
+        window: "1m"
+    - logging:
+        level: info
+
+sites:
+  - name: "api"
+    domains:
+      - "api.example.com"
+    strategy: "api_strict"  # Override global strategy
+    strategies:
+      api_strict:
+        - rate_limit:
+            requests: 100
+            window: "1m"
+        - auth:
+            type: jwt
+        - logging:
+            level: debug
+    routes:
+      - match:
+          path: "/api/v1/*"
+        backend: "http://api-service:8080"
 ```
 
-## Available Middleware
+### Running HttpWard
 
-- **EnricherLayer**: Enriches requests with client address and content type
-- **LogLayer**: Provides structured request/response logging
+```bash
+httpward --config httpward.yaml
+```
 
 ## Documentation
 
-See [docs/middleware-pipeline.md](docs/middleware-pipeline.md) for detailed usage guide.
+📖 **[Complete Documentation](https://zerex222.github.io/HttpWard)**
+
+- **[Configuration Guide](https://zerex222.github.io/HttpWard/configuration/configuration/)** - Complete configuration reference
+- **[Configuration Examples](https://zerex222.github.io/HttpWard/configuration/configuration-examples/)** - Practical examples and use cases
+- **[Extensions Guide](https://zerex222.github.io/HttpWard/guides/extensions-guide/)** - Building and using extensions
+- **[Extensions Migration Guide](https://zerex222.github.io/HttpWard/guides/extensions-migration-guide/)** - Migrating between extension versions
+
+## Architecture
+
+HttpWard is built with a modular architecture:
+
+- **httpward-core**: Core library with configuration, routing, and middleware systems
+- **httpward**: Main binary application with server implementation
+- **httpward-modules**: Extensible module system for custom middleware
+- **httpward-docs**: Documentation and examples
+
+## Performance
+
+- **Memory Usage**: Optimized for minimal memory footprint
+- **CPU Efficiency**: Async I/O with zero-copy where possible
+- **Scalability**: Handles thousands of concurrent connections
+- **Low Latency**: Sub-millisecond proxy overhead
+
+## Community
+
+- **GitHub**: [https://github.com/ZEREX222/HttpWard](https://github.com/ZEREX222/HttpWard)
+- **Issues**: Report bugs and request features
+- **Discussions**: Community discussions and Q&A
+
+## License
+
+HttpWard is licensed under the MPL-2.0 License. See [LICENSE](LICENSE) for details.
