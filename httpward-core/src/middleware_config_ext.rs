@@ -87,14 +87,13 @@ pub fn get_config_from_ctx<T>(
     ctx: &Context<()>,
     req: &Request<Body>,
     middleware_name: &str,
-) -> Option<T>
+) -> Result<T, Box<dyn Error + Send + Sync>>
 where
     T: DeserializeOwned,
 {
     let path = req.uri().path();
-    ctx.get_middleware_config_for_path_typed::<T>(path, middleware_name).unwrap_or_else(|e| {
-        None
-    })
+    ctx.get_middleware_config_for_path_typed::<T>(path, middleware_name)?
+        .ok_or_else(|| format!("No configuration found for middleware '{}' on path '{}'", middleware_name, path).into())
 }
 
 /// Universal function to get middleware configuration from context with module name
@@ -103,7 +102,7 @@ pub fn get_config_from_ctx_for_module<T>(
     ctx: &Context<()>,
     req: &Request<Body>,
     module_name: &str,
-) -> Option<T>
+) -> Result<T, Box<dyn Error + Send + Sync>>
 where
     T: DeserializeOwned,
 {
@@ -124,7 +123,7 @@ macro_rules! get_config_from_current_module {
 }
 
 /// Macro to get config using current crate name automatically
-/// Usage: get_config_from_current_crate!(MyConfig, ctx, req)
+/// Usage: get_module_config_from_current_crate!(MyConfig, ctx, req)
 #[macro_export]
 macro_rules! get_module_config_from_current_crate {
     ($config_type:ty, $ctx:expr, $req:expr) => {

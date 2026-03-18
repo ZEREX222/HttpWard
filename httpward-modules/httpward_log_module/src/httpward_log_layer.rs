@@ -21,56 +21,68 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct HttpWardLogConfig {
     /// Show basic request information (URI, method, etc.)
+    #[serde(default)]
     pub show_request: bool,
     
     /// Log client IP address from HttpWardContext
+    #[serde(default)]
     pub log_client_ip: bool,
     
     /// Log current site information from HttpWardContext
+    #[serde(default)]
     pub log_current_site: bool,
     
     /// Log route matching details from HttpWardContext
+    #[serde(default)]
     pub log_route_info: bool,
     
     /// Log strategy information for matched routes
+    #[serde(default)]
     pub log_strategy_info: bool,
     
     /// Log middleware details for active strategy
+    #[serde(default)]
     pub log_middleware_details: bool,
     
     /// Log URL parameters extracted from route matching
+    #[serde(default)]
     pub log_url_params: bool,
     
     /// Log request headers from HttpWardContext
+    #[serde(default)]
     pub log_request_headers: bool,
     
     /// Log content type information
+    #[serde(default)]
     pub log_content_type: bool,
     
     /// Log fingerprint information (header_fp, ja4_fp)
+    #[serde(default)]
     pub log_fingerprints: bool,
     
     /// Log response status code
+    #[serde(default)]
     pub log_response_status: bool,
     
     /// Log server instance information
+    #[serde(default)]
     pub log_server_info: bool,
 }
 
 impl Default for HttpWardLogConfig {
     fn default() -> Self {
         Self {
-            show_request: true,
-            log_client_ip: true,
-            log_current_site: true,
-            log_route_info: true,
+            show_request: false,
+            log_client_ip: false,
+            log_current_site: false,
+            log_route_info: false,
             log_strategy_info: false,
             log_middleware_details: false,
             log_url_params: false,
             log_request_headers: false,
             log_content_type: false,
             log_fingerprints: false,
-            log_response_status: true,
+            log_response_status: false,
             log_server_info: false,
         }
     }
@@ -96,11 +108,17 @@ impl HttpWardMiddleware for HttpWardLogLayer {
     ) -> Result<Response<Body>, BoxError> {
         module_log_debug!("HttpWardLogLayer.handle called");
 
-        // Get configuration from context using universal function
-        let config = get_module_config_from_current_crate!(HttpWardLogConfig, &ctx, &req)
-            .unwrap_or_default();
-
-        module_log_debug!("HttpWardLogLayer config loaded: {:?}", config);
+        // Get configuration from context, use default if error occurs
+        let config = match get_module_config_from_current_crate!(HttpWardLogConfig, &ctx, &req) {
+            Ok(config) => {
+                module_log_debug!("HttpWardLogLayer config loaded successfully: {:?}", config);
+                config
+            }
+            Err(e) => {
+                module_log_error!("Failed to load HttpWardLogLayer configuration: {}, using defaults", e);
+                HttpWardLogConfig::default()
+            }
+        };
 
         // Log basic request information if enabled
         if config.show_request {
