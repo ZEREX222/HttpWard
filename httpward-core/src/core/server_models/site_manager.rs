@@ -385,6 +385,7 @@ mod tests {
                 listeners: vec![],
                 routes: vec![],
                 log: Default::default(),
+                proxy_id: "httpward".to_string(),
                 sites_enabled: Default::default(),
                 strategy: Some(StrategyRef::Named("default".to_string())),
                 strategies,

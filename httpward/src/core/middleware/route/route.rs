@@ -191,7 +191,12 @@ where
                                 }
                             }
                         } else {
-                            match self.proxy_handler.proxy_request(request, &backend, &matched_route.params, Some(httpward_ctx.request_headers.clone())).await {
+                            // Extract client IP for X-Forwarded-For
+                            let client_ip = Some(httpward_ctx.client_ip.to_string());
+                            // Extract proxy_id from global config
+                            let proxy_id = &httpward_ctx.server_instance.global.proxy_id;
+                            
+                            match self.proxy_handler.proxy_request_with_client_ip_and_proxy_id(request, &backend, &matched_route.params, Some(httpward_ctx.request_headers.clone()), client_ip.as_deref(), proxy_id).await {
                                 Ok(response) => return Ok(response),
                                 Err(e) => {
                                     tracing::error!("Proxy error: {}", e);

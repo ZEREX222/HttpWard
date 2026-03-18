@@ -238,6 +238,7 @@ mod tests {
             listeners: vec![],
             routes: vec![],
             log: Default::default(),
+            proxy_id: "httpward".to_string(),
             sites_enabled: PathBuf::from("/tmp/sites"),
             strategy: Some(StrategyRef::Named("default".to_string())),
             strategies: {
@@ -723,6 +724,7 @@ mod tests {
             listeners: vec![],
             routes: vec![],
             log: Default::default(),
+            proxy_id: "httpward".to_string(),
             sites_enabled: std::path::PathBuf::from("/tmp/sites"),
             strategy: Some(StrategyRef::Named("strategy_0".to_string())),
             strategies,

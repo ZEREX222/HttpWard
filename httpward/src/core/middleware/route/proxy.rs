@@ -32,7 +32,21 @@ fn normalize_request_headers(
     upstream_host: &str,
     incoming_proto: &str, // "http" or "https"
     request_kind: ProxyRequestKind,
+    proxy_id: &str,
 ) -> Result<HeaderMap, Box<dyn std::error::Error>> {
+    // Preserve original Host header before replacing it
+    if let Some(original_host) = headers.get(header::HOST) {
+        if let Ok(host_str) = original_host.to_str() {
+            // Only add X-Forwarded-Host if it's different from upstream host
+            if host_str != upstream_host {
+                headers.insert(
+                    HeaderName::from_static("x-forwarded-host"),
+                    HeaderValue::from_str(host_str)?,
+                );
+            }
+        }
+    }
+
     // Hop-by-hop headers per RFC: always remove these.
     let mut hop_by_hop = vec![
         header::CONNECTION.clone(),
@@ -77,18 +91,23 @@ fn normalize_request_headers(
         HeaderValue::from_str(upstream_host)?,
     );
 
-    // Preserve original host in X-Forwarded-Host if present (optional)
-    // You can add logic to set X-Forwarded-Host only if original Host != upstream_host.
-    // headers.insert(HeaderName::from_static("x-forwarded-host"), ...);
-
-    // Append or create X-Forwarded-For
+    // Append or create X-Forwarded-For with IPv6 support
     if let Some(ip) = client_ip {
         let xff = HeaderName::from_static("x-forwarded-for");
         let prev = headers.get(&xff).and_then(|v| v.to_str().ok()).unwrap_or("");
-        let new_val = if prev.is_empty() {
-            ip.to_string()
+        
+        // Validate IP format (supports both IPv4 and IPv6)
+        let normalized_ip = if ip.contains(':') && ip.starts_with('[') && ip.ends_with(']') {
+            // IPv6 in brackets [::1] -> ::1
+            ip.trim_start_matches('[').trim_end_matches(']')
         } else {
-            format!("{}, {}", prev, ip)
+            ip // IPv4 or IPv6 without brackets
+        };
+        
+        let new_val = if prev.is_empty() {
+            normalized_ip.to_string()
+        } else {
+            format!("{}, {}", prev, normalized_ip)
         };
         headers.insert(xff, HeaderValue::from_str(&new_val)?);
     }
@@ -99,9 +118,9 @@ fn normalize_request_headers(
         HeaderValue::from_str(incoming_proto)?,
     );
 
-    // Add Via header
+    // Add Via header with configurable proxy identifier
     let via_name = HeaderName::from_static("via");
-    let our_via = format!("{} {}", incoming_proto, "my-proxy"); // replace my-proxy with actual id
+    let our_via = format!("{} {}", incoming_proto, proxy_id);
     let via_prev = headers.get(&via_name).and_then(|v| v.to_str().ok()).unwrap_or("");
     let via_val = if via_prev.is_empty() {
         our_via
@@ -199,12 +218,14 @@ impl ProxyHandler {
         params: &HashMap<String, String>,
         httpward_headers: Option<HeaderMap>,
     ) -> Result<RamaResponse<RamaBody>, ProxyError> {
-        self.proxy_request_with_kind(
+        self.proxy_request_with_kind_and_client_ip(
             req,
             backend,
             params,
             httpward_headers,
             ProxyRequestKind::Http,
+            "httpward",
+            None,
         ).await
     }
 
@@ -216,22 +237,48 @@ impl ProxyHandler {
         params: &HashMap<String, String>,
         httpward_headers: Option<HeaderMap>,
     ) -> Result<RamaResponse<RamaBody>, ProxyError> {
-        self.proxy_request_with_kind(
+        self.proxy_request_with_kind_and_client_ip(
             req,
             backend,
             params,
             httpward_headers,
             ProxyRequestKind::Grpc,
+            "httpward",
+            None,
         ).await
     }
 
-    async fn proxy_request_with_kind(
+    /// Proxy HTTP request to upstream with client IP and proxy ID
+    /// If httpward_headers is provided, they will be used instead of request headers (allowing middleware to modify them)
+    pub async fn proxy_request_with_client_ip_and_proxy_id(
+        &self,
+        req: RamaRequest<RamaBody>,
+        backend: &str,
+        params: &HashMap<String, String>,
+        httpward_headers: Option<HeaderMap>,
+        client_ip: Option<&str>,
+        proxy_id: &str,
+    ) -> Result<RamaResponse<RamaBody>, ProxyError> {
+        self.proxy_request_with_kind_and_client_ip(
+            req,
+            backend,
+            params,
+            httpward_headers,
+            ProxyRequestKind::Http,
+            proxy_id,
+            client_ip,
+        ).await
+    }
+
+    async fn proxy_request_with_kind_and_client_ip(
         &self,
         mut req: RamaRequest<RamaBody>,
         backend: &str,
         params: &HashMap<String, String>,
         httpward_headers: Option<HeaderMap>,
         request_kind: ProxyRequestKind,
+        proxy_id: &str,
+        client_ip: Option<&str>,
     ) -> Result<RamaResponse<RamaBody>, ProxyError> {
         // Build upstream URL using matcher parameters and original request query.
         let new_uri = Self::build_proxy_uri(backend, params, req.uri())?;
@@ -264,7 +311,6 @@ impl ProxyHandler {
             .ok_or_else(|| ProxyError::Upstream("Missing upstream authority".into()))?;
 
         // Example values (normally from connection context)
-        let client_ip = None; // Option<&str>
         let proto = "http";   // or "https"
 
         // Normalize headers before sending upstream
@@ -274,6 +320,7 @@ impl ProxyHandler {
             upstream_host,
             proto,
             request_kind,
+            proxy_id,
         ).map_err(|e| ProxyError::Upstream(e.to_string()))?;
 
         // Send request using Rama HTTP client
@@ -463,6 +510,7 @@ mod tests {
             "backend.local:8080",
             "http",
             ProxyRequestKind::Http,
+            "httpward",
         ).unwrap();
 
         assert!(!normalized.contains_key(header::TE));
@@ -479,6 +527,7 @@ mod tests {
             "backend.local:8080",
             "http",
             ProxyRequestKind::Grpc,
+            "httpward",
         ).unwrap();
 
         assert_eq!(

@@ -20,6 +20,7 @@ mod user_scenario_test {
             listeners: vec![],
             routes: vec![],
             log: crate::config::global::LogConfig::default(),
+            proxy_id: "httpward".to_string(),
             sites_enabled: PathBuf::from("./sites-enabled"),
             strategy: Some(StrategyRef::Named("default2".to_string())),
             strategies: {
@@ -105,6 +106,7 @@ mod user_scenario_test {
             listeners: vec![],
             routes: vec![],
             log: crate::config::global::LogConfig::default(),
+            proxy_id: "httpward".to_string(),
             sites_enabled: PathBuf::from("./sites-enabled"),
             strategy: None,
             strategies: Default::default(),

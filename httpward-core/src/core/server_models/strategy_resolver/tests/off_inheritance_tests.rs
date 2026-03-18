@@ -16,6 +16,7 @@ mod off_inheritance_tests {
             listeners: vec![],
             routes: vec![],
             log: LogConfig::default(),
+            proxy_id: "httpward".to_string(),
             sites_enabled: PathBuf::from("./sites-enabled"),
             strategy: Some(StrategyRef::Named("default2".to_string())),
             strategies: {

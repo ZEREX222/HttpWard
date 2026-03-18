@@ -30,6 +30,10 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub log: LogConfig,
 
+    /// Proxy identifier used in Via header
+    #[serde(default = "default_proxy_id")]
+    pub proxy_id: String,
+
     /// Path to directory with per-site .yaml / .yml files
     #[serde(default)]
     pub sites_enabled: PathBuf,
@@ -51,6 +55,7 @@ impl Default for GlobalConfig {
             listeners: Vec::default(),
             routes: Vec::default(),
             log: LogConfig::default(),
+            proxy_id: default_proxy_id(),
             sites_enabled: PathBuf::default(),
             strategy: default_strategy(),
             strategies: StrategyCollection::default(),
@@ -222,6 +227,10 @@ fn default_log_level() -> String {
 
 fn default_strategy() -> Option<StrategyRef> {
     Some(StrategyRef::Named("default".to_string()))
+}
+
+fn default_proxy_id() -> String {
+    "httpward".to_string()
 }
 
 #[cfg(test)]

@@ -14,6 +14,7 @@ mod hierarchical_inheritance_tests {
             listeners: vec![],
             routes: vec![],
             log: crate::config::global::LogConfig::default(),
+            proxy_id: "httpward".to_string(),
             sites_enabled: PathBuf::from("./sites-enabled"),
             strategy: Some(StrategyRef::Named("global_base".to_string())),
             strategies: {

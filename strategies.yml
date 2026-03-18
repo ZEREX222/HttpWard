@@ -3,16 +3,20 @@
 
 # Default strategy applied globally
 default:
-  - rate_limit:
-      requests: 1000
-      window: "1m"
-  - logging:
-      level: info
+  - httpward_log_module:
+      show_request: true
+      log_client_ip: true
+      log_current_site: true
+      log_route_info: true
+      log_response_status: true
+      log_fingerprints: true
 
 # For super safe mode
 super-safe:
-  - rate_limit:
-      requests: 10
-      window: "1m"
-  - logging:
-      level: info
+  - httpward_log_module:
+      show_request: true
+      log_client_ip: true
+      log_current_site: true
+      log_route_info: true
+      log_response_status: true
+      log_fingerprints: true
