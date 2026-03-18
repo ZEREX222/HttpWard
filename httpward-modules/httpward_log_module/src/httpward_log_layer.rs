@@ -72,7 +72,7 @@ pub struct HttpWardLogConfig {
 impl Default for HttpWardLogConfig {
     fn default() -> Self {
         Self {
-            show_request: false,
+            show_request: true,
             log_client_ip: false,
             log_current_site: false,
             log_route_info: false,
