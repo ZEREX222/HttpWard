@@ -1,15 +1,20 @@
-[lib]
-name = "httpward_core"
-authors = ["ZEREX"]
-description = "HttpWard is a lightweight, high-performance L7 reverse proxy written in Rust, focused on strong security (WAF, rate limiting, DDoS mitigation), intelligent caching, flexible virtual host routing, and extremely low resource usage."
-license = "MPL-2"
-repository = "https://github.com/ZEREX222/HttpWard"
-# crate-type = ["cdylib"]
-
 [package]
 name = "httpward-core"
 version = "0.0.1-alpha.1"
 edition = "2024"
+rust-version = "1.93.1"
+authors = ["ZEREX"]
+description = "HttpWard core library providing the fundamental components for building high-performance HTTP reverse proxies with advanced routing, middleware system, and security features."
+license = "MPL-2"
+repository = "https://github.com/ZEREX222/HttpWard"
+homepage = "https://zerex222.github.io/HttpWard/"
+documentation = "https://zerex222.github.io/HttpWard/"
+keywords = ["http", "reverse-proxy", "waf", "rust", "cli"]
+categories = ["network-programming", "command-line-utilities"]
+
+[lib]
+name = "httpward_core"
+# crate-type = ["cdylib"]
 
 
 [dependencies]
