@@ -15,7 +15,7 @@ categories = ["network-programming", "command-line-utilities"]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-httpward-core = { path = "../../httpward-core" }
+httpward-core = { workspace = true }
 async-trait = "0.1"
 rama = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }

@@ -20,7 +20,7 @@ tracing-subscriber = { workspace = true }
 rama = { workspace = true }
 rama-tls-rustls = { workspace = true }
 wildmatch = { workspace = true }
-httpward-core = { path = "../httpward-core" }
+httpward-core = { workspace = true }
 rcgen = "0.14"
 rustls = { version = "0.23", features = ["ring"] }
 notify = "8.2"
@@ -31,8 +31,7 @@ sha1 = "0.10"
 http = "1.4"
 tokio-tungstenite = { version = "0.24", features = ["connect", "rustls-tls-webpki-roots"] }
 libloading = "0.9"
-httpward_log_module = { path = "../httpward-modules/httpward_log_module", optional = true }
-
+httpward_log_module = { workspace = true, optional = true }
 
 [dev-dependencies]
 
