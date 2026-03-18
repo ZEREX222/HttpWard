@@ -985,7 +985,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "httpward"
-version = "0.0.1"
+version = "0.0.1-alpha.1"
 dependencies = [
  "base64",
  "futures-util",
@@ -1010,7 +1010,7 @@ dependencies = [
 
 [[package]]
 name = "httpward-core"
-version = "0.0.1"
+version = "0.0.1-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "httpward-docs"
-version = "0.0.1"
+version = "0.0.1-alpha.1"
 dependencies = [
  "httpward-core",
  "schemars",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "httpward_log_module"
-version = "0.0.1"
+version = "0.0.1-alpha.1"
 dependencies = [
  "async-trait",
  "httpward-core",

@@ -4,7 +4,7 @@ name = "httpward_core"
 
 [package]
 name = "httpward-core"
-version = "0.0.1"
+version = "0.0.1-alpha.1"
 edition = "2024"
 
 
