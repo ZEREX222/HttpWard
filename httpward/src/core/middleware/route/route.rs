@@ -14,9 +14,9 @@ use httpward_core::core::server_models::server_instance::ServerInstance;
 use httpward_core::core::server_models::listener::ListenerKey;
 use httpward_core::error::ErrorHandler;
 use super::{
-    proxy::{ProxyHandler, ProxyError},
-    websocket::{WebSocketHandler, WebSocketError},
+    proxy::{ProxyError, ProxyHandler},
     static_files,
+    websocket::{WebSocketError, WebSocketHandler},
 };
 use httpward_core::core::server_models::{SiteManager, SiteManagerError};
 
@@ -133,22 +133,43 @@ where
                         let is_websocket = ProxyHandler::is_websocket_upgrade(&request);
                         
                         if is_websocket {
-                            match WebSocketHandler::http_to_ws_url(&backend) {
-                                Ok(ws_url) => {
-                                    match self.websocket_handler.proxy_websocket(request, &ws_url, Some(&httpward_ctx.request_headers)).await {
-                                        Ok(response) => return Ok(response),
+                            match ProxyHandler::build_proxy_uri(&backend, &matched_route.params, request.uri()) {
+                                Ok(upstream_uri) => {
+                                    let upstream_uri_string = upstream_uri.to_string();
+                                    match WebSocketHandler::http_to_ws_url(&upstream_uri_string) {
+                                        Ok(ws_url) => {
+                                            match self.websocket_handler.proxy_websocket(&ctx, request, &ws_url, Some(&httpward_ctx.request_headers)).await {
+                                                Ok(response) => return Ok(response),
+                                                Err(e) => {
+                                                    tracing::error!(error = %e, upstream = %ws_url, "WebSocket proxy error");
+                                                    let status = match &e {
+                                                        WebSocketError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+                                                        WebSocketError::ConnectionFailed(_)
+                                                        | WebSocketError::WebSocket(_)
+                                                        | WebSocketError::Io(_) => StatusCode::BAD_GATEWAY,
+                                                        WebSocketError::InvalidUrl(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                                                    };
+
+                                                    return Ok(self.error_handler.create_error_response_with_code(status)
+                                                        .unwrap_or_else(|_| RamaResponse::builder()
+                                                            .status(status)
+                                                            .body(RamaBody::from("WebSocket proxy error"))
+                                                            .unwrap()));
+                                                }
+                                            }
+                                        }
                                         Err(e) => {
-                                            tracing::error!("WebSocket proxy error: {}", e);
+                                            tracing::error!(error = %e, backend = %upstream_uri_string, "Failed to convert backend URL to WebSocket URL");
                                             return Ok(self.error_handler.create_error_response_with_code(StatusCode::INTERNAL_SERVER_ERROR)
                                                 .unwrap_or_else(|_| RamaResponse::builder()
                                                     .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                                    .body(RamaBody::from("WebSocket proxy error"))
+                                                    .body(RamaBody::from("Invalid WebSocket URL"))
                                                     .unwrap()));
                                         }
                                     }
                                 }
                                 Err(e) => {
-                                    tracing::error!("Failed to convert HTTP URL to WebSocket URL: {}", e);
+                                    tracing::error!(error = %e, backend = %backend, "Failed to build WebSocket upstream URL");
                                     return Ok(self.error_handler.create_error_response_with_code(StatusCode::INTERNAL_SERVER_ERROR)
                                         .unwrap_or_else(|_| RamaResponse::builder()
                                             .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -219,7 +240,7 @@ impl<S> RouteService<S> {
     /// Handle redirects
     async fn handle_redirect(
         &self,
-        request: RamaRequest<RamaBody>,
+        _request: RamaRequest<RamaBody>,
         redirect: &Redirect,
         params: &std::collections::HashMap<String, String>,
     ) -> Result<RamaResponse<RamaBody>, RouteError> {

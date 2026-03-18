@@ -130,7 +130,16 @@ impl ProxyHandler {
         
         Ok(result)
     }
-    
+
+    pub(crate) fn build_proxy_uri(
+        backend: &str,
+        params: &HashMap<String, String>,
+        orig: &Uri,
+    ) -> Result<Uri, ProxyError> {
+        let processed_backend = Self::process_backend_url_with_params(backend, params)?;
+        Self::build_upstream_url(&processed_backend, orig)
+    }
+
     /// Proxy HTTP request to upstream
     /// If httpward_headers is provided, they will be used instead of request headers (allowing middleware to modify them)
     pub async fn proxy_request(
@@ -140,11 +149,8 @@ impl ProxyHandler {
         params: &HashMap<String, String>,
         httpward_headers: Option<HeaderMap>,
     ) -> Result<RamaResponse<RamaBody>, ProxyError> {
-        // Process backend URL with matcher parameters
-        let processed_backend = Self::process_backend_url_with_params(backend, params)?;
-        
-        // Build upstream URL
-        let new_uri = Self::build_upstream_url(&processed_backend, req.uri())?;
+        // Build upstream URL using matcher parameters and original request query.
+        let new_uri = Self::build_proxy_uri(backend, params, req.uri())?;
         *req.uri_mut() = new_uri;
 
         // Use headers from HttpWardContext if provided (allows middleware modifications)
