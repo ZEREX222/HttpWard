@@ -4,6 +4,7 @@ pub mod middleware_trait;
 pub mod next;
 pub mod pipe;
 pub mod adapter;
+pub mod dependency_error;
 
 #[cfg(test)]
 mod tests;
@@ -11,4 +12,5 @@ mod tests;
 pub use middleware_trait::HttpWardMiddleware;
 pub use pipe::HttpWardMiddlewarePipe;
 pub use types::BoxError;
+pub use dependency_error::DependencyError;
 pub use crate::core::error::errors::{HttpWardError, HttpWardMiddlewareError, IsHttpWardError};

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use crate::httpward_middleware::next::Next;
 use crate::httpward_middleware::types::BoxError;
+use crate::httpward_middleware::dependency_error::DependencyError;
 use rama::http::{Body, Request, Response};
 use rama::Context;
 use rama::service::Service;
@@ -52,27 +53,30 @@ impl HttpWardMiddlewarePipe {
         self.inner.is_empty()
     }
 
-    /// Add a middleware to the pipe (returns a new pipe for builder pattern compatibility)
-    pub fn add_layer<M>(&self, mw: M) -> Self
+    /// Add a middleware to the pipe with mandatory dependency validation
+    pub fn add_layer<M>(&self, mw: M) -> Result<Self, DependencyError>
     where
         M: HttpWardMiddleware + Send + Sync + 'static,
     {
+        let mw_name = mw.name().unwrap_or("unnamed");
+        let deps = mw.dependencies();
+        
+        // Check that all dependencies are already present in pipe
+        for &dep in &deps {
+            if self.get_layer_by_name(dep).is_none() {
+                return Err(DependencyError::MissingDependency {
+                    middleware: mw_name.to_string(),
+                    dependency: dep.to_string(),
+                });
+            }
+        }
+        
+        // If all dependencies are present, add middleware
         let mut new_vec = (*self.inner).clone();
         new_vec.push(Arc::new(mw));
-        Self {
+        Ok(Self {
             inner: Arc::new(new_vec),
-        }
-    }
-
-    /// Add a boxed middleware (Arc<dyn HttpWardMiddleware>) into the pipe.
-    /// This is useful when the middleware is created dynamically (plugins).
-    pub fn add_boxed_layer(&self, mw: BoxedMiddleware) -> Self {
-        // Clone the inner Vec and append the boxed middleware.
-        let mut new_vec = (*self.inner).clone();
-        new_vec.push(mw);
-        Self {
-            inner: Arc::new(new_vec),
-        }
+        })
     }
 
     /// Find layer by name (middleware may return a name via `name()`).
@@ -84,6 +88,80 @@ impl HttpWardMiddlewarePipe {
         self.inner.iter().find(|m| m.name().map_or(false, |n| n == name))
     }
 
+    /// Add a boxed middleware (Arc<dyn HttpWardMiddleware>) into the pipe with dependency validation.
+    /// This is useful when the middleware is created dynamically (plugins).
+    pub fn add_boxed_layer(&self, mw: BoxedMiddleware) -> Result<Self, DependencyError> {
+        let mw_name = mw.name().unwrap_or("unnamed");
+        let deps = mw.dependencies();
+        
+        // Check that all dependencies are already present in pipe
+        for &dep in &deps {
+            if self.get_layer_by_name(dep).is_none() {
+                return Err(DependencyError::MissingDependency {
+                    middleware: mw_name.to_string(),
+                    dependency: dep.to_string(),
+                });
+            }
+        }
+        
+        // Clone the inner Vec and append the boxed middleware.
+        let mut new_vec = (*self.inner).clone();
+        new_vec.push(mw);
+        Ok(Self {
+            inner: Arc::new(new_vec),
+        })
+    }
+    
+    /// Validate the entire pipe for correct dependency order
+    pub fn validate_order(&self) -> Result<(), Vec<DependencyError>> {
+        let mut errors = Vec::new();
+        
+        for (pos, mw) in self.inner.iter().enumerate() {
+            let mw_name = mw.name().unwrap_or("unnamed");
+            
+            for &dep in &mw.dependencies() {
+                // Search for dependency in middleware that come before current position
+                let dep_found = self.inner.iter().take(pos)
+                    .any(|m| m.name().map_or(false, |name| name == dep));
+                    
+                if !dep_found {
+                    errors.push(DependencyError::WrongOrder {
+                        middleware: mw_name.to_string(),
+                        dependency: dep.to_string(),
+                    });
+                }
+            }
+        }
+        
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+    
+    /// Execute middleware with dependency validation
+    pub async fn execute_with_validation<S>(
+        &self,
+        inner: S,
+        ctx: Context<()>,
+        req: Request<Body>,
+    ) -> Result<Response<Body>, BoxError>
+    where
+        S: Service<(), Request<Body>, Response = Response<Body>> + Clone + Send + Sync + 'static,
+        S::Error: std::error::Error + Send + Sync + 'static,
+    {
+        // Validate order before execution
+        if let Err(errors) = self.validate_order() {
+            let error_msg = errors.iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(format!("Dependency order errors: {}", error_msg).into());
+        }
+        
+        self.execute_middleware(inner, ctx, req).await
+    }
     /// Execute the middleware chain for a concrete inner service `S`.
     ///
     /// This converts the concrete `inner` service to a boxed type (`BoxService`) once,
@@ -113,7 +191,7 @@ impl HttpWardMiddlewarePipe {
 /// Builder used during configuration time to accumulate Box<dyn Middleware>.
 /// Use this builder to add layers; then call `build()` to obtain the cheap-cloneable pipe.
 pub struct HttpWardMiddlewarePipeBuilder {
-    v: Vec<BoxedMiddleware>,
+    pub(crate) v: Vec<BoxedMiddleware>,
 }
 
 impl HttpWardMiddlewarePipeBuilder {
@@ -122,20 +200,48 @@ impl HttpWardMiddlewarePipeBuilder {
         Self { v: Vec::new() }
     }
 
-    /// Add a middleware instance (consumes the middleware).
+    /// Add a middleware instance with dependency validation (consumes the middleware).
     /// Chaining is supported.
-    pub fn add_layer<M>(mut self, mw: M) -> Self
+    pub fn add_layer<M>(mut self, mw: M) -> Result<Self, DependencyError>
     where
         M: HttpWardMiddleware + Send + Sync + 'static,
     {
+        let mw_name = mw.name().unwrap_or("unnamed");
+        let deps = mw.dependencies();
+        
+        // Check that all dependencies are already present in builder
+        for &dep in &deps {
+            let found = self.v.iter().any(|m| m.name().map_or(false, |name| name == dep));
+            if !found {
+                return Err(DependencyError::MissingDependency {
+                    middleware: mw_name.to_string(),
+                    dependency: dep.to_string(),
+                });
+            }
+        }
+        
         self.v.push(Arc::new(mw));
-        self
+        Ok(self)
     }
 
-    /// Add a pre-boxed middleware (useful for plugins that already produce BoxedMiddleware).
-    pub fn push_box(mut self, mw: BoxedMiddleware) -> Self {
+    /// Add a pre-boxed middleware with dependency validation (useful for plugins that already produce BoxedMiddleware).
+    pub fn push_box(mut self, mw: BoxedMiddleware) -> Result<Self, DependencyError> {
+        let mw_name = mw.name().unwrap_or("unnamed");
+        let deps = mw.dependencies();
+        
+        // Check that all dependencies are already present in builder
+        for &dep in &deps {
+            let found = self.v.iter().any(|m| m.name().map_or(false, |name| name == dep));
+            if !found {
+                return Err(DependencyError::MissingDependency {
+                    middleware: mw_name.to_string(),
+                    dependency: dep.to_string(),
+                });
+            }
+        }
+        
         self.v.push(mw);
-        self
+        Ok(self)
     }
 
     /// Finalize builder into a cheap-cloneable `HttpWardMiddlewarePipe`.
@@ -170,17 +276,138 @@ mod tests {
             // call next without changes
             next.run(ctx, req).await
         }
+        
+        fn name(&self) -> Option<&'static str> {
+            Some("DummyMw")
+        }
+    }
+
+    // Test middleware with dependencies
+    struct DependentMw;
+    #[async_trait]
+    impl HttpWardMiddleware for DependentMw {
+        async fn handle(&self, ctx: Context<()>, req: Request<Body>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
+            next.run(ctx, req).await
+        }
+        
+        fn name(&self) -> Option<&'static str> {
+            Some("DependentMw")
+        }
+        
+        fn dependencies(&self) -> Vec<&'static str> {
+            vec!["DummyMw"]
+        }
+    }
+
+    // Test middleware with name but no dependencies
+    struct NamedMw;
+    #[async_trait]
+    impl HttpWardMiddleware for NamedMw {
+        async fn handle(&self, ctx: Context<()>, req: Request<Body>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
+            next.run(ctx, req).await
+        }
+        
+        fn name(&self) -> Option<&'static str> {
+            Some("NamedMw")
+        }
     }
 
     #[tokio::test]
     async fn build_and_execute_pipe() {
         // This test ensures builder + pipe compile — not a full integration.
         let builder = HttpWardMiddlewarePipeBuilder::new()
-            .add_layer(DummyMw);
+            .add_layer(DummyMw)
+            .unwrap();
         let pipe = builder.build();
 
         // Can't easily run a full Rama service here — just check metadata.
         assert_eq!(pipe.len(), 1);
         assert!(!pipe.is_empty());
+    }
+    
+    #[test]
+    fn test_add_layer_success() {
+        let pipe = HttpWardMiddlewarePipe::new()
+            .add_layer(DummyMw)
+            .unwrap()
+            .add_layer(DependentMw)
+            .unwrap();
+            
+        assert_eq!(pipe.len(), 2);
+        assert!(pipe.get_layer_by_name("DummyMw").is_some());
+        assert!(pipe.get_layer_by_name("DependentMw").is_some());
+    }
+    
+    #[test]
+    fn test_add_layer_missing_dependency() {
+        let pipe = HttpWardMiddlewarePipe::new();
+        let result = pipe.add_layer(DependentMw);
+        
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DependencyError::MissingDependency { middleware, dependency } => {
+                assert_eq!(middleware, "DependentMw");
+                assert_eq!(dependency, "DummyMw");
+            }
+            _ => panic!("Expected MissingDependency error"),
+        }
+    }
+    
+    #[test]
+    fn test_validate_order_success() {
+        let pipe = HttpWardMiddlewarePipe::new()
+            .add_layer(DummyMw)
+            .unwrap()
+            .add_layer(DependentMw)
+            .unwrap();
+            
+        assert!(pipe.validate_order().is_ok());
+    }
+    
+    #[test]
+    fn test_validate_order_wrong_order() {
+        // Create pipe with wrong order: add both middleware, then manually reorder for testing
+        let pipe = HttpWardMiddlewarePipe::new()
+            .add_layer(DummyMw)
+            .unwrap()
+            .add_layer(DependentMw)
+            .unwrap();
+            
+        // This pipe should have correct order, so validate_order should pass
+        assert!(pipe.validate_order().is_ok());
+        
+        // For testing wrong order, we need to create a scenario where dependencies exist but are in wrong position
+        // Since add_layer enforces dependencies, we can't create a truly wrong order at build time
+        // But we can test the validation logic by creating a pipe manually
+        let mut builder = HttpWardMiddlewarePipeBuilder::new();
+        builder.v.push(Arc::new(DependentMw));  // Add dependent first
+        builder.v.push(Arc::new(DummyMw));      // Add dependency second
+        
+        let wrong_order_pipe = builder.build();
+        let result = wrong_order_pipe.validate_order();
+        assert!(result.is_err());
+        
+        let errors = result.unwrap_err();
+        assert_eq!(errors.len(), 1);
+        match &errors[0] {
+            DependencyError::WrongOrder { middleware, dependency } => {
+                assert_eq!(middleware, "DependentMw");
+                assert_eq!(dependency, "DummyMw");
+            }
+            _ => panic!("Expected WrongOrder error"),
+        }
+    }
+    
+    #[test]
+    fn test_get_layer_by_name() {
+        let pipe = HttpWardMiddlewarePipe::new()
+            .add_layer(NamedMw)
+            .unwrap()
+            .add_layer(DummyMw)
+            .unwrap();
+            
+        assert!(pipe.get_layer_by_name("NamedMw").is_some());
+        assert!(pipe.get_layer_by_name("DummyMw").is_some()); // DummyMw now has a name
+        assert!(pipe.get_layer_by_name("NonExistent").is_none());
     }
 }

@@ -33,7 +33,8 @@ mod tests {
     #[test]
     fn test_layer_by_name() {
         let pipe = HttpWardMiddlewarePipe::new()
-            .add_layer(TestMiddleware);
+            .add_layer(TestMiddleware)
+            .unwrap();
 
         let layer = pipe.get_layer_by_name("TestMiddleware");
         assert!(layer.is_some());
@@ -42,7 +43,8 @@ mod tests {
     #[test]
     fn test_add_layer() {
         let pipe = HttpWardMiddlewarePipe::new()
-            .add_layer(TestMiddleware);
+            .add_layer(TestMiddleware)
+            .unwrap();
         
         assert_eq!(pipe.len(), 1);
     }

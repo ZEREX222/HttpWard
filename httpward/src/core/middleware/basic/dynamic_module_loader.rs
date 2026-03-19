@@ -40,7 +40,8 @@ impl DynamicModuleLoaderLayer {
         for middleware_name in &unique_middleware_names {
             match get_middleware_instance(middleware_name) {
                 Some(middleware_instance) => {
-                    loader.middleware_pipe = loader.middleware_pipe.add_boxed_layer(middleware_instance);
+                    loader.middleware_pipe = loader.middleware_pipe.add_boxed_layer(middleware_instance)
+                        .expect(&format!("Failed to add middleware '{}': dependency validation failed", middleware_name));
                     tracing::info!(target: "dynamic_module_loader", "Successfully loaded middleware: {}", middleware_name);
                 }
                 None => {
@@ -91,7 +92,8 @@ impl DynamicModuleLoaderLayer {
     where
         T: httpward_core::httpward_middleware::HttpWardMiddleware + 'static,
     {
-        self.middleware_pipe = self.middleware_pipe.add_layer(layer);
+        self.middleware_pipe = self.middleware_pipe.add_layer(layer)
+            .expect("Failed to add layer: dependency validation failed");
         self
     }
 
@@ -99,7 +101,8 @@ impl DynamicModuleLoaderLayer {
     /// This uses the `add_boxed_layer` method added to pipe.
     pub fn add_boxed_layer(&mut self, boxed: Arc<dyn httpward_core::httpward_middleware::HttpWardMiddleware + Send + Sync>) {
         // Convert Arc to the internal BoxedMiddleware type (which is Arc<dyn ...> already)
-        self.middleware_pipe = self.middleware_pipe.add_boxed_layer(boxed);
+        self.middleware_pipe = self.middleware_pipe.add_boxed_layer(boxed)
+            .expect("Failed to add boxed layer: dependency validation failed");
     }
 
 

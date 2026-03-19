@@ -26,6 +26,11 @@ pub trait HttpWardMiddleware: Send + Sync + 'static {
     fn name(&self) -> Option<&'static str> {
         None
     }
+    
+    /// Dependencies on other middleware (must be present earlier in pipe)
+    fn dependencies(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
 }
 
 pub type DynMiddleware = Arc<dyn HttpWardMiddleware>;
