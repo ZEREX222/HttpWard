@@ -59,6 +59,11 @@
             "level": ""
           }
         },
+        "proxy_id": {
+          "description": "Proxy identifier used in Via header",
+          "type": "string",
+          "default": "httpward"
+        },
         "sites_enabled": {
           "description": "Path to directory with per-site .yaml / .yml files",
           "type": "string",

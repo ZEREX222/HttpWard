@@ -16,6 +16,7 @@ For a page with copy-pasteable recipes, see [Configuration examples](configurati
 
 - [How configuration is loaded](#how-configuration-is-loaded)
 - [Quick start](#quick-start)
+- [How `domains` matching works](#how-domains-matching-works)
 - [AppConfig](#appconfig)
 - [Global file: `httpward.yaml`](#global-file-httpward-yaml)
 - [Site files: `sites-enabled/*.yml`](#site-files-sites-enabled-yml)
@@ -49,7 +50,11 @@ Important validation rules:
 
 ## Quick start
 
-Start with these three files:
+Use this structure when you want to split config by domains:
+
+1. Keep global listeners, shared routes, and shared strategies in `httpward.yaml`.
+2. Set `sites_enabled: "./sites-enabled"` in `httpward.yaml`.
+3. Put one or more site files into `sites-enabled/` (for example `sites-enabled/test.local.yml`) with `domain` or `domains`.
 
 ### Minimal `httpward.yaml`
 
@@ -58,6 +63,46 @@ domain: example.com
 listeners:
   - port: 80
 sites_enabled: ./sites-enabled
+```
+
+### Recommended multi-site `httpward.yaml`
+
+```yaml
+log:
+  level: "info"
+
+strategy: my_custom_strategy
+
+listeners:
+  - port: 443
+    tls:
+      self_signed: true
+
+routes:
+  - match:
+      path: "/my/{*any}"
+    backend: "http://zerex222.ru:8080/{*any}"
+
+  - match:
+      path: "/site/{*path}"
+    static_dir: "C:/myprojects/html/{*path}"
+
+  - match:
+      path: "/search/{request}"
+    redirect:
+      to: "https://www.google.com/search?q={request}"
+
+sites_enabled: "./sites-enabled"
+
+strategies:
+  my_custom_strategy:
+    - httpward_log_module:
+        show_request: true
+        log_client_ip: true
+        log_current_site: true
+        log_route_info: true
+        log_response_status: true
+        log_fingerprints: true
 ```
 
 ### Minimal `strategies.yml`
@@ -71,15 +116,44 @@ default:
       window: "1m"
 ```
 
-### Minimal site file
+### Recommended `sites-enabled/test.local.yml`
 
 ```yaml
-domain: app.example.com
+domains: ["test.local", "*.test2.local"]
+
+listeners:
+  - port: 443
+    tls:
+      self_signed: true
+
+strategy: default55
+
 routes:
   - match:
-      path: "/"
-    backend: "http://127.0.0.1:3000"
+      path: "/api"
+    backend: "http://127.0.0.1:8080"
+
+  - match:
+      path: "/site1/{*path}"
+    static_dir: "C:/myprojects/html/{*path}"
+
+  - match:
+      path: "/aaa/{id}"
+    backend: "http://127.0.0.1:3000/api/{id}"
 ```
+
+<a id="how-domains-matching-works"></a>
+
+## How `domains` matching works
+
+Domain resolution happens at request time and is based on the same matching logic used by the runtime:
+
+- HttpWard first tries the `Host` header (port is stripped, for example `example.com:443` becomes `example.com`).
+- If `Host` is missing, it falls back to TLS SNI (when available).
+- Matching uses wildcard patterns (`wildmatch`), so values like `*.example.com` are supported in both `domain` and `domains`.
+- Matching is effectively case-insensitive for incoming requests because runtime normalizes host/SNI to lowercase; use lowercase domains in config to avoid ambiguity.
+- If no domain matches, HttpWard can fall back to an unrestricted site (typically global routes with no `domain`/`domains`).
+- If there is no unrestricted site either, normal not-found handling is used.
 
 <a id="appconfig"></a>
 
@@ -107,6 +181,7 @@ The JSON Schema generated from this type is written to `docs/config.schema.json`
 | `listeners` | list of [`Listener`](#listener) | no | see examples | Network listeners (bind address + port + optional TLS) |
 | `routes` | list of [`Route`](#route) | no | see examples | Global routing rules (executed before site-level routes) |
 | `log` | [`LogConfig`](#logconfig) | no | see examples | Logging configuration |
+| `proxy_id` | `string` | no | `"httpward"` | Proxy identifier used in Via header |
 | `sites_enabled` | `string` | no | `""` | Path to directory with per-site .yaml / .yml files |
 | `strategy` | optional [`StrategyRef`](#strategyref) | no | `"default"` | Default strategy for all domains and routes |
 | `strategies` | map of string to list of [`MiddlewareConfig`](#middlewareconfig) | no | see examples | Global strategy definitions |
@@ -126,9 +201,7 @@ sites_enabled: ./sites-enabled
 # httpward.yaml - Fixed version with correct YAML indentation
 
 log:
-  level: "info"
-
-domain: global.local
+  level: "debug"
 
 strategy: default2
 
@@ -156,11 +229,7 @@ sites_enabled: "./sites-enabled"
 strategies:
   default2:
     - httpward_log_module:
-        show_request: true
-        log_client_ip: true
-        log_current_site: true
-        log_route_info: true
-        log_response_status: true
+        level: warn
 ```
 
 [↑ Back to top](#table-of-contents)
@@ -177,7 +246,7 @@ This section documents the fields of [`GlobalConfig`](#globalconfig).
 
 ## Site files: `sites-enabled/*.yml`
 
-Each file in `sites-enabled/` describes one site or virtual host. Site settings can override global listeners, routes, and strategies when needed.
+Each file in `sites-enabled/` describes one site or virtual host. For domain-based separation, set `sites_enabled: "./sites-enabled"` in `httpward.yaml` and keep per-domain configs here (for example `sites-enabled/test.local.yml`, `sites-enabled/api.example.com.yml`). Site settings can override global listeners, routes, and strategies when needed.
 
 <a id="siteconfig"></a>
 
@@ -202,15 +271,41 @@ routes:
     backend: "http://127.0.0.1:3000"
 ```
 
-### Example from this repository: `sites-enabled/example.com.yaml`
+### Recommended multi-site file
 
 ```yaml
 domains: ["test.local", "*.test2.local"]
 
 listeners:
-   - port: 777
-   - port: 443
-     tls:
+  - port: 443
+    tls:
+      self_signed: true
+
+strategy: default55
+
+routes:
+  - match:
+      path: "/api"
+    backend: "http://127.0.0.1:8080"
+
+  - match:
+      path: "/site1/{*path}"
+    static_dir: "C:/myprojects/html/{*path}"
+
+  - match:
+      path: "/aaa/{id}"
+    backend: "http://127.0.0.1:3000/api/{id}"
+```
+
+### Example from this repository: `sites-enabled/test.local.yml`
+
+```yaml
+domains: ["test.local", "*.test2.local"]
+
+listeners:
+  - port: 777
+  - port: 443
+    tls:
       self_signed: true
 
 strategy: default55
@@ -230,7 +325,7 @@ routes:
 
 strategies:
   default55:
-    - httpward_log_module:
+    - httpward_log_module2:
         level: error
         format: crazy
 ```
@@ -258,19 +353,23 @@ Structure rules:
 
 # Default strategy applied globally
 default:
-  - rate_limit:
-      requests: 1000
-      window: "1m"
-  - logging:
-      level: info
+  - httpward_log_module:
+      show_request: true
+      log_client_ip: true
+      log_current_site: true
+      log_route_info: true
+      log_response_status: true
+      log_fingerprints: true
 
 # For super safe mode
 super-safe:
-  - rate_limit:
-      requests: 10
-      window: "1m"
-  - logging:
-      level: info
+  - httpward_log_module:
+      show_request: true
+      log_client_ip: true
+      log_current_site: true
+      log_route_info: true
+      log_response_status: true
+      log_fingerprints: true
 ```
 
 ### Disable one inherited middleware
