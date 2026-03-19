@@ -278,6 +278,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -1035,6 +1036,17 @@ dependencies = [
  "httpward-core",
  "schemars",
  "serde_json",
+]
+
+[[package]]
+name = "httpward_identity_session_module"
+version = "0.0.1-alpha.1"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "httpward-core",
+ "rama",
+ "serde",
 ]
 
 [[package]]
