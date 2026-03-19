@@ -22,7 +22,7 @@ impl fmt::Display for DependencyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DependencyError::MissingDependency { middleware, dependency } => {
-                write!(f, "Middleware '{}' requires dependency '{}' which is not in pipe", middleware, dependency)
+                write!(f, "Middleware '{}' requires dependency '{}' which is not in pipe (check the order!)", middleware, dependency)
             }
             DependencyError::WrongOrder { middleware, dependency } => {
                 write!(f, "Middleware '{}' depends on '{}' which comes after it in pipe", middleware, dependency)
