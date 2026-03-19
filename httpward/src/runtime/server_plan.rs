@@ -13,8 +13,8 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
     // 1. Process Sites (including Global Config as a site if it has domains)
     let mut all_sites = config.sites.clone();
     
-    // Add global config as a site if it has domains
-    if config.global.has_domains() {
+    // Add global config as a site if it has domains OR routes
+    if config.global.has_domains() || config.global.has_routes() {
         all_sites.push(config.global.to_site_config());
     }
 
@@ -38,7 +38,30 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
 
     // 2. Process Global Listeners directly (for localhost/system access) 
     // only if no sites are using them
-    for listener in &config.global.listeners {
+    if config.global.listeners.is_empty() && config.global.has_routes() {
+        // Create default listener when no listeners are specified but routes exist
+        tracing::info!("No listeners specified but routes found, creating default listener on port 8080");
+        let default_listener = Listener {
+            host: "0.0.0.0".to_string(),
+            port: 80,
+            tls: None,
+        };
+        
+        let key = ListenerKey {
+            host: default_listener.host.clone(),
+            port: default_listener.port,
+        };
+        
+        let sites_vec = servers_map.entry(key).or_default();
+        
+        // Create global site for default listener
+        tracing::info!("Creating global site for default listener with {} routes", config.global.routes.len());
+        let mut global_site = config.global.to_site_config();
+        global_site.listeners = vec![default_listener];
+        sites_vec.push(global_site);
+    } else {
+        // Process existing listeners
+        for listener in &config.global.listeners {
         let key = ListenerKey {
             host: listener.host.clone(),
             port: listener.port,
@@ -46,9 +69,16 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
 
         let sites_vec = servers_map.entry(key).or_default();
         
-        // If no sites are using this listener and TLS is configured, create a global site
+        // If no sites are using this listener and TLS is configured OR global has routes, create a global site
         if sites_vec.is_empty() {
-            if let Some(_paths) = resolve_global_listener_tls(&config.global, listener) {
+            let should_create_global_site = if let Some(_paths) = resolve_global_listener_tls(&config.global, listener) {
+                true
+            } else {
+                // Also create global site if there are routes defined
+                config.global.has_routes()
+            };
+            
+            if should_create_global_site {
                 let _domains = get_global_listener_domains(&config.global);
                 
                 // Create a global site config for localhost access
@@ -58,6 +88,7 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
                 // Add to sites to be processed
                 sites_vec.push(global_site);
             }
+        }
         }
     }
 

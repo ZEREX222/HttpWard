@@ -79,6 +79,11 @@ impl GlobalConfig {
         !self.domain.is_empty() || !self.domains.is_empty()
     }
 
+    /// Check if this global config has any routes configured
+    pub fn has_routes(&self) -> bool {
+        !self.routes.is_empty()
+    }
+
     /// Convert global config to site config
     pub fn to_site_config(&self) -> SiteConfig {
         SiteConfig {
