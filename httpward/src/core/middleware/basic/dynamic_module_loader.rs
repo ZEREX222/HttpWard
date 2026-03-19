@@ -10,7 +10,6 @@ use rama::{
     Context,
 };
 use std::fmt::Debug;
-use httpward_core::httpward_middleware::pipe::HttpWardMiddlewarePipeBuilder;
 use httpward_core::core::server_models::server_instance::ServerInstance;
 
 /// Re-export the plugin loader
@@ -26,7 +25,7 @@ pub struct DynamicModuleLoaderLayer {
 impl DynamicModuleLoaderLayer {
     /// Create a new loader that automatically loads middleware from strategies
     pub fn new(server_instance: &Arc<ServerInstance>) -> Self {
-        let pipe = HttpWardMiddlewarePipeBuilder::new().build();
+        let pipe = HttpWardMiddlewarePipe::new();
         let mut loader = Self {
             middleware_pipe: pipe,
         };

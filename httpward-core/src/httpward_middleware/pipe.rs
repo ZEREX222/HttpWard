@@ -188,69 +188,6 @@ impl HttpWardMiddlewarePipe {
     }
 }
 
-/// Builder used during configuration time to accumulate Box<dyn Middleware>.
-/// Use this builder to add layers; then call `build()` to obtain the cheap-cloneable pipe.
-pub struct HttpWardMiddlewarePipeBuilder {
-    pub(crate) v: Vec<BoxedMiddleware>,
-}
-
-impl HttpWardMiddlewarePipeBuilder {
-    /// Create a new builder.
-    pub fn new() -> Self {
-        Self { v: Vec::new() }
-    }
-
-    /// Add a middleware instance with dependency validation (consumes the middleware).
-    /// Chaining is supported.
-    pub fn add_layer<M>(mut self, mw: M) -> Result<Self, DependencyError>
-    where
-        M: HttpWardMiddleware + Send + Sync + 'static,
-    {
-        let mw_name = mw.name().unwrap_or("unnamed");
-        let deps = mw.dependencies();
-        
-        // Check that all dependencies are already present in builder
-        for &dep in &deps {
-            let found = self.v.iter().any(|m| m.name().map_or(false, |name| name == dep));
-            if !found {
-                return Err(DependencyError::MissingDependency {
-                    middleware: mw_name.to_string(),
-                    dependency: dep.to_string(),
-                });
-            }
-        }
-        
-        self.v.push(Arc::new(mw));
-        Ok(self)
-    }
-
-    /// Add a pre-boxed middleware with dependency validation (useful for plugins that already produce BoxedMiddleware).
-    pub fn push_box(mut self, mw: BoxedMiddleware) -> Result<Self, DependencyError> {
-        let mw_name = mw.name().unwrap_or("unnamed");
-        let deps = mw.dependencies();
-        
-        // Check that all dependencies are already present in builder
-        for &dep in &deps {
-            let found = self.v.iter().any(|m| m.name().map_or(false, |name| name == dep));
-            if !found {
-                return Err(DependencyError::MissingDependency {
-                    middleware: mw_name.to_string(),
-                    dependency: dep.to_string(),
-                });
-            }
-        }
-        
-        self.v.push(mw);
-        Ok(self)
-    }
-
-    /// Finalize builder into a cheap-cloneable `HttpWardMiddlewarePipe`.
-    pub fn build(self) -> HttpWardMiddlewarePipe {
-        HttpWardMiddlewarePipe {
-            inner: Arc::new(self.v),
-        }
-    }
-}
 
 /// C-compatible representation of a fat pointer to dyn HttpWardMiddleware.
 #[repr(C)]
@@ -312,18 +249,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn build_and_execute_pipe() {
-        // This test ensures builder + pipe compile — not a full integration.
-        let builder = HttpWardMiddlewarePipeBuilder::new()
-            .add_layer(DummyMw)
-            .unwrap();
-        let pipe = builder.build();
-
-        // Can't easily run a full Rama service here — just check metadata.
-        assert_eq!(pipe.len(), 1);
-        assert!(!pipe.is_empty());
-    }
     
     #[test]
     fn test_add_layer_success() {
@@ -378,12 +303,14 @@ mod tests {
         
         // For testing wrong order, we need to create a scenario where dependencies exist but are in wrong position
         // Since add_layer enforces dependencies, we can't create a truly wrong order at build time
-        // But we can test the validation logic by creating a pipe manually
-        let mut builder = HttpWardMiddlewarePipeBuilder::new();
-        builder.v.push(Arc::new(DependentMw));  // Add dependent first
-        builder.v.push(Arc::new(DummyMw));      // Add dependency second
+        // But we can test the validation logic by creating a pipe manually with wrong order
+        let mut wrong_order_vec: Vec<BoxedMiddleware> = Vec::new();
+        wrong_order_vec.push(Arc::new(DependentMw) as BoxedMiddleware);  // Add dependent first
+        wrong_order_vec.push(Arc::new(DummyMw) as BoxedMiddleware);      // Add dependency second
         
-        let wrong_order_pipe = builder.build();
+        let wrong_order_pipe = HttpWardMiddlewarePipe {
+            inner: Arc::new(wrong_order_vec),
+        };
         let result = wrong_order_pipe.validate_order();
         assert!(result.is_err());
         
