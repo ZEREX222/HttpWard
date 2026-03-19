@@ -49,21 +49,31 @@ cargo install httpward
 Create a `httpward.yaml` file:
 
 ```yaml
-server:
-  host: "0.0.0.0"
-  port: 8080
-  tls: false
+listeners:
+  - port: 443
+    tls:
+      self_signed: true
 
-sites:
-  - name: "example"
-    domains:
-      - "example.com"
-      - "www.example.com"
-    routes:
-      - match:
-          path: "/"
-        backend: "http://localhost:3000"
+sites_enabled: "./sites-enabled"
+
+routes:
+  - match:
+      path: "/{*path}"
+    backend: "http://127.0.0.1:3000/{*path}"
 ```
+
+Create `sites-enabled/test.local.yml`:
+
+```yaml
+domains: ["test.local", "*.test2.local"]
+
+routes:
+  - match:
+      path: "/api/{*path}"
+    backend: "http://127.0.0.1:8080/{*path}"
+```
+
+If you want to separate sites by domain, keep one config file per site inside `sites-enabled/` and point `sites_enabled` to that folder.
 
 ### Advanced Configuration with Strategies
 
@@ -77,25 +87,27 @@ strategies:
         window: "1m"
     - logging:
         level: info
+```
 
-sites:
-  - name: "api"
-    domains:
-      - "api.example.com"
-    strategy: "api_strict"  # Override global strategy
-    strategies:
-      api_strict:
-        - rate_limit:
-            requests: 100
-            window: "1m"
-        - auth:
-            type: jwt
-        - logging:
-            level: debug
-    routes:
-      - match:
-          path: "/api/v1/*"
-        backend: "http://api-service:8080"
+```yaml
+# sites-enabled/api.example.com.yml
+domain: "api.example.com"
+
+strategy: "api_strict"  # Override global strategy
+strategies:
+  api_strict:
+    - rate_limit:
+        requests: 100
+        window: "1m"
+    - auth:
+        type: jwt
+    - logging:
+        level: debug
+
+routes:
+  - match:
+      path: "/api/v1/{*path}"
+    backend: "http://api-service:8080/{*path}"
 ```
 
 ### Running HttpWard

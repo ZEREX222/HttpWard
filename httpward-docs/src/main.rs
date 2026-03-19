@@ -403,12 +403,74 @@ listeners:
 sites_enabled: ./sites-enabled"#
 }
 
+fn multisite_httpward_yaml() -> &'static str {
+    r#"log:
+  level: "info"
+
+strategy: my_custom_strategy
+
+listeners:
+  - port: 443
+    tls:
+      self_signed: true
+
+routes:
+  - match:
+      path: "/my/{*any}"
+    backend: "http://zerex222.ru:8080/{*any}"
+
+  - match:
+      path: "/site/{*path}"
+    static_dir: "C:/myprojects/html/{*path}"
+
+  - match:
+      path: "/search/{request}"
+    redirect:
+      to: "https://www.google.com/search?q={request}"
+
+sites_enabled: "./sites-enabled"
+
+strategies:
+  my_custom_strategy:
+    - httpward_log_module:
+        show_request: true
+        log_client_ip: true
+        log_current_site: true
+        log_route_info: true
+        log_response_status: true
+        log_fingerprints: true"#
+}
+
 fn minimal_site_yaml() -> &'static str {
     r#"domain: app.example.com
 routes:
   - match:
       path: "/"
     backend: "http://127.0.0.1:3000""#
+}
+
+fn multisite_site_yaml() -> &'static str {
+    r#"domains: ["test.local", "*.test2.local"]
+
+listeners:
+  - port: 443
+    tls:
+      self_signed: true
+
+strategy: default55
+
+routes:
+  - match:
+      path: "/api"
+    backend: "http://127.0.0.1:8080"
+
+  - match:
+      path: "/site1/{*path}"
+    static_dir: "C:/myprojects/html/{*path}"
+
+  - match:
+      path: "/aaa/{id}"
+    backend: "http://127.0.0.1:3000/api/{id}""#
 }
 
 fn minimal_strategies_yaml() -> &'static str {
@@ -418,6 +480,10 @@ fn minimal_strategies_yaml() -> &'static str {
   - rate_limit:
       requests: 1000
       window: "1m""#
+}
+
+fn domains_matching_notes() -> &'static str {
+    "Domain resolution happens at request time and is based on the same matching logic used by the runtime:\n\n- HttpWard first tries the `Host` header (port is stripped, for example `example.com:443` becomes `example.com`).\n- If `Host` is missing, it falls back to TLS SNI (when available).\n- Matching uses wildcard patterns (`wildmatch`), so values like `*.example.com` are supported in both `domain` and `domains`.\n- Matching is effectively case-insensitive for incoming requests because runtime normalizes host/SNI to lowercase; use lowercase domains in config to avoid ambiguity.\n- If no domain matches, HttpWard can fall back to an unrestricted site (typically global routes with no `domain`/`domains`).\n- If there is no unrestricted site either, normal not-found handling is used."
 }
 
 fn render_configuration_markdown(schema: &Value, workspace_root: &Path) -> String {
@@ -449,6 +515,7 @@ fn render_configuration_markdown(schema: &Value, workspace_root: &Path) -> Strin
     md.push_str("## Table of Contents\n\n");
     md.push_str("- [How configuration is loaded](#how-configuration-is-loaded)\n");
     md.push_str("- [Quick start](#quick-start)\n");
+    md.push_str("- [How `domains` matching works](#how-domains-matching-works)\n");
     md.push_str("- [AppConfig](#appconfig)\n");
     md.push_str("- [Global file: `httpward.yaml`](#global-file-httpward-yaml)\n");
     md.push_str("- [Site files: `sites-enabled/*.yml`](#site-files-sites-enabled-yml)\n");
@@ -469,12 +536,15 @@ fn render_configuration_markdown(schema: &Value, workspace_root: &Path) -> Strin
     ));
 
     let quick_start_body = format!(
-        "Start with these three files:\n\n{}{}{}",
+        "Use this structure when you want to split config by domains:\n\n1. Keep global listeners, shared routes, and shared strategies in `httpward.yaml`.\n2. Set `sites_enabled: \"./sites-enabled\"` in `httpward.yaml`.\n3. Put one or more site files into `sites-enabled/` (for example `sites-enabled/test.local.yml`) with `domain` or `domains`.\n\n{}{}{}{}",
         render_yaml_example("Minimal `httpward.yaml`", minimal_httpward_yaml()),
+        render_yaml_example("Recommended multi-site `httpward.yaml`", multisite_httpward_yaml()),
         render_yaml_example("Minimal `strategies.yml`", minimal_strategies_yaml()),
-        render_yaml_example("Minimal site file", minimal_site_yaml()),
+        render_yaml_example("Recommended `sites-enabled/test.local.yml`", multisite_site_yaml()),
     );
     md.push_str(&render_section("Quick start", &quick_start_body));
+
+    md.push_str(&render_section("How `domains` matching works", domains_matching_notes()));
 
     let mut app_config_body = String::new();
     app_config_body.push_str("`AppConfig` is the combined in-memory model, not a file you write by hand. It is useful for tooling, validation, and the generated `config.schema.json`.\n\n");
@@ -499,15 +569,21 @@ fn render_configuration_markdown(schema: &Value, workspace_root: &Path) -> Strin
         global_examples,
     ));
 
-    let mut site_examples = vec![(
-        "Minimal site file".to_string(),
-        minimal_site_yaml().to_string(),
-    )];
+    let mut site_examples = vec![
+        (
+            "Minimal site file".to_string(),
+            minimal_site_yaml().to_string(),
+        ),
+        (
+            "Recommended multi-site file".to_string(),
+            multisite_site_yaml().to_string(),
+        ),
+    ];
     if let Some((name, example)) = &site_example {
         site_examples.push((format!("Example from this repository: `sites-enabled/{}`", name), example.clone()));
     }
     md.push_str(&format!("<a id=\"{}\"></a>\n\n## Global file: `httpward.yaml`\n\nThis section documents the fields of [`GlobalConfig`](#globalconfig).\n\n[↑ Back to top](#table-of-contents)\n\n", anchor_for("Global file: `httpward.yaml`")));
-    md.push_str(&format!("<a id=\"{}\"></a>\n\n## Site files: `sites-enabled/*.yml`\n\nEach file in `sites-enabled/` describes one site or virtual host. Site settings can override global listeners, routes, and strategies when needed.\n\n", anchor_for("Site files: `sites-enabled/*.yml`")));
+    md.push_str(&format!("<a id=\"{}\"></a>\n\n## Site files: `sites-enabled/*.yml`\n\nEach file in `sites-enabled/` describes one site or virtual host. For domain-based separation, set `sites_enabled: \"./sites-enabled\"` in `httpward.yaml` and keep per-domain configs here (for example `sites-enabled/test.local.yml`, `sites-enabled/api.example.com.yml`). Site settings can override global listeners, routes, and strategies when needed.\n\n", anchor_for("Site files: `sites-enabled/*.yml`")));
     md.push_str(&render_object_reference_section("SiteConfig", "", site_def, site_examples));
 
     let mut strategies_body = String::new();
@@ -623,6 +699,7 @@ fn render_examples_markdown(workspace_root: &Path) -> String {
     md.push_str("<a id=\"table-of-contents\"></a>\n\n");
     md.push_str("## Table of Contents\n\n");
     md.push_str("- [Minimal reverse proxy](#minimal-reverse-proxy)\n");
+    md.push_str("- [Multi-site by domains (recommended)](#multi-site-by-domains-recommended)\n");
     md.push_str("- [TLS listener](#tls-listener)\n");
     md.push_str("- [Static files](#static-files)\n");
     md.push_str("- [Redirect](#redirect)\n");
@@ -644,6 +721,14 @@ routes:
   - match:
       path: "/"
     backend: "http://127.0.0.1:3000""#,
+        ),
+    ));
+    md.push_str(&render_section(
+        "Multi-site by domains (recommended)",
+        &format!(
+            "Use this pair of files to split traffic by domain. The key is `sites_enabled: \"./sites-enabled\"` in the global file.\n\n{}{}",
+            render_yaml_example("`httpward.yaml`", multisite_httpward_yaml()),
+            render_yaml_example("`sites-enabled/test.local.yml`", multisite_site_yaml()),
         ),
     ));
     md.push_str(&render_section(

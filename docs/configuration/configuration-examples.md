@@ -13,6 +13,7 @@ Use this page when you want ready-to-adapt YAML snippets. For the full field-by-
 ## Table of Contents
 
 - [Minimal reverse proxy](#minimal-reverse-proxy)
+- [Multi-site by domains (recommended)](#multi-site-by-domains-recommended)
 - [TLS listener](#tls-listener)
 - [Static files](#static-files)
 - [Redirect](#redirect)
@@ -37,6 +38,78 @@ routes:
   - match:
       path: "/"
     backend: "http://127.0.0.1:3000"
+```
+
+<a id="multi-site-by-domains-recommended"></a>
+
+## Multi-site by domains (recommended)
+
+Use this pair of files to split traffic by domain. The key is `sites_enabled: "./sites-enabled"` in the global file.
+
+### `httpward.yaml`
+
+```yaml
+log:
+  level: "info"
+
+strategy: my_custom_strategy
+
+listeners:
+  - port: 443
+    tls:
+      self_signed: true
+
+routes:
+  - match:
+      path: "/my/{*any}"
+    backend: "http://zerex222.ru:8080/{*any}"
+
+  - match:
+      path: "/site/{*path}"
+    static_dir: "C:/myprojects/html/{*path}"
+
+  - match:
+      path: "/search/{request}"
+    redirect:
+      to: "https://www.google.com/search?q={request}"
+
+sites_enabled: "./sites-enabled"
+
+strategies:
+  my_custom_strategy:
+    - httpward_log_module:
+        show_request: true
+        log_client_ip: true
+        log_current_site: true
+        log_route_info: true
+        log_response_status: true
+        log_fingerprints: true
+```
+
+### `sites-enabled/test.local.yml`
+
+```yaml
+domains: ["test.local", "*.test2.local"]
+
+listeners:
+  - port: 443
+    tls:
+      self_signed: true
+
+strategy: default55
+
+routes:
+  - match:
+      path: "/api"
+    backend: "http://127.0.0.1:8080"
+
+  - match:
+      path: "/site1/{*path}"
+    static_dir: "C:/myprojects/html/{*path}"
+
+  - match:
+      path: "/aaa/{id}"
+    backend: "http://127.0.0.1:3000/api/{id}"
 ```
 
 <a id="tls-listener"></a>
@@ -120,9 +193,7 @@ strategy:
 # httpward.yaml - Fixed version with correct YAML indentation
 
 log:
-  level: "info"
-
-domain: global.local
+  level: "debug"
 
 strategy: default2
 
@@ -150,11 +221,7 @@ sites_enabled: "./sites-enabled"
 strategies:
   default2:
     - httpward_log_module:
-        show_request: true
-        log_client_ip: true
-        log_current_site: true
-        log_route_info: true
-        log_response_status: true
+        level: warn
 ```
 
 ### Current `strategies.yml`
@@ -165,30 +232,34 @@ strategies:
 
 # Default strategy applied globally
 default:
-  - rate_limit:
-      requests: 1000
-      window: "1m"
-  - logging:
-      level: info
+  - httpward_log_module:
+      show_request: true
+      log_client_ip: true
+      log_current_site: true
+      log_route_info: true
+      log_response_status: true
+      log_fingerprints: true
 
 # For super safe mode
 super-safe:
-  - rate_limit:
-      requests: 10
-      window: "1m"
-  - logging:
-      level: info
+  - httpward_log_module:
+      show_request: true
+      log_client_ip: true
+      log_current_site: true
+      log_route_info: true
+      log_response_status: true
+      log_fingerprints: true
 ```
 
-### Current `sites-enabled/example.com.yaml`
+### Current `sites-enabled/test.local.yml`
 
 ```yaml
 domains: ["test.local", "*.test2.local"]
 
 listeners:
-   - port: 777
-   - port: 443
-     tls:
+  - port: 777
+  - port: 443
+    tls:
       self_signed: true
 
 strategy: default55
@@ -208,7 +279,7 @@ routes:
 
 strategies:
   default55:
-    - httpward_log_module:
+    - httpward_log_module2:
         level: error
         format: crazy
 ```

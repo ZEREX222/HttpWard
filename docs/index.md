@@ -25,22 +25,32 @@ cargo install httpward
 Create a `httpward.yaml` file:
 
 ```yaml
-# Basic HTTP proxy configuration
-server:
-  host: "0.0.0.0"
-  port: 8080
-  tls: false
+# Global config (shared listeners/routes/strategies)
+listeners:
+  - port: 443
+    tls:
+      self_signed: true
 
-sites:
-  - name: "example"
-    domains:
-      - "example.com"
-      - "www.example.com"
-    routes:
-      - match:
-          path: "/"
-        backend: "http://localhost:3000"
+sites_enabled: "./sites-enabled"
+
+routes:
+  - match:
+      path: "/"
+    backend: "http://127.0.0.1:3000"
 ```
+
+Create `sites-enabled/test.local.yml`:
+
+```yaml
+domains: ["test.local", "*.test2.local"]
+
+routes:
+  - match:
+      path: "/api"
+    backend: "http://127.0.0.1:8080"
+```
+
+When you want domain-separated sites, keep each site in its own file under `sites-enabled/` and set `sites_enabled` in `httpward.yaml`.
 
 ### Running HttpWard
 
