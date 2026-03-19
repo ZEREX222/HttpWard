@@ -65,22 +65,75 @@ fn find_config_file(base_path: &str) -> String {
     }
 }
 
-fn parse_args() -> String {
+#[derive(Debug)]
+struct Args {
+    config: Option<String>,
+    help: bool,
+}
+
+fn print_help() {
+    println!("HttpWard - High Performance HTTP/HTTPS Reverse Proxy");
+    println!();
+    println!("USAGE:");
+    println!("    httpward [OPTIONS]");
+    println!();
+    println!("OPTIONS:");
+    println!("    --config <FILE>    Path to configuration file (default: httpward.yaml)");
+    println!("    --help             Print this help information");
+    println!();
+    println!("EXAMPLES:");
+    println!("    httpward                           # Use default config file");
+    println!("    httpward --config myproxy.yaml     # Use custom config file");
+    println!("    httpward --config /etc/proxy.yml   # Use absolute path");
+    println!();
+    println!("CONFIG FILE:");
+    println!("    The config file can be in YAML (.yaml or .yml) format.");
+    println!("    If no extension is provided, .yaml is tried first, then .yml.");
+}
+
+fn parse_args() -> Args {
     let args: Vec<String> = env::args().collect();
+    let mut config = None;
+    let mut help = false;
     
-    for i in 1..args.len() {
-        if args[i] == "--config" && i + 1 < args.len() {
-            return args[i + 1].clone();
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--config" => {
+                if i + 1 < args.len() {
+                    config = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("Error: --config requires a file path");
+                    std::process::exit(1);
+                }
+            }
+            "--help" | "-h" => {
+                help = true;
+                i += 1;
+            }
+            arg => {
+                eprintln!("Error: Unknown argument: {}", arg);
+                eprintln!("Use --help for usage information");
+                std::process::exit(1);
+            }
         }
     }
     
-    // Default config file
-    "httpward".to_string()
+    Args { config, help }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let config_base_path = parse_args();
+    let args = parse_args();
+    
+    // Handle --help flag
+    if args.help {
+        print_help();
+        return Ok(());
+    }
+    
+    let config_base_path = args.config.unwrap_or_else(|| "httpward".to_string());
     let config_path = find_config_file(&config_base_path);
     
     info!("Loading config from: {}", config_path);
