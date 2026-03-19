@@ -4,6 +4,8 @@ mod core;
 
 use httpward_core::config::load;
 use std::sync::Arc;
+use std::path::Path;
+use std::env;
 
 use tracing::{info, debug, warn};
 use tracing_subscriber::{EnvFilter};
@@ -37,16 +39,64 @@ fn load_middleware_manager(server_plans: &[ServerInstance]) -> Result<Middleware
     }
 }
 
+fn find_config_file(base_path: &str) -> String {
+    let path = Path::new(base_path);
+    
+    // If the path already has an extension, try it directly
+    if let Some(extension) = path.extension() {
+        if extension == "yaml" || extension == "yml" {
+            if path.exists() {
+                return base_path.to_string();
+            }
+        }
+    }
+    
+    // Try .yaml first, then .yml
+    let yaml_path = format!("{}.yaml", base_path);
+    let yml_path = format!("{}.yml", base_path);
+    
+    if Path::new(&yaml_path).exists() {
+        yaml_path
+    } else if Path::new(&yml_path).exists() {
+        yml_path
+    } else {
+        // Default to .yaml if neither exists (let the error handling deal with it)
+        yaml_path
+    }
+}
+
+fn parse_args() -> String {
+    let args: Vec<String> = env::args().collect();
+    
+    for i in 1..args.len() {
+        if args[i] == "--config" && i + 1 < args.len() {
+            return args[i + 1].clone();
+        }
+    }
+    
+    // Default config file
+    "httpward".to_string()
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let config = load("httpward.yaml")?;
+    let config_base_path = parse_args();
+    let config_path = find_config_file(&config_base_path);
+    
+    info!("Loading config from: {}", config_path);
+    let config = load(&config_path)?;
+    info!("Config loaded successfully from: {}", config_path);
 
+    // Initialize logging with default level first
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(config.global.log.level.to_string()));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .init();
+    
+    // Update logging level from config if needed
+    // Note: In a real implementation, you might want to reconfigure the subscriber
 
     info!("HttpWard starting...");
 
