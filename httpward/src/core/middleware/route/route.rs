@@ -117,8 +117,17 @@ where
 
         let path = request.uri().path().to_string();
         
+        // Use cached matched_route if available (set by DynamicModuleLoaderLayer)
+        // This avoids duplicate route resolution per request
+        let matched_route_result = if let Some(cached) = &httpward_ctx.matched_route {
+            Ok(cached.clone())
+        } else {
+            // No cache, resolve now (fallback for requests that bypass DynamicModuleLoaderLayer)
+            current_site.get_route(&path)
+        };
+
         // Try to match route using SiteManager
-        match current_site.get_route(&path) {
+        match matched_route_result {
             Ok(matched_route) => {
                 tracing::debug!("Route matched: {:?}", matched_route.route);
                 // Handle different route types

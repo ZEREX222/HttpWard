@@ -360,10 +360,20 @@ where
 
     async fn serve(
         &self,
-        ctx: Context<()>,
+        mut ctx: Context<()>,
         request: Request<Body>,
     ) -> Result<Self::Response, Self::Error> {
         tracing::debug!(target: "dynamic_module_loader", "DynamicModuleLoaderService.serve called");
+
+        // Cache the matched route in HttpWardContext to avoid re-resolution in RouteLayer
+        if let Some(hctx) = ctx.get_mut::<HttpWardContext>() {
+            if let Some(site) = &hctx.current_site {
+                let path = request.uri().path();
+                if let Ok(matched) = site.get_route(path) {
+                    hctx.matched_route = Some(matched.clone());
+                }
+            }
+        }
 
         match self.resolve_pipe(&ctx, &request) {
             Some(pipe) => {

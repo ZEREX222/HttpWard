@@ -241,6 +241,7 @@ where
             header_fp,
             request_headers: request.headers().clone(),
             extensions: httpward_core::core::context::ExtensionsMap::new(),
+            matched_route: None, // Will be set by DynamicModuleLoaderLayer
         };
 
         ctx.insert(enriched_context);

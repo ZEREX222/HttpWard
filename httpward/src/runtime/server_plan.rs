@@ -10,13 +10,11 @@ use httpward_core::core::server_models::site_manager::{SiteManager, TlsPaths, Tl
 pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
     let mut servers_map: HashMap<ListenerKey, Vec<SiteConfig>> = HashMap::new();
 
-    // 1. Process Sites (including Global Config as a site if it has domains)
+    // 1. Process Sites (excluding global for now)
     let mut all_sites = config.sites.clone();
     
-    // Add global config as a site if it has domains OR routes
-    if config.global.has_domains() || config.global.has_routes() {
-        all_sites.push(config.global.to_site_config());
-    }
+    // Track which listeners have sites (to avoid duplicating global site)
+    let mut listeners_with_sites: std::collections::HashSet<ListenerKey> = std::collections::HashSet::new();
 
     for site in &all_sites {
         let effective_listeners = if site.listeners.is_empty() {
@@ -31,64 +29,66 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
                 port: listener.port,
             };
 
+            listeners_with_sites.insert(key.clone());
+
             let sites_vec = servers_map.entry(key).or_default();
             sites_vec.push(site.clone());
         }
     }
 
-    // 2. Process Global Listeners directly (for localhost/system access) 
-    // only if no sites are using them
-    if config.global.listeners.is_empty() && config.global.has_routes() {
-        // Create default listener when no listeners are specified but routes exist
-        tracing::info!("No listeners specified but routes found, creating default listener on port 8080");
-        let default_listener = Listener {
-            host: "0.0.0.0".to_string(),
-            port: 80,
-            tls: None,
-        };
-        
-        let key = ListenerKey {
-            host: default_listener.host.clone(),
-            port: default_listener.port,
-        };
-        
-        let sites_vec = servers_map.entry(key).or_default();
-        
-        // Create global site for default listener
-        tracing::info!("Creating global site for default listener with {} routes", config.global.routes.len());
-        let mut global_site = config.global.to_site_config();
-        global_site.listeners = vec![default_listener];
-        sites_vec.push(global_site);
-    } else {
-        // Process existing listeners
-        for listener in &config.global.listeners {
-        let key = ListenerKey {
-            host: listener.host.clone(),
-            port: listener.port,
-        };
+    // 2. Handle Global config:
+    // - Add it once per listener if it has domains OR routes
+    // - Only add to listeners that either have it explicitly configured or need a fallback
 
-        let sites_vec = servers_map.entry(key).or_default();
-        
-        // If no sites are using this listener and TLS is configured OR global has routes, create a global site
-        if sites_vec.is_empty() {
-            let should_create_global_site = if let Some(_paths) = resolve_global_listener_tls(&config.global, listener) {
-                true
-            } else {
-                // Also create global site if there are routes defined
-                config.global.has_routes()
-            };
-            
-            if should_create_global_site {
-                let _domains = get_global_listener_domains(&config.global);
-                
-                // Create a global site config for localhost access
-                let mut global_site = config.global.to_site_config();
-                global_site.listeners = vec![listener.clone()];
-                
-                // Add to sites to be processed
-                sites_vec.push(global_site);
+    if config.global.has_domains() || config.global.has_routes() {
+        // Case A: Global listeners are explicitly configured
+        if !config.global.listeners.is_empty() {
+            for listener in &config.global.listeners {
+                let key = ListenerKey {
+                    host: listener.host.clone(),
+                    port: listener.port,
+                };
+
+                // Add global site to this listener (only once per listener)
+                let sites_vec = servers_map.entry(key).or_default();
+
+                // Avoid duplicate if global site already added for this listener
+                // Check if the global domain is already present in any site for this listener
+                let global_domains = config.global.get_all_domains();
+                let global_already_exists = !global_domains.is_empty() &&
+                    sites_vec.iter().any(|s| {
+                        let s_domains = s.get_all_domains();
+                        !s_domains.is_empty() && s_domains == global_domains
+                    });
+
+                if !global_already_exists {
+                    let mut global_site = config.global.to_site_config();
+                    global_site.listeners = vec![listener.clone()];
+                    sites_vec.push(global_site);
+                }
             }
-        }
+        } else {
+            // Case B: No global listeners configured, but global has routes
+            // Create default listener on port 80
+            tracing::info!("No listeners specified but routes found, creating default listener on port 80");
+            let default_listener = Listener {
+                host: "0.0.0.0".to_string(),
+                port: 80,
+                tls: None,
+            };
+
+            let key = ListenerKey {
+                host: default_listener.host.clone(),
+                port: default_listener.port,
+            };
+
+            let sites_vec = servers_map.entry(key).or_default();
+
+            // Add global site for default listener
+            tracing::info!("Creating global site for default listener with {} routes", config.global.routes.len());
+            let mut global_site = config.global.to_site_config();
+            global_site.listeners = vec![default_listener];
+            sites_vec.push(global_site);
         }
     }
 

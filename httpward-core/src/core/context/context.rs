@@ -22,6 +22,9 @@ pub struct HttpWardContext {
     /// Extensions map for storing arbitrary data during request lifetime.
     /// Allows middleware to share serialized objects without modifying context structure.
     pub extensions: ExtensionsMap,
+    /// Cached matched route to avoid duplicate route resolution per request
+    /// Set by DynamicModuleLoaderLayer, reused by RouteLayer
+    pub matched_route: Option<crate::core::server_models::MatchedRoute>,
 }
 
 impl HttpWardContext {
@@ -37,6 +40,7 @@ impl HttpWardContext {
             ja4_fp: None,
             request_headers: HeaderMap::new(),
             extensions: ExtensionsMap::new(),
+            matched_route: None,
         }
     }
     
