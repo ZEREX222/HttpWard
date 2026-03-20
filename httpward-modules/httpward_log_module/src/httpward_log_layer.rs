@@ -286,6 +286,6 @@ impl HttpWardMiddleware for HttpWardLogLayer {
     }
 
     fn name(&self) -> Option<&'static str> {
-        Some("HttpWardLogLayer")
+        Some("httpward_log_module")
     }
 }

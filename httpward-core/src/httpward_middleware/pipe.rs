@@ -88,6 +88,28 @@ impl HttpWardMiddlewarePipe {
         self.inner.iter().find(|m| m.name().map_or(false, |n| n == name))
     }
 
+    /// Create a new pipe containing **only** the middleware whose names appear in `active_names`.
+    /// Middleware without a name (`name() == None`) are always included.
+    ///
+    /// This is a cheap operation: each `BoxedMiddleware` is an `Arc`, so only Arc-pointers
+    /// are cloned — the underlying middleware objects are not copied.
+    ///
+    /// Typical use: precompute a per-route filtered pipe at startup so that at request time
+    /// only the middleware belonging to the active strategy for that route are executed.
+    pub fn create_filtered(&self, active_names: &std::collections::HashSet<&str>) -> Self {
+        let filtered: Vec<BoxedMiddleware> = self.inner
+            .iter()
+            .filter(|mw| match mw.name() {
+                Some(name) => active_names.contains(name),
+                None => true, // unnamed middleware always runs
+            })
+            .cloned()
+            .collect();
+        Self {
+            inner: Arc::new(filtered),
+        }
+    }
+
     /// Add a boxed middleware (Arc<dyn HttpWardMiddleware>) into the pipe with dependency validation.
     /// This is useful when the middleware is created dynamically (plugins).
     pub fn add_boxed_layer(&self, mw: BoxedMiddleware) -> Result<Self, DependencyError> {

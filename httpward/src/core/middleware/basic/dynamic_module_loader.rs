@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use httpward_core::httpward_middleware::{
     HttpWardMiddlewarePipe
 };
@@ -11,6 +11,7 @@ use rama::{
 };
 use std::fmt::Debug;
 use httpward_core::core::server_models::server_instance::ServerInstance;
+use httpward_core::core::HttpWardContext;
 
 /// Re-export the plugin loader
 use super::middleware_global_module_storage::get_middleware_instance;
@@ -19,7 +20,12 @@ use super::middleware_global_module_storage::get_middleware_instance;
 /// This layer integrates the abstract middleware pipe with Rama's layer system
 #[derive(Debug)]
 pub struct DynamicModuleLoaderLayer {
+    /// Global pipe with ALL enabled middleware — used as fallback
     middleware_pipe: HttpWardMiddlewarePipe,
+    /// Precomputed per-route filtered pipes.
+    /// Key = `Arc::as_ptr(&route) as usize` (stable for the lifetime of SiteManager).
+    /// Value = pipe containing only the middleware enabled by this route's active_strategy.
+    route_pipes: HashMap<usize, HttpWardMiddlewarePipe>,
 }
 
 impl DynamicModuleLoaderLayer {
@@ -28,6 +34,7 @@ impl DynamicModuleLoaderLayer {
         let pipe = HttpWardMiddlewarePipe::new();
         let mut loader = Self {
             middleware_pipe: pipe,
+            route_pipes: HashMap::new(),
         };
 
         // Collect unique middleware names from all strategies across all site managers
@@ -35,7 +42,9 @@ impl DynamicModuleLoaderLayer {
         
         tracing::info!(target: "dynamic_module_loader", "Found {} unique middleware names from strategies", unique_middleware_names.len());
 
-        // Load each middleware instance
+        let mut missing_middleware_names: Vec<String> = Vec::new();
+
+        // Load each middleware instance into the global pipe
         for middleware_name in &unique_middleware_names {
             match get_middleware_instance(middleware_name) {
                 Some(middleware_instance) => {
@@ -44,13 +53,67 @@ impl DynamicModuleLoaderLayer {
                     tracing::info!(target: "dynamic_module_loader", "Successfully loaded middleware: {}", middleware_name);
                 }
                 None => {
-                    tracing::warn!(target: "dynamic_module_loader", "Failed to load middleware '{}': not found in global storage", middleware_name);
+                    missing_middleware_names.push(middleware_name.clone());
                 }
             }
         }
 
-        tracing::info!(target: "dynamic_module_loader", "DynamicModuleLoaderLayer initialized with {} middleware layers", loader.middleware_count());
+        if !missing_middleware_names.is_empty() {
+            missing_middleware_names.sort();
+            panic!(
+                "Missing middleware modules in global storage: {}. Check strategy names and module loading mode.",
+                missing_middleware_names.join(", ")
+            );
+        }
+
+        tracing::info!(target: "dynamic_module_loader", "Global pipe initialized with {} middleware layers", loader.middleware_count());
+
+        // Precompute per-route filtered pipes
+        loader.route_pipes = loader.build_route_pipes(server_instance);
+        tracing::info!(target: "dynamic_module_loader", "Precomputed {} route-specific pipes", loader.route_pipes.len());
+
         loader
+    }
+
+    /// Build precomputed filtered pipes for every route across all site managers.
+    /// Key = `Arc::as_ptr(&route) as usize` — stable pointer, zero-cost lookup at request time.
+    fn build_route_pipes(&self, server_instance: &Arc<ServerInstance>) -> HashMap<usize, HttpWardMiddlewarePipe> {
+        let mut route_pipes = HashMap::new();
+
+        for site_manager in &server_instance.site_managers {
+            for route_with_strategy in site_manager.routes_with_strategy() {
+                // Collect names of ONLY the enabled middleware for this specific route
+                let active_names: HashSet<&str> = route_with_strategy
+                    .active_strategy
+                    .middleware
+                    .iter()
+                    .filter_map(|mc| match mc {
+                        httpward_core::config::strategy::MiddlewareConfig::Named { name, .. }
+                        | httpward_core::config::strategy::MiddlewareConfig::On { name } => Some(name.as_str()),
+                        httpward_core::config::strategy::MiddlewareConfig::Off { .. } => None,
+                    })
+                    .collect();
+
+                // Create a filtered pipe — cheap (Arc<dyn Middleware> clones only)
+                let filtered_pipe = self.middleware_pipe.create_filtered(&active_names);
+
+                // Stable pointer to Arc<Route> as the lookup key
+                let key = Arc::as_ptr(&route_with_strategy.route) as usize;
+
+                tracing::debug!(
+                    target: "dynamic_module_loader",
+                    "Route {:?}: precomputed pipe with {}/{} middleware (active: {:?})",
+                    route_with_strategy.route.get_match(),
+                    filtered_pipe.len(),
+                    self.middleware_pipe.len(),
+                    active_names,
+                );
+
+                route_pipes.insert(key, filtered_pipe);
+            }
+        }
+
+        route_pipes
     }
 
     /// Collect unique middleware names from all strategies across all site managers
@@ -79,10 +142,11 @@ impl DynamicModuleLoaderLayer {
         names
     }
 
-    /// Create a new loader with custom middleware pipe
+    /// Create a new loader with custom middleware pipe (no per-route precomputation)
     pub fn with_pipe(pipe: HttpWardMiddlewarePipe) -> Self {
         Self {
             middleware_pipe: pipe,
+            route_pipes: HashMap::new(),
         }
     }
 
@@ -150,7 +214,7 @@ where
     type Service = DynamicModuleLoaderService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        DynamicModuleLoaderService::new(inner, &self.middleware_pipe)
+        DynamicModuleLoaderService::new(inner, &self.middleware_pipe, self.route_pipes.clone())
     }
 }
 
@@ -158,18 +222,58 @@ where
 #[derive(Debug)]
 pub struct DynamicModuleLoaderService<S> {
     inner: S,
+    /// Global pipe — fallback when no route-specific pipe is found
     middleware_pipe: HttpWardMiddlewarePipe,
+    /// Precomputed per-route filtered pipes (shared cheap Arc clone from Layer)
+    route_pipes: HashMap<usize, HttpWardMiddlewarePipe>,
 }
 
 impl<S> DynamicModuleLoaderService<S>
 where
     S: Service<(), Request<Body>, Response = Response<Body>> + Send + Sync + 'static,
 {
-    pub fn new(inner: S, middleware_pipe: &HttpWardMiddlewarePipe) -> Self {
+    pub fn new(
+        inner: S,
+        middleware_pipe: &HttpWardMiddlewarePipe,
+        route_pipes: HashMap<usize, HttpWardMiddlewarePipe>,
+    ) -> Self {
         Self {
             inner,
-            middleware_pipe: middleware_pipe.clone(), // Use the passed pipe instead of empty one
+            middleware_pipe: middleware_pipe.clone(),
+            route_pipes,
         }
+    }
+
+    /// Resolve the correct pipe for this request.
+    ///
+    /// Lookup order:
+    /// 1. `HttpWardContext` present in `ctx` → find `current_site` → call `get_route(path)` →
+    ///    look up `Arc::as_ptr(&matched.route)` in `route_pipes`
+    /// 2. Fallback to the global `middleware_pipe`.
+    fn resolve_pipe<'a>(&'a self, ctx: &Context<()>, req: &Request<Body>) -> &'a HttpWardMiddlewarePipe {
+        if let Some(hctx) = ctx.get::<HttpWardContext>() {
+            if let Some(site) = &hctx.current_site {
+                let path = req.uri().path();
+                if let Ok(matched) = site.get_route(path) {
+                    let key = Arc::as_ptr(&matched.route) as usize;
+                    if let Some(pipe) = self.route_pipes.get(&key) {
+                        tracing::debug!(
+                            target: "dynamic_module_loader",
+                            "Using precomputed pipe ({} middleware) for route {:?}",
+                            pipe.len(),
+                            matched.route.get_match(),
+                        );
+                        return pipe;
+                    }
+                }
+            }
+        }
+        tracing::debug!(
+            target: "dynamic_module_loader",
+            "Using global fallback pipe ({} middleware)",
+            self.middleware_pipe.len(),
+        );
+        &self.middleware_pipe
     }
 
     /// Get the number of middleware layers
@@ -204,9 +308,11 @@ where
     ) -> Result<Self::Response, Self::Error> {
         tracing::debug!(target: "dynamic_module_loader", "DynamicModuleLoaderService.serve called");
 
-        // Execute all middleware in the pipe automatically
-        // The pipe handles all the nested middleware logic
-        self.middleware_pipe.execute_middleware(self.inner.clone(), ctx, request).await
+        // Pick the precomputed per-route filtered pipe, or fall back to the global one.
+        // This is an O(1) HashMap lookup — no allocation, no filtering at request time.
+        let pipe = self.resolve_pipe(&ctx, &request);
+
+        pipe.execute_middleware(self.inner.clone(), ctx, request).await
     }
 }
 
@@ -328,8 +434,8 @@ mod tests {
     #[test]
     fn test_collect_unique_middleware_names() {
         let server_instance = create_test_server_instance();
-        let layer = DynamicModuleLoaderLayer::new(&server_instance);
-        
+        let layer = DynamicModuleLoaderLayer::with_pipe(HttpWardMiddlewarePipe::new());
+
         // Test the collection method
         let unique_names = layer.collect_unique_middleware_names(&server_instance);
         
@@ -344,7 +450,7 @@ mod tests {
     #[test]
     fn test_collect_unique_middleware_names_includes_on() {
         let server_instance = create_test_server_instance_with_on();
-        let layer = DynamicModuleLoaderLayer::new(&server_instance);
+        let layer = DynamicModuleLoaderLayer::with_pipe(HttpWardMiddlewarePipe::new());
 
         let unique_names = layer.collect_unique_middleware_names(&server_instance);
 
@@ -376,5 +482,12 @@ mod tests {
         
         // Should create successfully even with dummy server instance
         assert_eq!(layer.middleware_count(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Missing middleware modules in global storage")]
+    fn test_new_panics_when_enabled_middleware_missing_in_storage() {
+        let server_instance = create_test_server_instance_with_on();
+        let _ = DynamicModuleLoaderLayer::new(&server_instance);
     }
 }
