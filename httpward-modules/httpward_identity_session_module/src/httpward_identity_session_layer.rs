@@ -16,7 +16,7 @@
 
 use httpward_core::httpward_middleware::{HttpWardMiddleware, BoxError};
 use httpward_core::httpward_middleware::next::Next;
-use httpward_core::{module_log_debug, module_log_error};
+use httpward_core::{get_config_from_middleware, module_log_debug, module_log_error};
 use httpward_core::module_logging::ModuleLogger;
 use rama::{http::{Request, Response, Body}, Context};
 use async_trait::async_trait;
@@ -47,8 +47,8 @@ impl HttpWardMiddleware for HttpWardIdentitySessionLayer {
         req: Request<Body>,
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError> {
-        // Load configuration using the macro
-        let _config = match httpward_core::get_module_config_from_current_crate!(HttpWardIdentitySessionConfig, &ctx, &req) {
+        // Load configuration using the middleware instance
+        let _config = match get_config_from_middleware::<HttpWardIdentitySessionConfig, _>(&ctx, &req, self) {
             Ok(config) => {
                 module_log_debug!("HttpWardIdentitySessionLayer config loaded successfully: {:?}", config);
                 config

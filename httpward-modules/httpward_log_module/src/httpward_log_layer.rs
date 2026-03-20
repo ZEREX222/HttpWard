@@ -7,7 +7,7 @@ use httpward_core::httpward_middleware::next::Next;
 use httpward_core::httpward_middleware::types::BoxError;
 use httpward_core::module_logging::ModuleLogger;
 use httpward_core::{
-    get_module_config_from_current_crate, module_log_debug, module_log_error, module_log_info,
+    get_config_from_middleware, module_log_debug, module_log_error, module_log_info,
     module_log_warn,
 };
 use rama::Context;
@@ -109,7 +109,7 @@ impl HttpWardMiddleware for HttpWardLogLayer {
         module_log_debug!("HttpWardLogLayer.handle called");
 
         // Get configuration from context, use default if error occurs
-        let config = match get_module_config_from_current_crate!(HttpWardLogConfig, &ctx, &req) {
+        let config = match get_config_from_middleware::<HttpWardLogConfig, _>(&ctx, &req, self) {
             Ok(config) => {
                 module_log_debug!("HttpWardLogLayer config loaded successfully: {:?}", config);
                 config
@@ -286,6 +286,6 @@ impl HttpWardMiddleware for HttpWardLogLayer {
     }
 
     fn name(&self) -> Option<&'static str> {
-        Some("httpward_log_module")
+        Some(env!("CARGO_PKG_NAME"))
     }
 }

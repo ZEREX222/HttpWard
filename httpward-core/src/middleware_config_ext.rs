@@ -1,5 +1,6 @@
 use crate::config::strategy::MiddlewareConfig;
 use crate::core::HttpWardContext;
+use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use rama::Context;
 use rama::http::{Request, Body};
 use serde::de::DeserializeOwned;
@@ -96,43 +97,20 @@ where
         .ok_or_else(|| format!("No configuration found for middleware '{}' on path '{}'", middleware_name, path).into())
 }
 
-/// Universal function to get middleware configuration from context with module name
-/// Usage: get_config_from_ctx_for_module::<MyConfig>(ctx, req, "my_module_name")
-pub fn get_config_from_ctx_for_module<T>(
+/// Universal function to get middleware configuration from context using middleware instance
+/// Usage: get_config_from_middleware::<MyConfig, MyMiddleware>(ctx, req, middleware_instance)
+pub fn get_config_from_middleware<T, M>(
     ctx: &Context<()>,
     req: &Request<Body>,
-    module_name: &str,
+    middleware: &M,
 ) -> Result<T, Box<dyn Error + Send + Sync>>
 where
     T: DeserializeOwned,
+    M: HttpWardMiddleware,
 {
-    get_config_from_ctx::<T>(ctx, req, module_name)
-}
-
-/// Macro to get config using current module name automatically
-/// Usage: get_config_from_current_module!(MyConfig, ctx, req)
-#[macro_export]
-macro_rules! get_config_from_current_module {
-    ($config_type:ty, $ctx:expr, $req:expr) => {
-        $crate::middleware_config_ext::get_config_from_ctx_for_module::<$config_type>(
-            $ctx,
-            $req,
-            module_path!().split("::").last().unwrap_or("unknown")
-        )
-    };
-}
-
-/// Macro to get config using current crate name automatically
-/// Usage: get_module_config_from_current_crate!(MyConfig, ctx, req)
-#[macro_export]
-macro_rules! get_module_config_from_current_crate {
-    ($config_type:ty, $ctx:expr, $req:expr) => {
-        $crate::middleware_config_ext::get_config_from_ctx_for_module::<$config_type>(
-            $ctx,
-            $req,
-            env!("CARGO_PKG_NAME")
-        )
-    };
+    let middleware_name = middleware.name()
+        .ok_or("Middleware does not have a name")?;
+    get_config_from_ctx::<T>(ctx, req, middleware_name)
 }
 
 /// Convenient function for getting middleware configuration from context
@@ -153,3 +131,6 @@ where
 {
     ctx.get_middleware_config_typed(middleware_name)
 }
+
+#[cfg(test)]
+mod tests;
