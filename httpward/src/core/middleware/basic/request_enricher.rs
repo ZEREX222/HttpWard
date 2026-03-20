@@ -230,8 +230,16 @@ where
         let site = self.find_site_by_domain(&ctx, &request);
         let site_domain = site.as_ref().map(|sm| sm.site_name());
 
+        // Cache the matched route to avoid re-resolution in RouteLayer
+        let matched_route = if let Some(ref site_manager) = site {
+            let path = request.uri().path();
+            site_manager.get_route(path).ok()
+        } else {
+            None
+        };
+
         // Create and insert HttpWardContext into the context
-        let mut enriched_context = HttpWardContext {
+        let enriched_context = HttpWardContext {
             client_ip,
             request_content_type: request_content_type.clone(),
             response_content_type: ContentType::text(), // Will be set by ResponseEnricher
@@ -241,7 +249,7 @@ where
             header_fp,
             request_headers: request.headers().clone(),
             extensions: httpward_core::core::context::ExtensionsMap::new(),
-            matched_route: None, // Will be set by DynamicModuleLoaderLayer
+            matched_route, // Set cached route
         };
 
         ctx.insert(enriched_context);
