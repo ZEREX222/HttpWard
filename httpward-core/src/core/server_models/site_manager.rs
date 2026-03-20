@@ -1,12 +1,15 @@
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::path::PathBuf;
 use matchit::Router;
 use regex::{Regex, RegexSet};
 use thiserror::Error;
 use crate::config::{SiteConfig, Route, GlobalConfig};
+use crate::config::strategy::{MiddlewareConfig, Strategy, UniversalValue};
 use super::strategy_resolver::StrategyResolver;
-use crate::config::strategy::Strategy;
+use serde::de::DeserializeOwned;
 
 #[derive(Debug, Clone)]
 pub struct TlsPaths {
@@ -15,12 +18,105 @@ pub struct TlsPaths {
 }
 
 /// Combined object containing a Route and its resolved active strategy
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RouteWithStrategy {
     /// The route definition
     pub route: Arc<Route>,
     /// The resolved active strategy for this route
     pub active_strategy: Arc<Strategy>,
+    /// Fast O(1) lookup: middleware name -> index in active_strategy.middleware.
+    middleware_index: Arc<HashMap<String, usize>>,
+    /// Typed config cache: (middleware_index, TypeId) -> Arc<T> erased as Any.
+    typed_cache: Arc<RwLock<HashMap<(usize, TypeId), Arc<dyn Any + Send + Sync>>>>,
+}
+
+impl std::fmt::Debug for RouteWithStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RouteWithStrategy")
+            .field("route", &self.route)
+            .field("active_strategy", &self.active_strategy)
+            .field("middleware_index_size", &self.middleware_index.len())
+            .finish()
+    }
+}
+
+impl RouteWithStrategy {
+    pub fn new(route: Arc<Route>, active_strategy: Arc<Strategy>) -> Self {
+        let mut middleware_index = HashMap::new();
+        for (idx, mw) in active_strategy.middleware.iter().enumerate() {
+            middleware_index.entry(mw.name().to_string()).or_insert(idx);
+        }
+
+        Self {
+            route,
+            active_strategy,
+            middleware_index: Arc::new(middleware_index),
+            typed_cache: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Fast middleware config lookup by middleware name.
+    pub fn middleware_config(&self, middleware_name: &str) -> Option<&MiddlewareConfig> {
+        let idx = *self.middleware_index.get(middleware_name)?;
+        self.active_strategy.middleware.get(idx)
+    }
+
+    /// Deserialize and cache typed middleware config for this route.
+    ///
+    /// Returns `Ok(None)` when middleware is not present or explicitly `Off`.
+    pub fn middleware_config_typed<T>(&self, middleware_name: &str) -> anyhow::Result<Option<Arc<T>>>
+    where
+        T: DeserializeOwned + Send + Sync + 'static,
+    {
+        let idx = match self.middleware_index.get(middleware_name) {
+            Some(idx) => *idx,
+            None => return Ok(None),
+        };
+
+        if matches!(self.active_strategy.middleware[idx], MiddlewareConfig::Off { .. }) {
+            return Ok(None);
+        }
+
+        let key = (idx, TypeId::of::<T>());
+
+        if let Some(cached) = self
+            .typed_cache
+            .read()
+            .map_err(|_| anyhow::anyhow!("typed config cache lock poisoned"))?
+            .get(&key)
+            .cloned()
+        {
+            if let Some(typed) = cached.downcast_ref::<Arc<T>>() {
+                return Ok(Some(typed.clone()));
+            }
+        }
+
+        let parsed = Arc::new(parse_middleware_config_typed::<T>(&self.active_strategy.middleware[idx])?);
+
+        self.typed_cache
+            .write()
+            .map_err(|_| anyhow::anyhow!("typed config cache lock poisoned"))?
+            .insert(key, Arc::new(parsed.clone()) as Arc<dyn Any + Send + Sync>);
+
+        Ok(Some(parsed))
+    }
+}
+
+fn parse_middleware_config_typed<T>(cfg: &MiddlewareConfig) -> anyhow::Result<T>
+where
+    T: DeserializeOwned,
+{
+    match cfg {
+        MiddlewareConfig::Named { config, .. } => match config {
+            UniversalValue::Json(v) => serde_json::from_value(v.clone())
+                .map_err(|e| anyhow::anyhow!("Failed to parse middleware JSON config: {}", e)),
+            UniversalValue::Yaml(v) => serde_yaml::from_value(v.clone())
+                .map_err(|e| anyhow::anyhow!("Failed to parse middleware YAML config: {}", e)),
+        },
+        MiddlewareConfig::On { .. } => serde_json::from_value(serde_json::Value::Object(serde_json::Map::new()))
+            .map_err(|e| anyhow::anyhow!("Failed to parse default middleware config: {}", e)),
+        MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Middleware is disabled")),
+    }
 }
 
 /// A mapping between a set of domains and their specific certificate files.
@@ -139,10 +235,7 @@ impl SiteManager {
         if let Some(resolver) = &strategy_resolver {
             for (index, route) in routes_arc.iter().enumerate() {
                 if let Some(strategy) = resolver.resolve_for_route(index) {
-                    routes_with_strategy.push(RouteWithStrategy {
-                        route: route.clone(),
-                        active_strategy: strategy,
-                    });
+                    routes_with_strategy.push(RouteWithStrategy::new(route.clone(), strategy));
                 }
             }
         }
@@ -314,10 +407,8 @@ impl SiteManager {
     /// Get active strategy middleware config by name for the given path
     pub fn get_active_strategy_config_by_route(&self, path: &str, middleware_name: &str) -> Result<Option<crate::config::strategy::MiddlewareConfig>, SiteManagerError> {
         let matched_route = self.get_route(path)?;
-        let middleware = matched_route.active_strategy.middleware.iter()
-            .find(|m| m.name() == middleware_name)
-            .cloned();
-        Ok(middleware)
+        let route_with_strategy = RouteWithStrategy::new(matched_route.route, matched_route.active_strategy);
+        Ok(route_with_strategy.middleware_config(middleware_name).cloned())
     }
 }
 

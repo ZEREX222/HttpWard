@@ -14,7 +14,7 @@ mod tests {
 
     #[async_trait]
     impl HttpWardMiddleware for TestMiddleware {
-        async fn handle(&self, _ctx: Context<()>, _req: Request<Body>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
+        async fn handle(&self, _ctx: Context<()>, _req: Request<Body>, _rws: std::sync::Arc<crate::core::server_models::site_manager::RouteWithStrategy>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
             next.run(_ctx, _req).await
         }
 

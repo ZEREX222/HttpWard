@@ -16,7 +16,8 @@
 
 use httpward_core::httpward_middleware::{HttpWardMiddleware, BoxError};
 use httpward_core::httpward_middleware::next::Next;
-use httpward_core::{get_config_from_middleware, module_log_debug, module_log_error};
+use httpward_core::core::server_models::site_manager::RouteWithStrategy;
+use httpward_core::{module_log_debug, module_log_error};
 use httpward_core::module_logging::ModuleLogger;
 use rama::{http::{Request, Response, Body}, Context};
 use async_trait::async_trait;
@@ -43,25 +44,29 @@ impl Default for HttpWardIdentitySessionLayer {
 impl HttpWardMiddleware for HttpWardIdentitySessionLayer {
     async fn handle(
         &self,
-        ctx: Context<()>,
-        req: Request<Body>,
+        _ctx: Context<()>,
+        _req: Request<Body>,
+        route_with_strategy: std::sync::Arc<RouteWithStrategy>,
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError> {
-        // Load configuration using the middleware instance
-        let _config = match get_config_from_middleware::<HttpWardIdentitySessionConfig, _>(&ctx, &req, self) {
-            Ok(config) => {
-                module_log_debug!("HttpWardIdentitySessionLayer config loaded successfully: {:?}", config);
+        let _config = match route_with_strategy.middleware_config_typed::<HttpWardIdentitySessionConfig>("HttpWardIdentitySessionLayer") {
+            Ok(Some(config)) => {
+                module_log_debug!("HttpWardIdentitySessionLayer config loaded from RouteWithStrategy cache: {:?}", config);
                 config
             }
+            Ok(None) => {
+                module_log_debug!("HttpWardIdentitySessionLayer config not found in RouteWithStrategy, using defaults");
+                std::sync::Arc::new(HttpWardIdentitySessionConfig::default())
+            }
             Err(e) => {
-                module_log_error!("Failed to load HttpWardIdentitySessionLayer configuration: {}, using defaults", e);
-                HttpWardIdentitySessionConfig::default()
+                module_log_error!("Failed to parse HttpWardIdentitySessionLayer config from RouteWithStrategy: {}, using defaults", e);
+                std::sync::Arc::new(HttpWardIdentitySessionConfig::default())
             }
         };
 
         // TODO: Implement identity and session logic using config
         // For now, just pass through to next middleware
-        next.run(ctx, req).await
+        next.run(_ctx, _req).await
     }
 
     fn name(&self) -> Option<&'static str> {

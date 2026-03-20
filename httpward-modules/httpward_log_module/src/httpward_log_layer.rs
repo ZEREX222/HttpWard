@@ -2,12 +2,13 @@
 
 use async_trait::async_trait;
 use httpward_core::core::HttpWardContext;
+use httpward_core::core::server_models::site_manager::RouteWithStrategy;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use httpward_core::httpward_middleware::next::Next;
 use httpward_core::httpward_middleware::types::BoxError;
 use httpward_core::module_logging::ModuleLogger;
 use httpward_core::{
-    get_config_from_middleware, module_log_debug, module_log_error, module_log_info,
+    module_log_debug, module_log_error, module_log_info,
     module_log_warn,
 };
 use rama::Context;
@@ -104,19 +105,25 @@ impl HttpWardMiddleware for HttpWardLogLayer {
         &self,
         ctx: Context<()>,
         req: Request<Body>,
+        route_with_strategy: std::sync::Arc<RouteWithStrategy>,
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError> {
         module_log_debug!("HttpWardLogLayer.handle called");
 
-        // Get configuration from context, use default if error occurs
-        let config = match get_config_from_middleware::<HttpWardLogConfig, _>(&ctx, &req, self) {
-            Ok(config) => {
-                module_log_debug!("HttpWardLogLayer config loaded successfully: {:?}", config);
+        // Pull typed config directly from RouteWithStrategy (pre-resolved route + strategy).
+        // This avoids extra route lookups and uses per-route typed cache in core.
+        let config = match route_with_strategy.middleware_config_typed::<HttpWardLogConfig>(env!("CARGO_PKG_NAME")) {
+            Ok(Some(config)) => {
+                module_log_debug!("HttpWardLogLayer config loaded from RouteWithStrategy cache: {:?}", config);
                 config
             }
+            Ok(None) => {
+                module_log_debug!("HttpWardLogLayer config not found in RouteWithStrategy, using defaults");
+                std::sync::Arc::new(HttpWardLogConfig::default())
+            }
             Err(e) => {
-                module_log_error!("Failed to load HttpWardLogLayer configuration: {}, using defaults", e);
-                HttpWardLogConfig::default()
+                module_log_error!("Failed to parse HttpWardLogLayer configuration from RouteWithStrategy: {}, using defaults", e);
+                std::sync::Arc::new(HttpWardLogConfig::default())
             }
         };
 
@@ -134,13 +141,10 @@ impl HttpWardMiddleware for HttpWardLogLayer {
 
         // Get HttpWardContext for detailed logging
         if let Some(httpward_ctx) = ctx.get::<HttpWardContext>() {
-            
+
             // Log client IP address if enabled
             if config.log_client_ip {
-                module_log_info!(
-                    "Client IP: {}",
-                    httpward_ctx.client_ip
-                );
+                module_log_info!("Client IP: {}", httpward_ctx.client_ip);
             }
 
             // Log server instance information if enabled
@@ -186,84 +190,35 @@ impl HttpWardMiddleware for HttpWardLogLayer {
             // Log request headers if enabled
             if config.log_request_headers {
                 let header_count = httpward_ctx.request_headers.len();
-                module_log_info!(
-                    "Request headers count: {}",
-                    header_count
-                );
-                
-                // Log some key headers
+                module_log_info!("Request headers count: {}", header_count);
+
                 if let Some(user_agent) = httpward_ctx.request_headers.get("user-agent") {
-                    if let Ok(user_agent_str) = user_agent.to_str() {
-                        module_log_info!(
-                            "User-Agent: {}",
-                            user_agent_str
-                        );
+                    if let Ok(ua) = user_agent.to_str() {
+                        module_log_info!("User-Agent: {}", ua);
                     }
                 }
-                
                 if let Some(host) = httpward_ctx.request_headers.get("host") {
-                    if let Ok(host_str) = host.to_str() {
-                        module_log_info!(
-                            "Host: {}",
-                            host_str
-                        );
+                    if let Ok(h) = host.to_str() {
+                        module_log_info!("Host: {}", h);
                     }
                 }
             }
 
-            // Log route matching information if enabled
-            if config.log_route_info {
+            // Log URL parameters (requires a get_route lookup for params / matcher_type)
+            if config.log_route_info && config.log_url_params {
                 let path = req.uri().path();
                 match httpward_ctx.get_route(path) {
-                    Ok(Some(matched_route)) => {
+                    Ok(Some(matched)) if !matched.params.is_empty() => {
                         module_log_info!(
-                            "Route matched - Path: {}, Route type: {:?}, Matcher type: {:?}",
-                            path,
-                            matched_route.route,
-                            matched_route.matcher_type
-                        );
-
-                        // Log URL parameters if enabled
-                        if config.log_url_params && !matched_route.params.is_empty() {
-                            module_log_info!(
-                                "URL parameters - Count: {}, Parameters: {:?}",
-                                matched_route.params.len(),
-                                matched_route.params
-                            );
-                        }
-
-                        // Log strategy information if enabled
-                        if config.log_strategy_info {
-                            module_log_info!(
-                                "Active strategy - Name: {}, Middleware count: {}",
-                                matched_route.active_strategy.name,
-                                matched_route.active_strategy.middleware.len()
-                            );
-                        }
-
-                        // Log middleware details if enabled
-                        if config.log_middleware_details {
-                            for (i, middleware) in matched_route.active_strategy.middleware.iter().enumerate() {
-                                module_log_info!(
-                                    "Middleware[{}] - Type: {:?}",
-                                    i,
-                                    middleware
-                                );
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        module_log_info!(
-                            "No route matched for path: {}",
-                            path
+                            "URL parameters - Count: {}, Parameters: {:?}, Matcher type: {:?}",
+                            matched.params.len(),
+                            matched.params,
+                            matched.matcher_type
                         );
                     }
+                    Ok(_) => {}
                     Err(e) => {
-                        module_log_error!(
-                            "Error getting route for path: {}, Error: {}",
-                            path,
-                            e
-                        );
+                        module_log_error!("Error resolving URL parameters for path {}: {}", path, e);
                     }
                 }
             }
@@ -271,15 +226,36 @@ impl HttpWardMiddleware for HttpWardLogLayer {
             module_log_warn!("HttpWardContext not found in request context");
         }
 
+        // Log route / strategy info directly from route_with_strategy —
+        // this is the authoritative value the pipe was built for (zero extra lookup).
+        if config.log_route_info {
+            module_log_info!(
+                "Route matched - Path: {}, Route: {:?}",
+                req.uri().path(),
+                route_with_strategy.route
+            );
+
+            if config.log_strategy_info {
+                module_log_info!(
+                    "Active strategy - Name: {}, Middleware count: {}",
+                    route_with_strategy.active_strategy.name,
+                    route_with_strategy.active_strategy.middleware.len()
+                );
+            }
+
+            if config.log_middleware_details {
+                for (i, mw) in route_with_strategy.active_strategy.middleware.iter().enumerate() {
+                    module_log_info!("Middleware[{}] - Type: {:?}", i, mw);
+                }
+            }
+        }
+
         // Call next middleware / inner service
         let res = next.run(ctx, req).await?;
 
         // Log response status if enabled
         if config.log_response_status {
-            module_log_info!(
-                "Response status: {}",
-                res.status()
-            );
+            module_log_info!("Response status: {}", res.status());
         }
 
         Ok(res)

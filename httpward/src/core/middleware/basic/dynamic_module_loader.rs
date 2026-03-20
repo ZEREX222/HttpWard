@@ -98,7 +98,15 @@ impl DynamicModuleLoaderLayer {
                     .collect();
 
                 // Create a filtered pipe — cheap (Arc<dyn Middleware> clones only)
-                let filtered_pipe = self.middleware_pipe.create_filtered(&active_names);
+                // Attach the RouteWithStrategy so every handle() call in this pipe
+                // automatically receives the correct route context. No extra lookup at request time.
+                let rws = Arc::new(httpward_core::core::server_models::site_manager::RouteWithStrategy::new(
+                    route_with_strategy.route.clone(),
+                    route_with_strategy.active_strategy.clone(),
+                ));
+                let filtered_pipe = self.middleware_pipe
+                    .create_filtered(&active_names)
+                    .with_route_strategy(rws);
 
                 // Validate that all middleware in the filtered pipe have their dependencies satisfied
                 self.validate_filtered_pipe_dependencies(&route_with_strategy.route, &active_names);
@@ -296,11 +304,11 @@ where
 
     /// Resolve the correct pipe for this request.
     ///
-    /// Lookup order:
-    /// 1. `HttpWardContext` present in `ctx` → find `current_site` → call `get_route(path)` →
-    ///    look up `Arc::as_ptr(&matched.route)` in `route_pipes`
-    /// 2. Fallback to the global `middleware_pipe`.
-    fn resolve_pipe<'a>(&'a self, ctx: &Context<()>, req: &Request<Body>) -> &'a HttpWardMiddlewarePipe {
+    /// Returns:
+    /// - `Some(pipe)` — precomputed per-route filtered pipe when a route is matched.
+    /// - `None`       — no route matched; the caller should bypass the middleware pipe
+    ///                  and forward the request directly to the inner service.
+    fn resolve_pipe<'a>(&'a self, ctx: &Context<()>, req: &Request<Body>) -> Option<&'a HttpWardMiddlewarePipe> {
         if let Some(hctx) = ctx.get::<HttpWardContext>() {
             if let Some(site) = &hctx.current_site {
                 let path = req.uri().path();
@@ -313,17 +321,16 @@ where
                             pipe.len(),
                             matched.route.get_match(),
                         );
-                        return pipe;
+                        return Some(pipe);
                     }
                 }
             }
         }
         tracing::debug!(
             target: "dynamic_module_loader",
-            "Using global fallback pipe ({} middleware)",
-            self.middleware_pipe.len(),
+            "No route matched — skipping middleware pipe, forwarding directly to inner service",
         );
-        &self.middleware_pipe
+        None
     }
 
     /// Get the number of middleware layers
@@ -358,11 +365,17 @@ where
     ) -> Result<Self::Response, Self::Error> {
         tracing::debug!(target: "dynamic_module_loader", "DynamicModuleLoaderService.serve called");
 
-        // Pick the precomputed per-route filtered pipe, or fall back to the global one.
-        // This is an O(1) HashMap lookup — no allocation, no filtering at request time.
-        let pipe = self.resolve_pipe(&ctx, &request);
-
-        pipe.execute_middleware(self.inner.clone(), ctx, request).await
+        match self.resolve_pipe(&ctx, &request) {
+            Some(pipe) => {
+                // Route matched — run the precomputed filtered middleware pipe.
+                pipe.execute_middleware(self.inner.clone(), ctx, request).await
+            }
+            None => {
+                // No route matched — skip all middleware and forward directly to inner service.
+                self.inner.serve(ctx, request).await
+                    .map_err(|e| Box::new(e) as Self::Error)
+            }
+        }
     }
 }
 

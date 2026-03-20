@@ -3,10 +3,7 @@ pub mod config;
 pub mod core;
 pub mod httpward_middleware;
 pub mod error;
-pub mod middleware_config_ext;
 pub mod module_logging;
 pub mod module_export;
 
-// Re-export commonly used functions
-pub use middleware_config_ext::get_config_from_middleware;
 

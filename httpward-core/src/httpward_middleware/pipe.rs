@@ -6,6 +6,7 @@ use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use crate::httpward_middleware::next::Next;
 use crate::httpward_middleware::types::BoxError;
 use crate::httpward_middleware::dependency_error::DependencyError;
+use crate::core::server_models::site_manager::RouteWithStrategy;
 use rama::http::{Body, Request, Response};
 use rama::Context;
 use rama::service::Service;
@@ -17,9 +18,15 @@ type BoxedMiddleware = Arc<dyn HttpWardMiddleware>;
 
 /// Public wrapper around shared pipeline storage.
 /// The internal Vec is wrapped in an Arc so cloning the pipe is cheap (one atomic increment).
+///
+/// Per-route filtered pipes carry the `RouteWithStrategy` they were built for, so
+/// every middleware `handle` call receives the correct route context automatically.
 #[derive(Clone)]
 pub struct HttpWardMiddlewarePipe {
     inner: Arc<Vec<BoxedMiddleware>>,
+    /// The route + active strategy this pipe was built for.
+    /// `None` for the global (fallback) pipe; `Some` for precomputed per-route pipes.
+    route_with_strategy: Option<Arc<RouteWithStrategy>>,
 }
 
 impl Default for HttpWardMiddlewarePipe {
@@ -32,15 +39,17 @@ impl fmt::Debug for HttpWardMiddlewarePipe {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HttpWardMiddlewarePipe")
             .field("middleware_count", &self.inner.len())
+            .field("has_route", &self.route_with_strategy.is_some())
             .finish()
     }
 }
 
 impl HttpWardMiddlewarePipe {
-    /// Create an empty, cheap-to-clone pipe.
+    /// Create an empty, cheap-to-clone pipe (no route context).
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Vec::new()),
+            route_with_strategy: None,
         }
     }
 
@@ -51,6 +60,24 @@ impl HttpWardMiddlewarePipe {
 
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
+    }
+
+    /// Attach a `RouteWithStrategy` to this pipe (builder pattern).
+    ///
+    /// Used by `DynamicModuleLoaderLayer::build_route_pipes` to associate each
+    /// precomputed per-route pipe with its matching route/strategy pair.
+    /// Every subsequent `execute_middleware` call will forward the value to
+    /// `handle` of every active middleware in the chain.
+    pub fn with_route_strategy(self, rws: Arc<RouteWithStrategy>) -> Self {
+        Self {
+            inner: self.inner,
+            route_with_strategy: Some(rws),
+        }
+    }
+
+    /// Returns the route+strategy this pipe was built for, if any.
+    pub fn route_with_strategy(&self) -> Option<&Arc<RouteWithStrategy>> {
+        self.route_with_strategy.as_ref()
     }
 
     /// Add a middleware to the pipe with mandatory dependency validation
@@ -76,6 +103,7 @@ impl HttpWardMiddlewarePipe {
         new_vec.push(Arc::new(mw));
         Ok(Self {
             inner: Arc::new(new_vec),
+            route_with_strategy: self.route_with_strategy.clone(),
         })
     }
 
@@ -100,8 +128,8 @@ impl HttpWardMiddlewarePipe {
     /// This is a cheap operation: each `BoxedMiddleware` is an `Arc`, so only Arc-pointers
     /// are cloned — the underlying middleware objects are not copied.
     ///
-    /// Typical use: precompute a per-route filtered pipe at startup so that at request time
-    /// only the middleware belonging to the active strategy for that route are executed.
+    /// The resulting pipe has `route_with_strategy = None`; call `.with_route_strategy(rws)` on
+    /// the result to associate it with a specific route (as done in `build_route_pipes`).
     pub fn create_filtered(&self, active_names: &std::collections::HashSet<&str>) -> Self {
         let filtered: Vec<BoxedMiddleware> = self.inner
             .iter()
@@ -113,6 +141,7 @@ impl HttpWardMiddlewarePipe {
             .collect();
         Self {
             inner: Arc::new(filtered),
+            route_with_strategy: None,
         }
     }
 
@@ -137,6 +166,7 @@ impl HttpWardMiddlewarePipe {
         new_vec.push(mw);
         Ok(Self {
             inner: Arc::new(new_vec),
+            route_with_strategy: self.route_with_strategy.clone(),
         })
     }
     
@@ -205,12 +235,19 @@ impl HttpWardMiddlewarePipe {
         S: Service<(), Request<Body>, Response = Response<Body>> + Clone + Send + Sync + 'static,
         S::Error: std::error::Error + Send + Sync + 'static,
     {
+        let rws = self.route_with_strategy.clone().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "RouteWithStrategy is required for middleware execution",
+            )
+        })?;
+
         let slice: &[BoxedMiddleware] = &*self.inner;
 
         // Convert the concrete service to BoxService
         let boxed_service = crate::httpward_middleware::adapter::box_service_from(inner);
 
-        let next = Next::new(slice, &boxed_service);
+        let next = Next::new(slice, &boxed_service, rws);
 
         next.run(ctx, req).await
     }
@@ -237,44 +274,31 @@ mod tests {
     struct DummyMw;
     #[async_trait]
     impl HttpWardMiddleware for DummyMw {
-        async fn handle(&self, ctx: Context<()>, req: Request<Body>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
-            // call next without changes
+        async fn handle(&self, ctx: Context<()>, req: Request<Body>, _rws: Arc<crate::core::server_models::site_manager::RouteWithStrategy>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
             next.run(ctx, req).await
         }
-        
-        fn name(&self) -> Option<&'static str> {
-            Some("DummyMw")
-        }
+        fn name(&self) -> Option<&'static str> { Some("DummyMw") }
     }
 
     // Test middleware with dependencies
     struct DependentMw;
     #[async_trait]
     impl HttpWardMiddleware for DependentMw {
-        async fn handle(&self, ctx: Context<()>, req: Request<Body>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
+        async fn handle(&self, ctx: Context<()>, req: Request<Body>, _rws: Arc<crate::core::server_models::site_manager::RouteWithStrategy>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
             next.run(ctx, req).await
         }
-        
-        fn name(&self) -> Option<&'static str> {
-            Some("DependentMw")
-        }
-        
-        fn dependencies(&self) -> Vec<&'static str> {
-            vec!["DummyMw"]
-        }
+        fn name(&self) -> Option<&'static str> { Some("DependentMw") }
+        fn dependencies(&self) -> Vec<&'static str> { vec!["DummyMw"] }
     }
 
     // Test middleware with name but no dependencies
     struct NamedMw;
     #[async_trait]
     impl HttpWardMiddleware for NamedMw {
-        async fn handle(&self, ctx: Context<()>, req: Request<Body>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
+        async fn handle(&self, ctx: Context<()>, req: Request<Body>, _rws: Arc<crate::core::server_models::site_manager::RouteWithStrategy>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
             next.run(ctx, req).await
         }
-        
-        fn name(&self) -> Option<&'static str> {
-            Some("NamedMw")
-        }
+        fn name(&self) -> Option<&'static str> { Some("NamedMw") }
     }
 
     
@@ -338,6 +362,7 @@ mod tests {
         
         let wrong_order_pipe = HttpWardMiddlewarePipe {
             inner: Arc::new(wrong_order_vec),
+            route_with_strategy: None,
         };
         let result = wrong_order_pipe.validate_order();
         assert!(result.is_err());
