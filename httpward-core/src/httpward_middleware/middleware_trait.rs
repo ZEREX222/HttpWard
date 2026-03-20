@@ -6,15 +6,11 @@ use crate::httpward_middleware::types::BoxError;
 use rama::http::{Body, Request, Response};
 use rama::Context;
 use crate::httpward_middleware::next::Next;
-use crate::core::server_models::site_manager::RouteWithStrategy;
 
 /// HttpWard middleware trait — object-safe, async.
 #[async_trait]
 pub trait HttpWardMiddleware: Send + Sync + 'static {
     /// Handle a request or call the next middleware.
-    ///
-    /// # Parameters
-    /// - `route_with_strategy`: the matched route together with its resolved active strategy.
     ///
     /// # Notes
     /// - This method is object-safe because it does not use generics.
@@ -23,7 +19,6 @@ pub trait HttpWardMiddleware: Send + Sync + 'static {
         &self,
         ctx: Context<()>,
         req: Request<Body>,
-        route_with_strategy: Arc<RouteWithStrategy>,
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError>;
 

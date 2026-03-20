@@ -71,11 +71,8 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 /// use httpward_core::export_middleware_module;
 /// use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 /// use httpward_core::httpward_middleware::next::Next;
-/// use httpward_core::core::server_models::site_manager::RouteWithStrategy;
 /// use rama::{Context, http::{Body, Request, Response}};
 /// use async_trait::async_trait;
-/// use std::sync::Arc;
-/// use std::convert::Infallible;
 ///
 /// #[derive(Default)]
 /// struct MyMiddleware;
@@ -90,7 +87,6 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 ///         &self,
 ///         _ctx: Context<()>,
 ///         request: Request<Body>,
-///         _rws: Arc<RouteWithStrategy>,
 ///         next: Next<'_>,
 ///     ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
 ///         next.run(_ctx, request).await
@@ -105,10 +101,8 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 /// use httpward_core::export_middleware_module;
 /// use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 /// use httpward_core::httpward_middleware::next::Next;
-/// use httpward_core::core::server_models::site_manager::RouteWithStrategy;
 /// use rama::{Context, http::{Body, Request, Response}};
 /// use async_trait::async_trait;
-/// use std::sync::Arc;
 ///
 /// #[derive(Default)]
 /// struct MyMiddleware;
@@ -123,7 +117,6 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 ///         &self,
 ///         _ctx: Context<()>,
 ///         request: Request<Body>,
-///         _rws: Arc<RouteWithStrategy>,
 ///         next: Next<'_>,
 ///     ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
 ///         next.run(_ctx, request).await
@@ -138,10 +131,8 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 /// use httpward_core::export_middleware_module;
 /// use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 /// use httpward_core::httpward_middleware::next::Next;
-/// use httpward_core::core::server_models::site_manager::RouteWithStrategy;
 /// use rama::{Context, http::{Body, Request, Response}};
 /// use async_trait::async_trait;
-/// use std::sync::Arc;
 ///
 /// #[derive(Default)]
 /// struct MyMiddleware;
@@ -156,7 +147,6 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 ///         &self,
 ///         _ctx: Context<()>,
 ///         request: Request<Body>,
-///         _rws: Arc<RouteWithStrategy>,
 ///         next: Next<'_>,
 ///     ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
 ///         next.run(_ctx, request).await
@@ -327,7 +317,6 @@ mod tests {
             &self,
             ctx: Context<()>,
             request: Request<Body>,
-            _rws: std::sync::Arc<crate::core::server_models::site_manager::RouteWithStrategy>,
             next: Next<'_>,
         ) -> Result<Response<Body>, BoxError> {
             next.run(ctx, request).await

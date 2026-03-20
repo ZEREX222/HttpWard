@@ -97,16 +97,9 @@ impl DynamicModuleLoaderLayer {
                     })
                     .collect();
 
-                // Create a filtered pipe — cheap (Arc<dyn Middleware> clones only)
-                // Attach the RouteWithStrategy so every handle() call in this pipe
-                // automatically receives the correct route context. No extra lookup at request time.
-                let rws = Arc::new(httpward_core::core::server_models::site_manager::RouteWithStrategy::new(
-                    route_with_strategy.route.clone(),
-                    route_with_strategy.active_strategy.clone(),
-                ));
+                // Create a filtered pipe — cheap (Arc<dyn Middleware> clones only).
                 let filtered_pipe = self.middleware_pipe
-                    .create_filtered(&active_names)
-                    .with_route_strategy(rws);
+                    .create_filtered(&active_names);
 
                 // Validate that all middleware in the filtered pipe have their dependencies satisfied
                 self.validate_filtered_pipe_dependencies(&route_with_strategy.route, &active_names);

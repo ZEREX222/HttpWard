@@ -4,6 +4,7 @@ use crate::core::server_models::SiteManager;
 use crate::core::server_models::server_instance::ServerInstance;
 use rama::http::headers::ContentType;
 use rama::http::HeaderMap;
+use serde::de::DeserializeOwned;
 use crate::core::context::ExtensionsMap;
 
 
@@ -71,5 +72,26 @@ impl HttpWardContext {
     /// Get site name if available
     pub fn site_name(&self) -> Option<&str> {
         self.current_site.as_ref().map(|sm| sm.site_name())
+    }
+
+    /// Get typed middleware config from cached matched route in this request context.
+    pub fn middleware_config_typed_from_matched_route<T>(
+        &self,
+        middleware_name: &str,
+    ) -> anyhow::Result<Option<Arc<T>>>
+    where
+        T: DeserializeOwned + Send + Sync + 'static,
+    {
+        let matched = match &self.matched_route {
+            Some(matched) => matched,
+            None => return Ok(None),
+        };
+
+        let route_with_strategy = crate::core::server_models::site_manager::RouteWithStrategy::new(
+            matched.route.clone(),
+            matched.active_strategy.clone(),
+        );
+
+        route_with_strategy.middleware_config_typed::<T>(middleware_name)
     }
 }

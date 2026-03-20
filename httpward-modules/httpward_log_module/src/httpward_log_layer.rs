@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use httpward_core::core::HttpWardContext;
-use httpward_core::core::server_models::site_manager::RouteWithStrategy;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use httpward_core::httpward_middleware::next::Next;
 use httpward_core::httpward_middleware::types::BoxError;
@@ -91,11 +90,11 @@ impl Default for HttpWardLogConfig {
 
 /// Simple logging middleware for HttpWard with custom module logging.
 #[derive(Clone, Debug, Default)]
-pub struct HttpWardLogLayer {}
+pub struct HttpWardLogLayer;
 
 impl HttpWardLogLayer {
     pub fn new() -> Self {
-        Self {}
+        Self
     }
 }
 
@@ -105,26 +104,34 @@ impl HttpWardMiddleware for HttpWardLogLayer {
         &self,
         ctx: Context<()>,
         req: Request<Body>,
-        route_with_strategy: std::sync::Arc<RouteWithStrategy>,
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError> {
         module_log_debug!("HttpWardLogLayer.handle called");
 
-        // Pull typed config directly from RouteWithStrategy (pre-resolved route + strategy).
-        // This avoids extra route lookups and uses per-route typed cache in core.
-        let config = match route_with_strategy.middleware_config_typed::<HttpWardLogConfig>(env!("CARGO_PKG_NAME")) {
-            Ok(Some(config)) => {
-                module_log_debug!("HttpWardLogLayer config loaded from RouteWithStrategy cache: {:?}", config);
-                config
+        let httpward_ctx = ctx.get::<HttpWardContext>();
+        let matched_for_logging = httpward_ctx.and_then(|c| c.matched_route.clone());
+        let request_path = req.uri().path();
+
+        let config = if let Some(httpward_ctx) = httpward_ctx {
+            match httpward_ctx
+                .middleware_config_typed_from_matched_route::<HttpWardLogConfig>(env!("CARGO_PKG_NAME"))
+            {
+                Ok(Some(config)) => {
+                    module_log_debug!("HttpWardLogLayer config loaded from HttpWardContext.matched_route: {:?}", config);
+                    config
+                }
+                Ok(None) => {
+                    module_log_debug!("HttpWardLogLayer config not found in HttpWardContext.matched_route, using defaults");
+                    std::sync::Arc::new(HttpWardLogConfig::default())
+                }
+                Err(e) => {
+                    module_log_error!("Failed to parse HttpWardLogLayer configuration from HttpWardContext.matched_route: {}, using defaults", e);
+                    std::sync::Arc::new(HttpWardLogConfig::default())
+                }
             }
-            Ok(None) => {
-                module_log_debug!("HttpWardLogLayer config not found in RouteWithStrategy, using defaults");
-                std::sync::Arc::new(HttpWardLogConfig::default())
-            }
-            Err(e) => {
-                module_log_error!("Failed to parse HttpWardLogLayer configuration from RouteWithStrategy: {}, using defaults", e);
-                std::sync::Arc::new(HttpWardLogConfig::default())
-            }
+        } else {
+            module_log_warn!("HttpWardContext not found in request context");
+            std::sync::Arc::new(HttpWardLogConfig::default())
         };
 
         // Log basic request information if enabled
@@ -140,7 +147,7 @@ impl HttpWardMiddleware for HttpWardLogLayer {
         }
 
         // Get HttpWardContext for detailed logging
-        if let Some(httpward_ctx) = ctx.get::<HttpWardContext>() {
+        if let Some(httpward_ctx) = httpward_ctx {
 
             // Log client IP address if enabled
             if config.log_client_ip {
@@ -204,49 +211,41 @@ impl HttpWardMiddleware for HttpWardLogLayer {
                 }
             }
 
-            // Log URL parameters (requires a get_route lookup for params / matcher_type)
-            if config.log_route_info && config.log_url_params {
-                let path = req.uri().path();
-                match httpward_ctx.get_route(path) {
-                    Ok(Some(matched)) if !matched.params.is_empty() => {
-                        module_log_info!(
-                            "URL parameters - Count: {}, Parameters: {:?}, Matcher type: {:?}",
-                            matched.params.len(),
-                            matched.params,
-                            matched.matcher_type
-                        );
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        module_log_error!("Error resolving URL parameters for path {}: {}", path, e);
-                    }
-                }
-            }
-        } else {
-            module_log_warn!("HttpWardContext not found in request context");
         }
 
-        // Log route / strategy info directly from route_with_strategy —
-        // this is the authoritative value the pipe was built for (zero extra lookup).
+        // Log route / strategy info from cached matched route in HttpWardContext.
         if config.log_route_info {
-            module_log_info!(
-                "Route matched - Path: {}, Route: {:?}",
-                req.uri().path(),
-                route_with_strategy.route
-            );
-
-            if config.log_strategy_info {
+            if let Some(matched_route) = &matched_for_logging {
                 module_log_info!(
-                    "Active strategy - Name: {}, Middleware count: {}",
-                    route_with_strategy.active_strategy.name,
-                    route_with_strategy.active_strategy.middleware.len()
+                    "Route matched - Path: {}, Route: {:?}",
+                    request_path,
+                    matched_route.route
                 );
-            }
 
-            if config.log_middleware_details {
-                for (i, mw) in route_with_strategy.active_strategy.middleware.iter().enumerate() {
-                    module_log_info!("Middleware[{}] - Type: {:?}", i, mw);
+                if config.log_url_params && !matched_route.params.is_empty() {
+                    module_log_info!(
+                        "URL parameters - Count: {}, Parameters: {:?}, Matcher type: {:?}",
+                        matched_route.params.len(),
+                        matched_route.params,
+                        matched_route.matcher_type
+                    );
                 }
+
+                if config.log_strategy_info {
+                    module_log_info!(
+                        "Active strategy - Name: {}, Middleware count: {}",
+                        matched_route.active_strategy.name,
+                        matched_route.active_strategy.middleware.len()
+                    );
+                }
+
+                if config.log_middleware_details {
+                    for (i, mw) in matched_route.active_strategy.middleware.iter().enumerate() {
+                        module_log_info!("Middleware[{}] - Type: {:?}", i, mw);
+                    }
+                }
+            } else {
+                module_log_debug!("Route info requested but HttpWardContext.matched_route is not set");
             }
         }
 
