@@ -77,6 +77,9 @@ impl DynamicModuleLoaderLayer {
 
     /// Build precomputed filtered pipes for every route across all site managers.
     /// Key = `Arc::as_ptr(&route) as usize` — stable pointer, zero-cost lookup at request time.
+    ///
+    /// Validates that each filtered pipe has all required dependencies satisfied.
+    /// Panics if a middleware's required dependency is not included in the route's active strategy.
     fn build_route_pipes(&self, server_instance: &Arc<ServerInstance>) -> HashMap<usize, HttpWardMiddlewarePipe> {
         let mut route_pipes = HashMap::new();
 
@@ -97,23 +100,70 @@ impl DynamicModuleLoaderLayer {
                 // Create a filtered pipe — cheap (Arc<dyn Middleware> clones only)
                 let filtered_pipe = self.middleware_pipe.create_filtered(&active_names);
 
-                // Stable pointer to Arc<Route> as the lookup key
-                let key = Arc::as_ptr(&route_with_strategy.route) as usize;
+                // Validate that all middleware in the filtered pipe have their dependencies satisfied
+                self.validate_filtered_pipe_dependencies(&route_with_strategy.route, &active_names);
 
+                let route_match = route_with_strategy.route.get_match();
                 tracing::debug!(
                     target: "dynamic_module_loader",
-                    "Route {:?}: precomputed pipe with {}/{} middleware (active: {:?})",
-                    route_with_strategy.route.get_match(),
+                    "✓ Route '{:?}': dependency validation passed — precomputed pipe with {}/{} middleware (active: {:?})",
+                    route_match,
                     filtered_pipe.len(),
                     self.middleware_pipe.len(),
                     active_names,
                 );
 
+                // Stable pointer to Arc<Route> as the lookup key
+                let key = Arc::as_ptr(&route_with_strategy.route) as usize;
                 route_pipes.insert(key, filtered_pipe);
             }
         }
 
         route_pipes
+    }
+
+    /// Validate that all middleware enabled for a route have their dependencies also enabled.
+    /// Panics with a detailed error message if any required dependency is missing.
+    fn validate_filtered_pipe_dependencies(
+        &self,
+        route: &std::sync::Arc<httpward_core::config::Route>,
+        active_names: &HashSet<&str>,
+    ) {
+        let mut validation_errors: Vec<String> = Vec::new();
+
+        for mw_ptr in self.middleware_pipe.iter() {
+            // Check if this middleware is in the filtered pipe
+            if let Some(mw_name) = mw_ptr.name() {
+                if !active_names.contains(mw_name) {
+                    continue; // Middleware not in this route's active strategy, skip
+                }
+
+                // This middleware IS in the filtered pipe, check if its dependencies are also there
+                for &dependency_name in &mw_ptr.dependencies() {
+                    if !active_names.contains(dependency_name) {
+                        validation_errors.push(format!(
+                            "Middleware '{}' requires dependency '{}' which is NOT enabled in route's active strategy",
+                            mw_name,
+                            dependency_name
+                        ));
+                    }
+                }
+            }
+        }
+
+        if !validation_errors.is_empty() {
+            let route_match = route.get_match();
+            let error_details = validation_errors.join("\n  - ");
+            let error_message = format!(
+                "Middleware dependency validation failed for route '{:?}':\n  - {}",
+                route_match, error_details
+            );
+            tracing::error!(
+                target: "dynamic_module_loader",
+                "✗ CRITICAL: {}", error_message
+            );
+            panic!("{}", error_message);
+        }
     }
 
     /// Collect unique middleware names from all strategies across all site managers

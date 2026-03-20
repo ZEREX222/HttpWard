@@ -88,6 +88,12 @@ impl HttpWardMiddlewarePipe {
         self.inner.iter().find(|m| m.name().map_or(false, |n| n == name))
     }
 
+    /// Get an iterator over all middleware in the pipe.
+    /// Returns a slice of all `BoxedMiddleware` items.
+    pub fn iter(&self) -> std::slice::Iter<'_, BoxedMiddleware> {
+        self.inner.iter()
+    }
+
     /// Create a new pipe containing **only** the middleware whose names appear in `active_names`.
     /// Middleware without a name (`name() == None`) are always included.
     ///
