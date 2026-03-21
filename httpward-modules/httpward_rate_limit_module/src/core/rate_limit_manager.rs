@@ -136,15 +136,17 @@ impl RateLimitManager {
         }
 
         if let Some(scope) = matched_route_scope
-            && !internal.matched_route.is_empty() && site.initialized_route_scopes.insert(scope) {
-                for rule in &internal.matched_route {
-                    site.limiter.add_rule(
-                        rule.key.clone(),
-                        RateLimitScope::Route(scope),
-                        rule.to_runtime_rule(),
-                    );
-                }
+            && !internal.matched_route.is_empty()
+            && site.initialized_route_scopes.insert(scope)
+        {
+            for rule in &internal.matched_route {
+                site.limiter.add_rule(
+                    rule.key.clone(),
+                    RateLimitScope::Route(scope),
+                    rule.to_runtime_rule(),
+                );
             }
+        }
 
         Ok(())
     }
@@ -177,15 +179,17 @@ impl RateLimitManager {
         }
 
         if let Some(scope) = matched_route_scope
-            && !internal.matched_route.is_empty() && site.initialized_route_scopes.insert(scope) {
-                for rule in &internal.matched_route {
-                    site.limiter.add_rule(
-                        rule.key.clone(),
-                        RateLimitScope::Route(scope),
-                        rule.to_runtime_rule(),
-                    );
-                }
+            && !internal.matched_route.is_empty()
+            && site.initialized_route_scopes.insert(scope)
+        {
+            for rule in &internal.matched_route {
+                site.limiter.add_rule(
+                    rule.key.clone(),
+                    RateLimitScope::Route(scope),
+                    rule.to_runtime_rule(),
+                );
             }
+        }
 
         Ok(())
     }

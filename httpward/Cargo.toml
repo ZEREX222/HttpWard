@@ -35,12 +35,16 @@ httpward_log_module = { workspace = true, optional = true }
 httpward_rate_limit_module = { workspace = true, optional = true }
 
 [dev-dependencies]
+cargo-husky = "1.5"
+
+[package.metadata.cargo-husky]
+pre-commit = [
+    "cargo fmt --all -- --check",
+    "cargo clippy --all-targets --all-features -- -D warnings"
+]
 
 [features]
 default = []
 static_modules = ["httpward_log_module", "httpward_rate_limit_module"]
 dynamic_modules = []
-
-[profile.dev]
-debug = true
 

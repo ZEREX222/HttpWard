@@ -26,7 +26,6 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
                 port: listener.port,
             };
 
-
             let sites_vec = servers_map.entry(key).or_default();
             sites_vec.push(site.clone());
         }
@@ -109,21 +108,22 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
                         for listener in get_effective_listeners(&site_config, &config.global) {
                             if listener.host == key.host && listener.port == key.port {
                                 if listener.tls.is_some()
-                                    && let Some(paths) = resolve_site_tls(&site_config, &listener) {
-                                        let domains = site_config.get_all_domains();
+                                    && let Some(paths) = resolve_site_tls(&site_config, &listener)
+                                {
+                                    let domains = site_config.get_all_domains();
 
-                                        // Use domains from site config, or fallback to localhost for global sites
-                                        let tls_domains = if domains.is_empty() {
-                                            vec!["localhost".to_string(), "127.0.0.1".to_string()]
-                                        } else {
-                                            domains
-                                        };
+                                    // Use domains from site config, or fallback to localhost for global sites
+                                    let tls_domains = if domains.is_empty() {
+                                        vec!["localhost".to_string(), "127.0.0.1".to_string()]
+                                    } else {
+                                        domains
+                                    };
 
-                                        site_manager.add_tls_mapping(TlsMapping {
-                                            domains: tls_domains,
-                                            paths,
-                                        });
-                                    }
+                                    site_manager.add_tls_mapping(TlsMapping {
+                                        domains: tls_domains,
+                                        paths,
+                                    });
+                                }
                                 break; // Found the matching listener, no need to check others
                             }
                         }

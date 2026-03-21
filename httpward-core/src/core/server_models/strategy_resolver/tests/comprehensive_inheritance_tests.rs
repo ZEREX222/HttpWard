@@ -291,11 +291,10 @@ mod comprehensive_inheritance_tests {
 
         // Logging should be completely removed
         assert!(
-            complex_strategy
+            !complex_strategy
                 .middleware
                 .iter()
-                .find(|m: &&MiddlewareConfig| m.name() == "logging")
-                .is_none()
+                .any(|m: &MiddlewareConfig| m.name() == "logging")
         );
 
         // Auth from site should be present
@@ -303,8 +302,7 @@ mod comprehensive_inheritance_tests {
             complex_strategy
                 .middleware
                 .iter()
-                .find(|m: &&MiddlewareConfig| m.name() == "auth")
-                .is_some()
+                .any(|m: &MiddlewareConfig| m.name() == "auth")
         );
 
         // Cors from global should be present
@@ -312,8 +310,7 @@ mod comprehensive_inheritance_tests {
             complex_strategy
                 .middleware
                 .iter()
-                .find(|m: &&MiddlewareConfig| m.name() == "cors")
-                .is_some()
+                .any(|m: &MiddlewareConfig| m.name() == "cors")
         );
 
         // Security from inline should be present

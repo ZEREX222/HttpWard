@@ -607,15 +607,11 @@ impl<'de> Deserialize<'de> for MiddlewareConfig {
             serde_yaml::Value::String(s) if s.eq_ignore_ascii_case("off") => {
                 Ok(MiddlewareConfig::Off { name })
             }
-            serde_yaml::Value::Bool(b) if !b => {
-                Ok(MiddlewareConfig::Off { name })
-            }
+            serde_yaml::Value::Bool(b) if !b => Ok(MiddlewareConfig::Off { name }),
             serde_yaml::Value::String(s) if s.eq_ignore_ascii_case("on") => {
                 Ok(MiddlewareConfig::On { name })
             }
-            serde_yaml::Value::Bool(b) if *b => {
-                Ok(MiddlewareConfig::On { name })
-            }
+            serde_yaml::Value::Bool(b) if *b => Ok(MiddlewareConfig::On { name }),
             _ => {
                 // Normal middleware configuration
                 Ok(MiddlewareConfig::Named {

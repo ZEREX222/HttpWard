@@ -287,9 +287,7 @@ where
             }
             Err(e) => {
                 error!("Route matching error: {}", e);
-                Ok(
-                    self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Routing error")
-                )
+                Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Routing error"))
             }
         }
     }

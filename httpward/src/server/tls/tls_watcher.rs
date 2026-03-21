@@ -215,10 +215,8 @@ impl TlsFileWatcher {
                             {
                                 match Self::reload_single_mapping_static(mapping).await {
                                     Ok(certified_key) => {
-                                        resolver.update_domain_certificate(
-                                            Some(domain),
-                                            certified_key,
-                                        );
+                                        resolver
+                                            .update_domain_certificate(Some(domain), certified_key);
                                         info!(
                                             "Successfully reloaded TLS certificate for domain: {}",
                                             domain

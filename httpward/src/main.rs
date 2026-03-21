@@ -60,9 +60,10 @@ fn find_config_file(base_path: &str) -> String {
     // If the path already has an extension, try it directly
     if let Some(extension) = path.extension()
         && (extension == "yaml" || extension == "yml")
-            && path.exists() {
-                return base_path.to_string();
-            }
+        && path.exists()
+    {
+        return base_path.to_string();
+    }
 
     // Try .yaml first, then .yml
     let yaml_path = format!("{}.yaml", base_path);

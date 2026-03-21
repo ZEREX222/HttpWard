@@ -58,9 +58,10 @@ impl StrategyResolver {
             }
             // Otherwise, if a global default exists — inherit that.
             else if let Some(default_name) = &global_default_name
-                && let Some(global_default_vec) = global_map.get(default_name) {
-                    supplement_middleware(&mut merged, global_default_vec.as_ref().as_slice())?;
-                }
+                && let Some(global_default_vec) = global_map.get(default_name)
+            {
+                supplement_middleware(&mut merged, global_default_vec.as_ref().as_slice())?;
+            }
 
             merged_site.insert(name.clone(), Arc::new(merged));
         }
@@ -112,9 +113,10 @@ impl StrategyResolver {
 
                 // First, supplement with site strategy if it exists
                 if let Some(StrategyRef::Named(site_strategy_name)) = &site.strategy
-                    && let Some(site_strategy_vec) = merged_site.get(site_strategy_name) {
-                        supplement_middleware(&mut merged, site_strategy_vec.as_ref().as_slice())?;
-                    }
+                    && let Some(site_strategy_vec) = merged_site.get(site_strategy_name)
+                {
+                    supplement_middleware(&mut merged, site_strategy_vec.as_ref().as_slice())?;
+                }
 
                 // Then, supplement with global default strategy if it exists and is different
                 if let Some(StrategyRef::Named(default_strategy_name)) = &global_default {
@@ -125,12 +127,10 @@ impl StrategyResolver {
                     });
 
                     if site_strategy_name.as_ref() != Some(default_strategy_name)
-                        && let Some(global_default_vec) = merged_site.get(default_strategy_name) {
-                            supplement_middleware(
-                                &mut merged,
-                                global_default_vec.as_ref().as_slice(),
-                            )?;
-                        }
+                        && let Some(global_default_vec) = merged_site.get(default_strategy_name)
+                    {
+                        supplement_middleware(&mut merged, global_default_vec.as_ref().as_slice())?;
+                    }
                 }
 
                 // Filter out disabled middleware after inheritance
@@ -151,19 +151,20 @@ impl StrategyResolver {
             Some(StrategyRef::Named(name)) => {
                 // If route has its own strategies map, it may override the named strategy locally.
                 if let Some(route_strats) = route.get_strategies()
-                    && let Some(route_vec) = route_strats.get(&name) {
-                        let mut merged = route_vec.clone();
+                    && let Some(route_vec) = route_strats.get(&name)
+                {
+                    let mut merged = route_vec.clone();
 
-                        // If there's a parent (site/global) with same name, supplement from parent without cloning parent vec.
-                        if let Some(parent) = merged_site.get(&name) {
-                            supplement_middleware(&mut merged, parent.as_ref().as_slice())?;
-                        }
-
-                        return Ok(Some(Arc::new(Strategy {
-                            name,
-                            middleware: Arc::new(merged),
-                        })));
+                    // If there's a parent (site/global) with same name, supplement from parent without cloning parent vec.
+                    if let Some(parent) = merged_site.get(&name) {
+                        supplement_middleware(&mut merged, parent.as_ref().as_slice())?;
                     }
+
+                    return Ok(Some(Arc::new(Strategy {
+                        name,
+                        middleware: Arc::new(merged),
+                    })));
+                }
 
                 // Otherwise, use merged_site version if exists (reuse parent's Arc<Vec<...>> directly).
                 merged_site.get(&name).map(|v| {

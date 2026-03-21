@@ -95,9 +95,10 @@ impl RouteWithStrategy {
             .map_err(|_| anyhow::anyhow!("typed config cache lock poisoned"))?
             .get(&key)
             .cloned()
-            && let Some(typed) = cached.downcast_ref::<Arc<T>>() {
-                return Ok(Some(typed.clone()));
-            }
+            && let Some(typed) = cached.downcast_ref::<Arc<T>>()
+        {
+            return Ok(Some(typed.clone()));
+        }
 
         let parsed = Arc::new(parse_middleware_config_typed::<T>(
             &self.active_strategy.middleware[idx],

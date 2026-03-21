@@ -76,8 +76,12 @@ impl DynamicModuleLoaderLayer {
                     loader.middleware_pipe = loader
                         .middleware_pipe
                         .add_boxed_layer(middleware_instance)
-                        .unwrap_or_else(|_| panic!("Failed to add middleware '{}': dependency validation failed",
-                            middleware_name));
+                        .unwrap_or_else(|_| {
+                            panic!(
+                                "Failed to add middleware '{}': dependency validation failed",
+                                middleware_name
+                            )
+                        });
                     tracing::info!(target: "dynamic_module_loader", "Successfully loaded middleware: {}", middleware_name);
                 }
                 None => {
@@ -202,13 +206,14 @@ impl DynamicModuleLoaderLayer {
 
                 for &optional_dependency_name in &mw_ptr.optional_dependencies() {
                     if let Some(&dep_pos) = positions.get(optional_dependency_name)
-                        && dep_pos >= mw_pos {
-                            validation_errors.push(format!(
+                        && dep_pos >= mw_pos
+                    {
+                        validation_errors.push(format!(
                                 "Middleware '{}' has optional dependency '{}' enabled, but it must be BEFORE it in route's active strategy",
                                 mw_name,
                                 optional_dependency_name
                             ));
-                        }
+                    }
                 }
             }
         }
@@ -385,21 +390,22 @@ where
         req: &Request<Body>,
     ) -> Option<&'a HttpWardMiddlewarePipe> {
         if let Some(hctx) = ctx.get::<HttpWardContext>()
-            && let Some(site) = &hctx.current_site {
-                let path = req.uri().path();
-                if let Ok(matched) = site.get_route(path) {
-                    let key = Arc::as_ptr(&matched.route) as usize;
-                    if let Some(pipe) = self.route_pipes.get(&key) {
-                        tracing::debug!(
-                            target: "dynamic_module_loader",
-                            "Using precomputed pipe ({} middleware) for route {:?}",
-                            pipe.len(),
-                            matched.route.get_match(),
-                        );
-                        return Some(pipe);
-                    }
+            && let Some(site) = &hctx.current_site
+        {
+            let path = req.uri().path();
+            if let Ok(matched) = site.get_route(path) {
+                let key = Arc::as_ptr(&matched.route) as usize;
+                if let Some(pipe) = self.route_pipes.get(&key) {
+                    tracing::debug!(
+                        target: "dynamic_module_loader",
+                        "Using precomputed pipe ({} middleware) for route {:?}",
+                        pipe.len(),
+                        matched.route.get_match(),
+                    );
+                    return Some(pipe);
                 }
             }
+        }
         tracing::debug!(
             target: "dynamic_module_loader",
             "No route matched — skipping middleware pipe, forwarding directly to inner service",

@@ -1,9 +1,4 @@
-use rama::{
-    Context,
-    http::Request,
-    layer::Layer,
-    service::Service,
-};
+use rama::{Context, http::Request, layer::Layer, service::Service};
 use std::fmt::Debug;
 use std::sync::Arc;
 use tracing::trace;
@@ -20,9 +15,10 @@ use std::str::FromStr;
 fn extract_content_type_from_request(request: &Request<Body>) -> ContentType {
     // Try to extract headers from the request
     if let Some(headers) = request.headers().get("content-type")
-        && let Ok(content_type_str) = headers.to_str() {
-            return ContentType::from_str(content_type_str).unwrap_or_else(|_| ContentType::text());
-        }
+        && let Ok(content_type_str) = headers.to_str()
+    {
+        return ContentType::from_str(content_type_str).unwrap_or_else(|_| ContentType::text());
+    }
     ContentType::text()
 }
 
@@ -95,24 +91,26 @@ impl<S> RequestEnricherService<S> {
 
         // Try to get domain from Host header (HTTP) first
         if let Some(host_header) = request.headers().get("host")
-            && let Ok(host_str) = host_header.to_str() {
-                // Remove port if present (e.g., "example.com:8080" -> "example.com")
-                domain_to_match = Some(
-                    host_str
-                        .split(':')
-                        .next()
-                        .unwrap_or(host_str)
-                        .to_lowercase(),
-                );
-            }
+            && let Ok(host_str) = host_header.to_str()
+        {
+            // Remove port if present (e.g., "example.com:8080" -> "example.com")
+            domain_to_match = Some(
+                host_str
+                    .split(':')
+                    .next()
+                    .unwrap_or(host_str)
+                    .to_lowercase(),
+            );
+        }
 
         // If no Host header, try SNI from TLS context (HTTPS)
         if domain_to_match.is_none()
             && let Some(st) = ctx.get::<rama::net::tls::SecureTransport>()
-                && let Some(client_hello) = st.client_hello()
-                    && let Some(sni) = client_hello.ext_server_name() {
-                        domain_to_match = Some(sni.to_string().to_lowercase());
-                    }
+            && let Some(client_hello) = st.client_hello()
+            && let Some(sni) = client_hello.ext_server_name()
+        {
+            domain_to_match = Some(sni.to_string().to_lowercase());
+        }
 
         // If we have a domain to match, find the corresponding site
         if let Some(domain) = domain_to_match {

@@ -77,9 +77,7 @@ impl HttpWardMiddlewarePipe {
     /// Find layer by name (middleware may return a name via `name()`).
     /// Returns a reference to the boxed middleware if found.
     pub fn get_layer_by_name(&self, name: &str) -> Option<&BoxedMiddleware> {
-        self.inner
-            .iter()
-            .find(|m| m.name() == Some(name))
+        self.inner.iter().find(|m| m.name() == Some(name))
     }
 
     /// Get an iterator over all middleware in the pipe.

@@ -46,11 +46,12 @@ fn collect_defs(schema: &Value) -> HashMap<String, Value> {
     let mut map = HashMap::new();
 
     if let Some(defs) = schema.get("$defs").or_else(|| schema.get("definitions"))
-        && let Some(obj) = defs.as_object() {
-            for (name, value) in obj {
-                map.insert(name.clone(), value.clone());
-            }
+        && let Some(obj) = defs.as_object()
+    {
+        for (name, value) in obj {
+            map.insert(name.clone(), value.clone());
         }
+    }
 
     map
 }

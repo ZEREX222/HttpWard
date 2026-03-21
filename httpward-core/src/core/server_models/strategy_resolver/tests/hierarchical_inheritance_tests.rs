@@ -260,11 +260,10 @@ mod hierarchical_inheritance_tests {
 
         // Logging should be completely removed (off in inline)
         assert!(
-            inline_strategy
+            !inline_strategy
                 .middleware
                 .iter()
-                .find(|m: &&MiddlewareConfig| m.name() == "logging")
-                .is_none()
+                .any(|m: &MiddlewareConfig| m.name() == "logging")
         );
 
         // Check cors: inherited from global
@@ -367,18 +366,16 @@ mod hierarchical_inheritance_tests {
 
         // Should NOT have site or global middleware
         assert!(
-            local_strategy
+            !local_strategy
                 .middleware
                 .iter()
-                .find(|m: &&MiddlewareConfig| m.name() == "logging")
-                .is_none()
+                .any(|m: &MiddlewareConfig| m.name() == "logging")
         );
         assert!(
-            local_strategy
+            !local_strategy
                 .middleware
                 .iter()
-                .find(|m: &&MiddlewareConfig| m.name() == "security")
-                .is_none()
+                .any(|m: &MiddlewareConfig| m.name() == "security")
         );
 
         println!("✅ Hierarchical route local strategy isolation works correctly");
@@ -456,18 +453,16 @@ mod hierarchical_inheritance_tests {
 
         // Should NOT have rate_limit, logging, etc. (route local strategies are standalone)
         assert!(
-            deep_strategy
+            !deep_strategy
                 .middleware
                 .iter()
-                .find(|m: &&MiddlewareConfig| m.name() == "rate_limit")
-                .is_none()
+                .any(|m: &MiddlewareConfig| m.name() == "rate_limit")
         );
         assert!(
-            deep_strategy
+            !deep_strategy
                 .middleware
                 .iter()
-                .find(|m: &&MiddlewareConfig| m.name() == "logging")
-                .is_none()
+                .any(|m: &MiddlewareConfig| m.name() == "logging")
         );
 
         println!("✅ Hierarchical deep inheritance chain works correctly (route local isolation)");
@@ -527,11 +522,10 @@ mod hierarchical_inheritance_tests {
 
         // Check auth: should be removed (off in inline)
         assert!(
-            off_strategy
+            !off_strategy
                 .middleware
                 .iter()
-                .find(|m: &&MiddlewareConfig| m.name() == "auth")
-                .is_none()
+                .any(|m: &MiddlewareConfig| m.name() == "auth")
         );
 
         // Check rate_limit: from site (which overrode global)

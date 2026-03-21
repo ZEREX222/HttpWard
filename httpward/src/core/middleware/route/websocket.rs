@@ -117,14 +117,15 @@ impl WebSocketHandler {
         use sha1::Digest;
 
         if let Some(key) = headers.get("Sec-WebSocket-Key")
-            && let Ok(key_str) = key.to_str() {
-                let key_bytes = key_str.as_bytes();
-                let mut hasher = sha1::Sha1::new();
-                hasher.update(key_bytes);
-                hasher.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-                let result = hasher.finalize();
-                return Ok(STANDARD.encode(result));
-            }
+            && let Ok(key_str) = key.to_str()
+        {
+            let key_bytes = key_str.as_bytes();
+            let mut hasher = sha1::Sha1::new();
+            hasher.update(key_bytes);
+            hasher.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+            let result = hasher.finalize();
+            return Ok(STANDARD.encode(result));
+        }
 
         Err(WebSocketError::InvalidRequest(
             "missing or invalid Sec-WebSocket-Key".to_string(),
@@ -246,11 +247,12 @@ impl WebSocketHandler {
     fn is_websocket_headers(headers: &HeaderMap) -> bool {
         if let Some(upgrade) = headers.get(header::UPGRADE)
             && let Ok(upgrade_str) = upgrade.to_str()
-                && upgrade_str.eq_ignore_ascii_case("websocket")
-                    && let Some(connection) = headers.get(header::CONNECTION)
-                        && let Ok(conn_str) = connection.to_str() {
-                            return conn_str.to_ascii_lowercase().contains("upgrade");
-                        }
+            && upgrade_str.eq_ignore_ascii_case("websocket")
+            && let Some(connection) = headers.get(header::CONNECTION)
+            && let Ok(conn_str) = connection.to_str()
+        {
+            return conn_str.to_ascii_lowercase().contains("upgrade");
+        }
         false
     }
 

@@ -42,7 +42,6 @@ pub struct HttpWardRateLimitConfig {
     pub response: Option<RateLimitResponseConfig>,
 }
 
-
 impl HttpWardRateLimitConfig {
     pub fn new() -> Self {
         Self::default()
@@ -128,7 +127,6 @@ pub struct RateLimitStoreConfig {
     pub cleanup_interval_sec: Option<u64>,
 }
 
-
 impl RateLimitStoreConfig {
     fn to_internal(&self) -> InternalRateLimitStoreConfig {
         InternalRateLimitStoreConfig {
@@ -152,7 +150,6 @@ pub enum RateLimitStrategy {
     /// Fixed window - complete refill each period
     Fixed,
 }
-
 
 /// Rate limit rule in YAML format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,7 +215,8 @@ impl RateLimitResponseConfig {
         InternalRateLimitResponseConfig {
             status_code: self.status_code.unwrap_or(429),
             body: self
-                .body.clone()
+                .body
+                .clone()
                 .unwrap_or_else(|| "Rate limit exceeded".to_string()),
         }
     }

@@ -264,13 +264,8 @@ pub mod module_setup {
     use super::*;
 
     /// Type for module logger setter function
-    pub type SetLoggerFn = extern "C" fn(
-        HostLogErrorFn,
-        HostLogWarnFn,
-        HostLogInfoFn,
-        HostLogDebugFn,
-        HostLogTraceFn,
-    );
+    pub type SetLoggerFn =
+        extern "C" fn(HostLogErrorFn, HostLogWarnFn, HostLogInfoFn, HostLogDebugFn, HostLogTraceFn);
 
     /// Setup module logger with host callbacks
     /// This should be called from module_set_logger function
