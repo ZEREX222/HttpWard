@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use httpward_rate_limit_module::{
-    HttpWardRateLimitConfig, RateLimitStrategy, RateLimitRuleConfig,
-    RateLimiter, RateLimitKeyKind, RateLimitScope, InternalRateLimitRule,
+    HttpWardRateLimitConfig, InternalRateLimitRule, RateLimitKeyKind, RateLimitRuleConfig,
+    RateLimitScope, RateLimitStrategy, RateLimiter,
 };
 
 #[cfg(test)]
@@ -96,7 +96,7 @@ mod integration_tests {
         // Wait for complete refill (simulate with shorter time for test)
         // In real scenario, this would be 1 hour
         std::thread::sleep(Duration::from_millis(100));
-        
+
         // Still should fail (not enough time passed)
         assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1"));
     }
@@ -104,19 +104,40 @@ mod integration_tests {
     #[test]
     fn test_config_to_runtime_rule_conversion() {
         let test_cases = vec![
-            (RateLimitStrategy::Sliding, 50, Duration::from_secs(10), Duration::from_millis(200), 1),
-            (RateLimitStrategy::Burst, 50, Duration::from_secs(10), Duration::from_secs(10), 1),
-            (RateLimitStrategy::Fixed, 50, Duration::from_secs(10), Duration::from_secs(10), 50),
+            (
+                RateLimitStrategy::Sliding,
+                50,
+                Duration::from_secs(10),
+                Duration::from_millis(200),
+                1,
+            ),
+            (
+                RateLimitStrategy::Burst,
+                50,
+                Duration::from_secs(10),
+                Duration::from_secs(10),
+                1,
+            ),
+            (
+                RateLimitStrategy::Fixed,
+                50,
+                Duration::from_secs(10),
+                Duration::from_secs(10),
+                50,
+            ),
         ];
 
-        for (strategy, capacity, window, expected_refill_every, expected_refill_amount) in test_cases {
-            let rule = httpward_rate_limit_module::httpward_rate_limit_config::InternalRateLimitRule {
-                key: RateLimitKeyKind::Ip,
-                capacity,
-                refill_every: window,
-                refill_amount: 1,
-                strategy,
-            };
+        for (strategy, capacity, window, expected_refill_every, expected_refill_amount) in
+            test_cases
+        {
+            let rule =
+                httpward_rate_limit_module::httpward_rate_limit_config::InternalRateLimitRule {
+                    key: RateLimitKeyKind::Ip,
+                    capacity,
+                    refill_every: window,
+                    refill_amount: 1,
+                    strategy,
+                };
 
             let runtime_rule = rule.to_runtime_rule();
             assert_eq!(runtime_rule.capacity, capacity);
@@ -171,12 +192,12 @@ mod integration_tests {
         };
 
         let internal = config.to_internal();
-        
+
         // Check global sliding rule
         assert_eq!(internal.global.len(), 1);
         assert_eq!(internal.global[0].strategy, RateLimitStrategy::Sliding);
         assert_eq!(internal.global[0].capacity, 50);
-        
+
         // Check site burst rule
         assert_eq!(internal.matched_route.len(), 1);
         assert_eq!(internal.matched_route[0].strategy, RateLimitStrategy::Burst);
