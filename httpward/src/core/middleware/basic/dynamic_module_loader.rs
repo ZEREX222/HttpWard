@@ -85,8 +85,9 @@ impl DynamicModuleLoaderLayer {
 
         for site_manager in &server_instance.site_managers {
             for route_with_strategy in site_manager.routes_with_strategy() {
-                // Collect names of ONLY the enabled middleware for this specific route
-                let active_names: HashSet<&str> = route_with_strategy
+                // Collect names of enabled middleware for this specific route
+                // Preserve order from strategy configuration
+                let ordered_names: Vec<&str> = route_with_strategy
                     .active_strategy
                     .middleware
                     .iter()
@@ -97,11 +98,12 @@ impl DynamicModuleLoaderLayer {
                     })
                     .collect();
 
-                // Create a filtered pipe — cheap (Arc<dyn Middleware> clones only).
+                // Create a filtered pipe with proper order from strategy
                 let filtered_pipe = self.middleware_pipe
-                    .create_filtered(&active_names);
+                    .create_filtered_ordered(&ordered_names);
 
                 // Validate that all middleware in the filtered pipe have their dependencies satisfied
+                let active_names: std::collections::HashSet<&str> = ordered_names.iter().copied().collect();
                 self.validate_filtered_pipe_dependencies(&route_with_strategy.route, &active_names);
 
                 let route_match = route_with_strategy.route.get_match();
@@ -128,7 +130,7 @@ impl DynamicModuleLoaderLayer {
     fn validate_filtered_pipe_dependencies(
         &self,
         route: &std::sync::Arc<httpward_core::config::Route>,
-        active_names: &HashSet<&str>,
+        active_names: &std::collections::HashSet<&str>,
     ) {
         let mut validation_errors: Vec<String> = Vec::new();
 
@@ -168,8 +170,10 @@ impl DynamicModuleLoaderLayer {
     }
 
     /// Collect unique middleware names from all strategies across all site managers
+    /// Preserves the order from the configuration (not alphabetical)
     fn collect_unique_middleware_names(&self, server_instance: &Arc<ServerInstance>) -> Vec<String> {
-        let mut middleware_names = HashSet::new();
+        let mut middleware_names: Vec<String> = Vec::new();
+        let mut seen = HashSet::new();
 
         for site_manager in &server_instance.site_managers {
             for route_with_strategy in site_manager.routes_with_strategy() {
@@ -178,7 +182,11 @@ impl DynamicModuleLoaderLayer {
                     match middleware_config {
                         httpward_core::config::strategy::MiddlewareConfig::Named { name, .. }
                         | httpward_core::config::strategy::MiddlewareConfig::On { name } => {
-                            middleware_names.insert(name.clone());
+                            // Add only if not seen before - preserves order from config
+                            if !seen.contains(name) {
+                                middleware_names.push(name.clone());
+                                seen.insert(name.clone());
+                            }
                         }
                         httpward_core::config::strategy::MiddlewareConfig::Off { .. } => {
                             // Skip disabled middleware
@@ -188,9 +196,7 @@ impl DynamicModuleLoaderLayer {
             }
         }
 
-        let mut names: Vec<String> = middleware_names.into_iter().collect();
-        names.sort(); // Sort for consistent ordering
-        names
+        middleware_names
     }
 
     /// Create a new loader with custom middleware pipe (no per-route precomputation)

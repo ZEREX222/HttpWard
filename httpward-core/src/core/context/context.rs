@@ -5,7 +5,6 @@ use crate::core::server_models::server_instance::ServerInstance;
 use rama::http::headers::ContentType;
 use rama::http::HeaderMap;
 use serde::de::DeserializeOwned;
-use crate::core::context::ExtensionsMap;
 
 
 
@@ -16,13 +15,8 @@ pub struct HttpWardContext {
     pub server_instance: Arc<ServerInstance>,
     pub request_content_type: ContentType,
     pub response_content_type: ContentType,
-    pub header_fp: Option<String>,
-    pub ja4_fp: Option<String>,
     /// Request headers that can be modified by middleware during pipe processing
     pub request_headers: HeaderMap,
-    /// Extensions map for storing arbitrary data during request lifetime.
-    /// Allows middleware to share serialized objects without modifying context structure.
-    pub extensions: ExtensionsMap,
     /// Cached matched route to avoid duplicate route resolution per request
     /// Set by DynamicModuleLoaderLayer, reused by RouteLayer
     pub matched_route: Option<crate::core::server_models::MatchedRoute>,
@@ -37,10 +31,7 @@ impl HttpWardContext {
             response_content_type: ContentType::text(),
             current_site: None,
             server_instance,
-            header_fp: None,
-            ja4_fp: None,
             request_headers: HeaderMap::new(),
-            extensions: ExtensionsMap::new(),
             matched_route: None,
         }
     }

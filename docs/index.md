@@ -88,8 +88,6 @@ httpward --config httpward.yaml
 
 - **[Configuration Guide](configuration/configuration.md)** - Complete configuration reference
 - **[Configuration Examples](configuration/configuration-examples.md)** - Practical examples and use cases
-- **[Extensions Guide](guides/extensions-guide.md)** - Building and using extensions
-- **[Extensions Migration Guide](guides/extensions-migration-guide.md)** - Migrating between extension versions
 
 ## Community
 

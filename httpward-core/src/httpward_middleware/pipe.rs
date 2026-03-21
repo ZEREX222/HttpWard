@@ -95,19 +95,16 @@ impl HttpWardMiddlewarePipe {
         self.inner.iter()
     }
 
-    /// Create a new pipe containing **only** the middleware whose names appear in `active_names`.
-    /// Middleware without a name (`name() == None`) are always included.
+    /// Create a new pipe containing middleware in the order specified by `ordered_names`.
+    /// This method preserves the exact order from the strategy configuration.
     ///
     /// This is a cheap operation: each `BoxedMiddleware` is an `Arc`, so only Arc-pointers
     /// are cloned — the underlying middleware objects are not copied.
     ///
-    pub fn create_filtered(&self, active_names: &std::collections::HashSet<&str>) -> Self {
-        let filtered: Vec<BoxedMiddleware> = self.inner
+    pub fn create_filtered_ordered(&self, ordered_names: &[&str]) -> Self {
+        let filtered: Vec<BoxedMiddleware> = ordered_names
             .iter()
-            .filter(|mw| match mw.name() {
-                Some(name) => active_names.contains(name),
-                None => true, // unnamed middleware always runs
-            })
+            .filter_map(|name| self.get_layer_by_name(name))
             .cloned()
             .collect();
         Self {

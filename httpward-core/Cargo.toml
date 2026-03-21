@@ -20,7 +20,6 @@ name = "httpward_core"
 [dependencies]
 serde_json = { workspace = true }
 schemars= { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
@@ -31,7 +30,6 @@ async-trait = "0.1"
 matchit = "0.9"
 regex = "1.12"
 thiserror = "2.0"
-parking_lot = { workspace = true }
 
 
 

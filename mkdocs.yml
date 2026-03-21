@@ -69,6 +69,3 @@ nav:
   - Configuration:
       - Schema: configuration/configuration.md
       - Examples: configuration/configuration-examples.md
-  - Documentation:
-    - Extensions Guide: guides/extensions-guide.md
-    - Extensions Migration Guide: guides/extensions-migration-guide.md

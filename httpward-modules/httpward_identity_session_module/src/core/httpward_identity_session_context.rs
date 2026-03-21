@@ -13,6 +13,10 @@ pub struct HttpWardIdentitySessionContext {
     pub is_authenticated: bool,
     /// Session expiration
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Header fingerprint for client identification
+    pub header_fp: Option<String>,
+    /// JA4 fingerprint for TLS client identification
+    pub ja4_fp: Option<String>,
 }
 
 impl Default for HttpWardIdentitySessionContext {
@@ -22,6 +26,8 @@ impl Default for HttpWardIdentitySessionContext {
             session_data: HashMap::new(),
             is_authenticated: false,
             expires_at: None,
+            header_fp: None,
+            ja4_fp: None,
         }
     }
 }
@@ -51,6 +57,18 @@ impl HttpWardIdentitySessionContext {
         self
     }
 
+    /// Set header fingerprint
+    pub fn with_header_fp(mut self, header_fp: String) -> Self {
+        self.header_fp = Some(header_fp);
+        self
+    }
+
+    /// Set JA4 fingerprint
+    pub fn with_ja4_fp(mut self, ja4_fp: String) -> Self {
+        self.ja4_fp = Some(ja4_fp);
+        self
+    }
+
     /// Get session data value
     pub fn get_session_data(&self, key: &str) -> Option<&String> {
         self.session_data.get(key)
@@ -71,5 +89,7 @@ impl HttpWardIdentitySessionContext {
         self.session_data.clear();
         self.is_authenticated = false;
         self.expires_at = None;
+        self.header_fp = None;
+        self.ja4_fp = None;
     }
 }

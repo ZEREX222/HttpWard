@@ -6,15 +6,10 @@ use rama::{
 };
 use std::fmt::Debug;
 use std::sync::Arc;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, trace};
 use wildmatch::WildMatch;
-use std::collections::HashMap;
-
-
 
 use rama::http::Body;
-use rama::net::fingerprint::Ja4;
-use rama::net::tls::{ProtocolVersion, SecureTransport};
 use rama::http::headers::ContentType;
 use std::str::FromStr;
 use httpward_core::core::server_models::site_manager::SiteManager;
@@ -30,52 +25,6 @@ fn extract_content_type_from_request(request: &Request<Body>) -> ContentType {
         }
     }
     ContentType::text()
-}
-
-/// Extract header fingerprint from specific headers
-fn extract_header_fingerprint(headers: &HeaderMap) -> Option<String> {
-    use std::hash::{Hash, Hasher};
-    use std::collections::hash_map::DefaultHasher;
-    
-    let header_names = [
-        "user-agent",
-        "accept",
-        "accept-language", 
-        "accept-encoding",
-        "sec-ch-ua",
-        "sec-ch-ua-platform",
-        "sec-ch-ua-mobile"
-    ];
-    
-    let mut header_values = HashMap::new();
-    
-    for header_name in &header_names {
-        if let Some(header_value) = headers.get(*header_name) {
-            if let Ok(value_str) = header_value.to_str() {
-                header_values.insert(*header_name, value_str.to_lowercase());
-            }
-        }
-    }
-    
-    if header_values.is_empty() {
-        return None;
-    }
-    
-    // Create a deterministic string from header values
-    let mut sorted_headers: Vec<_> = header_values.iter().collect();
-    sorted_headers.sort_by_key(|(k, _)| *k);
-    
-    let combined_string = sorted_headers
-        .iter()
-        .map(|(k, v)| format!("{}:{}", k, v))
-        .collect::<Vec<_>>()
-        .join("|");
-    
-    // Create hash
-    let mut hasher = DefaultHasher::new();
-    combined_string.hash(&mut hasher);
-    
-    Some(format!("{:x}", hasher.finish()))
 }
 
 /// Layer that enriches request context with HttpWardContext containing client_addr, site and server_instance
@@ -190,39 +139,6 @@ where
             .or_else(|| ctx.get::<std::net::SocketAddr>().map(|addr| addr.ip()))
             .unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
 
-        let mut ja4_fp = None;
-        let mut header_fp = None;
-
-        // Try to get SecureTransport from context
-        if let Some(st) = ctx.get::<SecureTransport>() {
-
-            // ClientHello is available only if with_store_client_hello(true) was enabled
-            if let Some(client_hello) = st.client_hello() {
-
-                let pv = client_hello.protocol_version();
-
-                let effective_version = match pv {
-                    ProtocolVersion::Unknown(_) => ProtocolVersion::TLSv1_2,
-                    other => other,
-                };
-
-                // Try to compute JA4 fingerprint
-                match Ja4::compute_from_client_hello(client_hello, Some(effective_version)) {
-                    Ok(ja4) => {
-                        ja4_fp = Some(ja4.to_string());
-                        debug!("JA4 fingerprint: {}", ja4_fp.as_ref().unwrap());
-                    }
-                    Err(e) => {
-                        warn!("Failed to compute JA4 fingerprint: {}", e);
-                    }
-                }
-
-            }
-        }
-
-        // Extract header fingerprint from specific headers
-        header_fp = extract_header_fingerprint(request.headers());
-
         // Extract content type from request headers
         let request_content_type = extract_content_type_from_request(&request);
 
@@ -245,10 +161,7 @@ where
             response_content_type: ContentType::text(), // Will be set by ResponseEnricher
             current_site: site.clone(),
             server_instance: self.server_instance.clone(),
-            ja4_fp,
-            header_fp,
             request_headers: request.headers().clone(),
-            extensions: httpward_core::core::context::ExtensionsMap::new(),
             matched_route, // Set cached route
         };
 

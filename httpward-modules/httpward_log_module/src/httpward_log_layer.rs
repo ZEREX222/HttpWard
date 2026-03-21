@@ -56,10 +56,6 @@ pub struct HttpWardLogConfig {
     #[serde(default)]
     pub log_content_type: bool,
     
-    /// Log fingerprint information (header_fp, ja4_fp)
-    #[serde(default)]
-    pub log_fingerprints: bool,
-    
     /// Log response status code
     #[serde(default)]
     pub log_response_status: bool,
@@ -81,7 +77,6 @@ impl Default for HttpWardLogConfig {
             log_url_params: false,
             log_request_headers: false,
             log_content_type: false,
-            log_fingerprints: false,
             log_response_status: false,
             log_server_info: false,
         }
@@ -182,15 +177,6 @@ impl HttpWardMiddleware for HttpWardLogLayer {
                     "Content types - Request: {}, Response: {}",
                     httpward_ctx.request_content_type,
                     httpward_ctx.response_content_type
-                );
-            }
-
-            // Log fingerprint information if enabled
-            if config.log_fingerprints {
-                module_log_info!(
-                    "Fingerprints - Header FP: {:?}, JA4 FP: {:?}",
-                    httpward_ctx.header_fp,
-                    httpward_ctx.ja4_fp
                 );
             }
 
