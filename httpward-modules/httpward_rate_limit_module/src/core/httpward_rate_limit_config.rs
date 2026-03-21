@@ -82,7 +82,8 @@ impl HttpWardRateLimitConfig {
                             key,
                             capacity: rule_cfg.max_requests,
                             refill_every: rule_cfg.window_duration(),
-                            refill_amount: rule_cfg.refill_amount.unwrap_or(1),
+                            refill_amount: 1, // Will be overridden by strategy logic
+                            strategy: rule_cfg.strategy.clone(),
                         })
                     })
                     .collect::<Vec<_>>()
@@ -101,7 +102,8 @@ impl HttpWardRateLimitConfig {
                             key,
                             capacity: rule_cfg.max_requests,
                             refill_every: rule_cfg.window_duration(),
-                            refill_amount: rule_cfg.refill_amount.unwrap_or(1),
+                            refill_amount: 1, // Will be overridden by strategy logic
+                            strategy: rule_cfg.strategy.clone(),
                         })
                     })
                     .collect::<Vec<_>>()
@@ -155,6 +157,24 @@ impl RateLimitStoreConfig {
     }
 }
 
+/// Rate limit strategy types.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RateLimitStrategy {
+    /// Sliding window - gradual token refill
+    Sliding,
+    /// Burst protection - large capacity, slow refill
+    Burst,
+    /// Fixed window - complete refill each period
+    Fixed,
+}
+
+impl Default for RateLimitStrategy {
+    fn default() -> Self {
+        RateLimitStrategy::Sliding
+    }
+}
+
 /// Rate limit rule in YAML format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -164,8 +184,9 @@ pub struct RateLimitRuleConfig {
     /// Time window as a duration string (e.g., "10s", "1m").
     #[serde(default = "default_window")]
     pub window: String,
-    /// Tokens to add per window (optional, defaults to 1).
-    pub refill_amount: Option<u32>,
+    /// Rate limiting strategy.
+    #[serde(default)]
+    pub strategy: RateLimitStrategy,
 }
 
 fn default_window() -> String {
@@ -177,7 +198,7 @@ impl Default for RateLimitRuleConfig {
         Self {
             max_requests: 100,
             window: "10s".to_string(),
-            refill_amount: None,
+            strategy: RateLimitStrategy::Sliding,
         }
     }
 }
@@ -254,18 +275,50 @@ pub struct InternalRateLimitRule {
     /// Pre-parsed refill window.
     pub refill_every: Duration,
     pub refill_amount: u32,
+    pub strategy: RateLimitStrategy,
 }
 
 impl InternalRateLimitRule {
     pub fn to_runtime_rule(&self) -> super::RateLimitRule {
-        super::RateLimitRule {
-            capacity: self.capacity.max(1),
-            refill_every: if self.refill_every.is_zero() {
-                Duration::from_millis(1)
-            } else {
-                self.refill_every
-            },
-            refill_amount: self.refill_amount.max(1),
+        match self.strategy {
+            RateLimitStrategy::Sliding => {
+                // Gradual refill: window / capacity = refill interval
+                let refill_interval = self.refill_every.checked_div(self.capacity.max(1))
+                    .unwrap_or(self.refill_every);
+                super::RateLimitRule {
+                    capacity: self.capacity.max(1),
+                    refill_every: if refill_interval.is_zero() {
+                        Duration::from_millis(1)
+                    } else {
+                        refill_interval
+                    },
+                    refill_amount: 1,
+                }
+            }
+            RateLimitStrategy::Burst => {
+                // Current behavior: large capacity, slow refill
+                super::RateLimitRule {
+                    capacity: self.capacity.max(1),
+                    refill_every: if self.refill_every.is_zero() {
+                        Duration::from_millis(1)
+                    } else {
+                        self.refill_every
+                    },
+                    refill_amount: 1,
+                }
+            }
+            RateLimitStrategy::Fixed => {
+                // Fixed window: complete refill each period
+                super::RateLimitRule {
+                    capacity: self.capacity.max(1),
+                    refill_every: if self.refill_every.is_zero() {
+                        Duration::from_millis(1)
+                    } else {
+                        self.refill_every
+                    },
+                    refill_amount: self.capacity.max(1),
+                }
+            }
         }
     }
 }
@@ -396,7 +449,7 @@ mod tests {
             RateLimitRuleConfig {
                 max_requests: 100,
                 window: "10s".to_string(),
-                refill_amount: Some(10),
+                strategy: RateLimitStrategy::Sliding,
             },
         );
 
@@ -415,6 +468,132 @@ mod tests {
         assert_eq!(internal.store.max_entries, 50_000);
         assert_eq!(internal.store.idle_ttl_secs, 30);
         assert_eq!(internal.global.len(), 1);
+        assert_eq!(internal.global[0].strategy, RateLimitStrategy::Sliding);
+    }
+
+    #[test]
+    fn test_sliding_strategy_conversion() {
+        let rule = InternalRateLimitRule {
+            key: RateLimitKeyKind::Ip,
+            capacity: 50,
+            refill_every: Duration::from_secs(10),
+            refill_amount: 1,
+            strategy: RateLimitStrategy::Sliding,
+        };
+
+        let runtime_rule = rule.to_runtime_rule();
+        
+        // Sliding: 10s / 50 = 200ms per token
+        assert_eq!(runtime_rule.capacity, 50);
+        assert_eq!(runtime_rule.refill_every, Duration::from_millis(200));
+        assert_eq!(runtime_rule.refill_amount, 1);
+    }
+
+    #[test]
+    fn test_burst_strategy_conversion() {
+        let rule = InternalRateLimitRule {
+            key: RateLimitKeyKind::Ip,
+            capacity: 50,
+            refill_every: Duration::from_secs(10),
+            refill_amount: 1,
+            strategy: RateLimitStrategy::Burst,
+        };
+
+        let runtime_rule = rule.to_runtime_rule();
+        
+        // Burst: original parameters preserved
+        assert_eq!(runtime_rule.capacity, 50);
+        assert_eq!(runtime_rule.refill_every, Duration::from_secs(10));
+        assert_eq!(runtime_rule.refill_amount, 1);
+    }
+
+    #[test]
+    fn test_fixed_strategy_conversion() {
+        let rule = InternalRateLimitRule {
+            key: RateLimitKeyKind::Ip,
+            capacity: 50,
+            refill_every: Duration::from_secs(10),
+            refill_amount: 1,
+            strategy: RateLimitStrategy::Fixed,
+        };
+
+        let runtime_rule = rule.to_runtime_rule();
+        
+        // Fixed: complete refill each period
+        assert_eq!(runtime_rule.capacity, 50);
+        assert_eq!(runtime_rule.refill_every, Duration::from_secs(10));
+        assert_eq!(runtime_rule.refill_amount, 50);
+    }
+
+    #[test]
+    fn test_strategy_edge_cases() {
+        // Test zero capacity
+        let rule = InternalRateLimitRule {
+            key: RateLimitKeyKind::Ip,
+            capacity: 0,
+            refill_every: Duration::from_secs(10),
+            refill_amount: 1,
+            strategy: RateLimitStrategy::Sliding,
+        };
+
+        let runtime_rule = rule.to_runtime_rule();
+        assert_eq!(runtime_rule.capacity, 1); // min(1)
+        assert_eq!(runtime_rule.refill_every, Duration::from_secs(10)); // division by 0 avoided
+    }
+
+    #[test]
+    fn test_full_config_with_all_strategies() {
+        let mut global_rules = HashMap::new();
+        global_rules.insert(
+            "ip".to_string(),
+            RateLimitRuleConfig {
+                max_requests: 50,
+                window: "10s".to_string(),
+                strategy: RateLimitStrategy::Sliding,
+            },
+        );
+
+        let mut site_rules = HashMap::new();
+        site_rules.insert(
+            "ja4".to_string(),
+            RateLimitRuleConfig {
+                max_requests: 1000,
+                window: "300s".to_string(),
+                strategy: RateLimitStrategy::Burst,
+            },
+        );
+
+        let config = HttpWardRateLimitConfig {
+            global_config: None,
+            global_rules: vec![global_rules],
+            current_site_rules: vec![site_rules],
+            response: None,
+        };
+
+        let internal = config.to_internal();
+        
+        // Check global sliding rule
+        assert_eq!(internal.global.len(), 1);
+        assert_eq!(internal.global[0].strategy, RateLimitStrategy::Sliding);
+        assert_eq!(internal.global[0].capacity, 50);
+        
+        // Check site burst rule
+        assert_eq!(internal.matched_route.len(), 1);
+        assert_eq!(internal.matched_route[0].strategy, RateLimitStrategy::Burst);
+        assert_eq!(internal.matched_route[0].capacity, 1000);
+    }
+
+    #[test]
+    fn test_rate_limit_strategy_default() {
+        assert_eq!(RateLimitStrategy::default(), RateLimitStrategy::Sliding);
+    }
+
+    #[test]
+    fn test_rate_limit_rule_config_default() {
+        let default = RateLimitRuleConfig::default();
+        assert_eq!(default.max_requests, 100);
+        assert_eq!(default.window, "10s");
+        assert_eq!(default.strategy, RateLimitStrategy::Sliding);
     }
 }
 

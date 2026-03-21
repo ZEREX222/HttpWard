@@ -283,6 +283,7 @@ pub fn get_global_manager() -> Option<&'static RateLimitManager> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RateLimitStrategy;
 
     #[tokio::test]
     async fn test_manager_initializes_site_once() {
@@ -329,7 +330,7 @@ mod tests {
             RateLimitRuleConfig {
                 max_requests: 2,
                 window: "1s".to_string(),
-                refill_amount: Some(1),
+                strategy: RateLimitStrategy::Sliding, // Explicitly set for test
             },
         );
 
@@ -339,7 +340,7 @@ mod tests {
             RateLimitRuleConfig {
                 max_requests: 1,
                 window: "1s".to_string(),
-                refill_amount: Some(1),
+                strategy: RateLimitStrategy::Sliding, // Explicitly set for test
             },
         );
 
