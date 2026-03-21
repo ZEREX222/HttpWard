@@ -1,16 +1,16 @@
 use futures_util::{SinkExt, StreamExt};
+use http::{Method, Request as HttpRequest, Response};
 use rama::{
     Context,
     http::{
-        Body as RamaBody, HeaderMap, Request as RamaRequest, Response as RamaResponse,
-        StatusCode, header,
+        Body as RamaBody, HeaderMap, Request as RamaRequest, Response as RamaResponse, StatusCode,
+        header,
     },
 };
-use http::{Method, Request as HttpRequest, Response};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_tungstenite::{WebSocketStream, connect_async};
 use tokio_tungstenite::tungstenite::{Error as TungsteniteError, protocol::Role};
+use tokio_tungstenite::{WebSocketStream, connect_async};
 use tracing::error;
 use url::Url;
 
@@ -36,7 +36,7 @@ impl WebSocketHandler {
     pub fn new() -> Self {
         Self
     }
-    
+
     /// Proxy WebSocket connection to upstream
     /// If httpward_headers is provided, they will be used instead of request headers (allowing middleware to modify them)
     pub async fn proxy_websocket<State>(
@@ -80,7 +80,8 @@ impl WebSocketHandler {
         ctx.spawn(async move {
             match on_upgrade.await {
                 Ok(upgraded) => {
-                    let client_ws = WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await;
+                    let client_ws =
+                        WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await;
                     if let Err(err) = Self::relay_websocket_streams(client_ws, upstream_ws).await {
                         error!(error = %err, "websocket proxy relay failed");
                     }
@@ -101,18 +102,18 @@ impl WebSocketHandler {
             resp = resp.header("Sec-WebSocket-Protocol", protocol);
         }
 
-        let resp = resp
-            .body(RamaBody::empty())
-            .map_err(|e| WebSocketError::ConnectionFailed(format!("Failed to build response: {}", e)))?;
+        let resp = resp.body(RamaBody::empty()).map_err(|e| {
+            WebSocketError::ConnectionFailed(format!("Failed to build response: {}", e))
+        })?;
 
         Ok(resp)
     }
-    
+
     /// Generate WebSocket accept key from request headers
     fn generate_accept_key(&self, headers: &HeaderMap) -> Result<String, WebSocketError> {
-        use base64::{engine::general_purpose::STANDARD, Engine};
+        use base64::{Engine, engine::general_purpose::STANDARD};
         use sha1::Digest;
-        
+
         if let Some(key) = headers.get("Sec-WebSocket-Key") {
             if let Ok(key_str) = key.to_str() {
                 let key_bytes = key_str.as_bytes();
@@ -149,31 +150,35 @@ impl WebSocketHandler {
             .method(Method::GET)
             .uri(upstream_ws_url)
             .body(())
-            .map_err(|e| WebSocketError::ConnectionFailed(format!("Failed to build upstream request: {}", e)))?;
+            .map_err(|e| {
+                WebSocketError::ConnectionFailed(format!("Failed to build upstream request: {}", e))
+            })?;
 
         for (name, value) in headers {
             if Self::should_forward_upstream_header(name.as_str()) {
-                upstream_request.headers_mut().insert(name.clone(), value.clone());
+                upstream_request
+                    .headers_mut()
+                    .insert(name.clone(), value.clone());
             }
         }
 
         upstream_request.headers_mut().insert(
             header::HOST,
-            authority
-                .parse()
-                .map_err(|e| WebSocketError::InvalidRequest(format!("invalid upstream host header: {}", e)))?,
+            authority.parse().map_err(|e| {
+                WebSocketError::InvalidRequest(format!("invalid upstream host header: {}", e))
+            })?,
         );
         upstream_request.headers_mut().insert(
             header::CONNECTION,
-            "Upgrade"
-                .parse()
-                .map_err(|e| WebSocketError::InvalidRequest(format!("invalid connection header: {}", e)))?,
+            "Upgrade".parse().map_err(|e| {
+                WebSocketError::InvalidRequest(format!("invalid connection header: {}", e))
+            })?,
         );
         upstream_request.headers_mut().insert(
             header::UPGRADE,
-            "websocket"
-                .parse()
-                .map_err(|e| WebSocketError::InvalidRequest(format!("invalid upgrade header: {}", e)))?,
+            "websocket".parse().map_err(|e| {
+                WebSocketError::InvalidRequest(format!("invalid upgrade header: {}", e))
+            })?,
         );
 
         if !Self::has_required_headers_in_map(upstream_request.headers()) {
@@ -251,31 +256,34 @@ impl WebSocketHandler {
         }
         false
     }
-    
+
     /// Convert HTTP URL to WebSocket URL
     pub fn http_to_ws_url(http_url: &str) -> Result<String, WebSocketError> {
         let url = Url::parse(http_url)
             .map_err(|e| WebSocketError::InvalidUrl(format!("Invalid URL: {}", e)))?;
-            
+
         let mut ws_url = url.clone();
-        
+
         match url.scheme() {
             "http" => ws_url.set_scheme("ws").unwrap(),
             "https" => ws_url.set_scheme("wss").unwrap(),
-            "ws" | "wss" => {}, // Already WebSocket scheme
-            _ => return Err(WebSocketError::InvalidUrl(
-                format!("Unsupported scheme: {}", url.scheme())
-            )),
+            "ws" | "wss" => {} // Already WebSocket scheme
+            _ => {
+                return Err(WebSocketError::InvalidUrl(format!(
+                    "Unsupported scheme: {}",
+                    url.scheme()
+                )));
+            }
         }
-        
+
         Ok(ws_url.into())
     }
-    
+
     /// Check if request is a WebSocket upgrade request
     pub fn is_websocket_request(req: &RamaRequest<RamaBody>) -> bool {
         Self::is_websocket_headers(req.headers())
     }
-    
+
     /// Check required WebSocket headers
     pub fn has_required_headers(req: &RamaRequest<RamaBody>) -> bool {
         Self::has_required_headers_in_map(req.headers())
@@ -300,18 +308,18 @@ mod tests {
             WebSocketHandler::http_to_ws_url("http://example.com").unwrap(),
             "ws://example.com/"
         );
-        
+
         assert_eq!(
             WebSocketHandler::http_to_ws_url("https://example.com").unwrap(),
             "wss://example.com/"
         );
-        
+
         assert_eq!(
             WebSocketHandler::http_to_ws_url("ws://example.com").unwrap(),
             "ws://example.com/"
         );
     }
-    
+
     #[test]
     fn test_websocket_detection() {
         let req = RamaRequest::builder()
@@ -323,10 +331,10 @@ mod tests {
             .header("Sec-WebSocket-Version", "13")
             .body(RamaBody::empty())
             .unwrap();
-            
+
         assert!(WebSocketHandler::is_websocket_request(&req));
         assert!(WebSocketHandler::has_required_headers(&req));
-        
+
         // Test missing required headers
         let req2 = RamaRequest::builder()
             .method(Method::GET)
@@ -335,11 +343,11 @@ mod tests {
             .header("Connection", "upgrade")
             .body(RamaBody::empty())
             .unwrap();
-            
+
         assert!(WebSocketHandler::is_websocket_request(&req2));
         assert!(!WebSocketHandler::has_required_headers(&req2));
     }
-    
+
     #[test]
     fn test_generate_accept_key() {
         let handler = WebSocketHandler::new();
@@ -349,7 +357,7 @@ mod tests {
             .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
             .body(RamaBody::empty())
             .unwrap();
-            
+
         let accept_key = handler.generate_accept_key(req.headers()).unwrap();
         assert_eq!(accept_key, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
     }
@@ -376,13 +384,29 @@ mod tests {
             .build_upstream_request("ws://backend.internal:9001/socket?token=1", req.headers())
             .unwrap();
 
-        assert_eq!(upstream_request.uri(), "ws://backend.internal:9001/socket?token=1");
-        assert_eq!(upstream_request.headers()[header::HOST], "backend.internal:9001");
+        assert_eq!(
+            upstream_request.uri(),
+            "ws://backend.internal:9001/socket?token=1"
+        );
+        assert_eq!(
+            upstream_request.headers()[header::HOST],
+            "backend.internal:9001"
+        );
         assert_eq!(upstream_request.headers()[header::UPGRADE], "websocket");
-        assert_eq!(upstream_request.headers()["sec-websocket-protocol"], "chat, superchat");
-        assert_eq!(upstream_request.headers()["origin"], "https://frontend.local");
+        assert_eq!(
+            upstream_request.headers()["sec-websocket-protocol"],
+            "chat, superchat"
+        );
+        assert_eq!(
+            upstream_request.headers()["origin"],
+            "https://frontend.local"
+        );
         assert_eq!(upstream_request.headers()["cookie"], "session=abc");
-        assert!(!upstream_request.headers().contains_key("Sec-WebSocket-Extensions"));
+        assert!(
+            !upstream_request
+                .headers()
+                .contains_key("Sec-WebSocket-Extensions")
+        );
     }
 
     #[tokio::test]
@@ -390,8 +414,10 @@ mod tests {
         let (proxy_client_io, mut client_peer_io) = duplex(4096);
         let (proxy_upstream_io, mut upstream_peer_io) = duplex(4096);
 
-        let proxy_client_ws = WebSocketStream::from_raw_socket(proxy_client_io, Role::Server, None).await;
-        let proxy_upstream_ws = WebSocketStream::from_raw_socket(proxy_upstream_io, Role::Client, None).await;
+        let proxy_client_ws =
+            WebSocketStream::from_raw_socket(proxy_client_io, Role::Server, None).await;
+        let proxy_upstream_ws =
+            WebSocketStream::from_raw_socket(proxy_upstream_io, Role::Client, None).await;
 
         let relay_task = tokio::spawn(async move {
             WebSocketHandler::relay_websocket_streams(proxy_client_ws, proxy_upstream_ws)
@@ -399,8 +425,10 @@ mod tests {
                 .unwrap();
         });
 
-        let mut client_peer_ws = WebSocketStream::from_raw_socket(&mut client_peer_io, Role::Client, None).await;
-        let mut upstream_peer_ws = WebSocketStream::from_raw_socket(&mut upstream_peer_io, Role::Server, None).await;
+        let mut client_peer_ws =
+            WebSocketStream::from_raw_socket(&mut client_peer_io, Role::Client, None).await;
+        let mut upstream_peer_ws =
+            WebSocketStream::from_raw_socket(&mut upstream_peer_io, Role::Server, None).await;
 
         client_peer_ws
             .send(Message::Text("hello-upstream".into()))

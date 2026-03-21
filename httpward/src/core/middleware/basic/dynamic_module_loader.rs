@@ -1,17 +1,15 @@
-use std::sync::{Arc, Mutex};
-use std::collections::{HashSet, HashMap};
-use httpward_core::httpward_middleware::{
-    HttpWardMiddlewarePipe
-};
+use httpward_core::core::HttpWardContext;
+use httpward_core::core::server_models::server_instance::ServerInstance;
+use httpward_core::httpward_middleware::HttpWardMiddlewarePipe;
 use rama::{
+    Context,
     http::{Body, Request, Response},
     layer::Layer,
     service::Service,
-    Context,
 };
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use httpward_core::core::server_models::server_instance::ServerInstance;
-use httpward_core::core::HttpWardContext;
+use std::sync::{Arc, Mutex};
 
 /// Re-export the plugin loader
 use super::middleware_global_module_storage::get_middleware_instance;
@@ -32,11 +30,15 @@ impl DynamicModuleLoaderLayer {
     fn init_middleware(
         server_instance: &Arc<ServerInstance>,
         middleware_name: &str,
-        middleware_instance: &Arc<dyn httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware + Send + Sync>,
+        middleware_instance: &Arc<
+            dyn httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware
+                + Send
+                + Sync,
+        >,
     ) {
         tracing::debug!(
             target: "dynamic_module_loader",
-            "Initializing middleware '{}'", 
+            "Initializing middleware '{}'",
             middleware_name
         );
 
@@ -45,8 +47,7 @@ impl DynamicModuleLoaderLayer {
             .unwrap_or_else(|error| {
                 panic!(
                     "Failed to initialize middleware '{}': {}",
-                    middleware_name,
-                    error
+                    middleware_name, error
                 )
             });
     }
@@ -61,7 +62,7 @@ impl DynamicModuleLoaderLayer {
 
         // Collect unique middleware names from all strategies across all site managers
         let unique_middleware_names = loader.collect_unique_middleware_names(server_instance);
-        
+
         tracing::info!(target: "dynamic_module_loader", "Found {} unique middleware names from strategies", unique_middleware_names.len());
 
         let mut missing_middleware_names: Vec<String> = Vec::new();
@@ -72,8 +73,13 @@ impl DynamicModuleLoaderLayer {
                 Some(middleware_instance) => {
                     Self::init_middleware(server_instance, middleware_name, &middleware_instance);
 
-                    loader.middleware_pipe = loader.middleware_pipe.add_boxed_layer(middleware_instance)
-                        .expect(&format!("Failed to add middleware '{}': dependency validation failed", middleware_name));
+                    loader.middleware_pipe = loader
+                        .middleware_pipe
+                        .add_boxed_layer(middleware_instance)
+                        .expect(&format!(
+                            "Failed to add middleware '{}': dependency validation failed",
+                            middleware_name
+                        ));
                     tracing::info!(target: "dynamic_module_loader", "Successfully loaded middleware: {}", middleware_name);
                 }
                 None => {
@@ -104,7 +110,10 @@ impl DynamicModuleLoaderLayer {
     ///
     /// Validates that each filtered pipe has all required dependencies satisfied.
     /// Panics if a middleware's required dependency is not included in the route's active strategy.
-    fn build_route_pipes(&self, server_instance: &Arc<ServerInstance>) -> HashMap<usize, HttpWardMiddlewarePipe> {
+    fn build_route_pipes(
+        &self,
+        server_instance: &Arc<ServerInstance>,
+    ) -> HashMap<usize, HttpWardMiddlewarePipe> {
         let mut route_pipes = HashMap::new();
 
         for site_manager in &server_instance.site_managers {
@@ -116,18 +125,24 @@ impl DynamicModuleLoaderLayer {
                     .middleware
                     .iter()
                     .filter_map(|mc| match mc {
-                        httpward_core::config::strategy::MiddlewareConfig::Named { name, .. }
-                        | httpward_core::config::strategy::MiddlewareConfig::On { name } => Some(name.as_str()),
+                        httpward_core::config::strategy::MiddlewareConfig::Named {
+                            name, ..
+                        }
+                        | httpward_core::config::strategy::MiddlewareConfig::On { name } => {
+                            Some(name.as_str())
+                        }
                         httpward_core::config::strategy::MiddlewareConfig::Off { .. } => None,
                     })
                     .collect();
 
                 // Create a filtered pipe with proper order from strategy
-                let filtered_pipe = self.middleware_pipe
-                    .create_filtered_ordered(&ordered_names);
+                let filtered_pipe = self.middleware_pipe.create_filtered_ordered(&ordered_names);
 
                 // Validate that all middleware in the filtered pipe have their dependencies satisfied
-                self.validate_filtered_pipe_dependencies(&route_with_strategy.route, &ordered_names);
+                self.validate_filtered_pipe_dependencies(
+                    &route_with_strategy.route,
+                    &ordered_names,
+                );
 
                 let route_match = route_with_strategy.route.get_match();
                 tracing::debug!(
@@ -218,7 +233,10 @@ impl DynamicModuleLoaderLayer {
 
     /// Collect unique middleware names from all strategies across all site managers
     /// Preserves the order from the configuration (not alphabetical)
-    fn collect_unique_middleware_names(&self, server_instance: &Arc<ServerInstance>) -> Vec<String> {
+    fn collect_unique_middleware_names(
+        &self,
+        server_instance: &Arc<ServerInstance>,
+    ) -> Vec<String> {
         let mut middleware_names: Vec<String> = Vec::new();
         let mut seen = HashSet::new();
 
@@ -227,7 +245,9 @@ impl DynamicModuleLoaderLayer {
                 for middleware_config in route_with_strategy.active_strategy.middleware.iter() {
                     // Only include enabled middleware (skip Off middleware)
                     match middleware_config {
-                        httpward_core::config::strategy::MiddlewareConfig::Named { name, .. }
+                        httpward_core::config::strategy::MiddlewareConfig::Named {
+                            name, ..
+                        }
                         | httpward_core::config::strategy::MiddlewareConfig::On { name } => {
                             // Add only if not seen before - preserves order from config
                             if !seen.contains(name) {
@@ -259,19 +279,25 @@ impl DynamicModuleLoaderLayer {
     where
         T: httpward_core::httpward_middleware::HttpWardMiddleware + 'static,
     {
-        self.middleware_pipe = self.middleware_pipe.add_layer(layer)
+        self.middleware_pipe = self
+            .middleware_pipe
+            .add_layer(layer)
             .expect("Failed to add layer: dependency validation failed");
         self
     }
 
     /// Add a pre-boxed middleware (Arc<dyn HttpWardMiddleware>) to the pipe at runtime.
     /// This uses the `add_boxed_layer` method added to pipe.
-    pub fn add_boxed_layer(&mut self, boxed: Arc<dyn httpward_core::httpward_middleware::HttpWardMiddleware + Send + Sync>) {
+    pub fn add_boxed_layer(
+        &mut self,
+        boxed: Arc<dyn httpward_core::httpward_middleware::HttpWardMiddleware + Send + Sync>,
+    ) {
         // Convert Arc to the internal BoxedMiddleware type (which is Arc<dyn ...> already)
-        self.middleware_pipe = self.middleware_pipe.add_boxed_layer(boxed)
+        self.middleware_pipe = self
+            .middleware_pipe
+            .add_boxed_layer(boxed)
             .expect("Failed to add boxed layer: dependency validation failed");
     }
-
 
     /// Get the number of middleware layers
     pub fn middleware_count(&self) -> usize {
@@ -289,10 +315,12 @@ impl DynamicModuleLoaderLayer {
     }
 
     /// Get a specific layer by name
-    pub fn get_layer_by_name(&self, name: &str) -> Option<std::sync::Arc<dyn httpward_core::httpward_middleware::HttpWardMiddleware>> {
+    pub fn get_layer_by_name(
+        &self,
+        name: &str,
+    ) -> Option<std::sync::Arc<dyn httpward_core::httpward_middleware::HttpWardMiddleware>> {
         self.middleware_pipe.get_layer_by_name(name).cloned()
     }
-
 }
 
 impl Default for DynamicModuleLoaderLayer {
@@ -354,7 +382,11 @@ where
     /// - `Some(pipe)` — precomputed per-route filtered pipe when a route is matched.
     /// - `None`       — no route matched; the caller should bypass the middleware pipe
     ///                  and forward the request directly to the inner service.
-    fn resolve_pipe<'a>(&'a self, ctx: &Context<()>, req: &Request<Body>) -> Option<&'a HttpWardMiddlewarePipe> {
+    fn resolve_pipe<'a>(
+        &'a self,
+        ctx: &Context<()>,
+        req: &Request<Body>,
+    ) -> Option<&'a HttpWardMiddlewarePipe> {
         if let Some(hctx) = ctx.get::<HttpWardContext>() {
             if let Some(site) = &hctx.current_site {
                 let path = req.uri().path();
@@ -390,7 +422,10 @@ where
     }
 
     /// Get a specific layer by name
-    pub fn get_layer_by_name(&self, name: &str) -> Option<std::sync::Arc<dyn httpward_core::httpward_middleware::HttpWardMiddleware>> {
+    pub fn get_layer_by_name(
+        &self,
+        name: &str,
+    ) -> Option<std::sync::Arc<dyn httpward_core::httpward_middleware::HttpWardMiddleware>> {
         self.middleware_pipe.get_layer_by_name(name).cloned()
     }
 }
@@ -414,11 +449,14 @@ where
         match self.resolve_pipe(&ctx, &request) {
             Some(pipe) => {
                 // Route matched — run the precomputed filtered middleware pipe.
-                pipe.execute_middleware(self.inner.clone(), ctx, request).await
+                pipe.execute_middleware(self.inner.clone(), ctx, request)
+                    .await
             }
             None => {
                 // No route matched — skip all middleware and forward directly to inner service.
-                self.inner.serve(ctx, request).await
+                self.inner
+                    .serve(ctx, request)
+                    .await
                     .map_err(|e| Box::new(e) as Self::Error)
             }
         }
@@ -428,10 +466,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use httpward_core::config::{SiteConfig, Route, GlobalConfig, MiddlewareConfig, StrategyRef};
-    use httpward_core::core::server_models::site_manager::SiteManager;
-    use httpward_core::core::server_models::listener::ListenerKey;
+    use httpward_core::config::{GlobalConfig, MiddlewareConfig, Route, SiteConfig, StrategyRef};
     use httpward_core::config::{Match, StrategyCollection};
+    use httpward_core::core::server_models::listener::ListenerKey;
+    use httpward_core::core::server_models::site_manager::SiteManager;
     use std::sync::Arc;
 
     fn create_test_server_instance() -> Arc<ServerInstance> {
@@ -466,10 +504,8 @@ mod tests {
         };
 
         // Create site manager
-        let site_manager = SiteManager::new(
-            Arc::new(site_config),
-            Some(&GlobalConfig::default()),
-        ).unwrap();
+        let site_manager =
+            SiteManager::new(Arc::new(site_config), Some(&GlobalConfig::default())).unwrap();
 
         // Create server instance
         let server_instance = ServerInstance {
@@ -512,10 +548,8 @@ mod tests {
             ..Default::default()
         };
 
-        let site_manager = SiteManager::new(
-            Arc::new(site_config),
-            Some(&GlobalConfig::default()),
-        ).unwrap();
+        let site_manager =
+            SiteManager::new(Arc::new(site_config), Some(&GlobalConfig::default())).unwrap();
 
         Arc::new(ServerInstance {
             bind: ListenerKey {
@@ -531,11 +565,11 @@ mod tests {
     fn test_dynamic_module_loader_layer_creation() {
         let server_instance = create_test_server_instance();
         let layer = DynamicModuleLoaderLayer::new(&server_instance);
-        
+
         // Should have some middleware count (0 if no middleware found, or count of loaded middleware)
         let middleware_count = layer.middleware_count();
         println!("Middleware count: {}", middleware_count);
-        
+
         // The layer should be created successfully
         assert!(middleware_count >= 0);
     }
@@ -547,12 +581,12 @@ mod tests {
 
         // Test the collection method
         let unique_names = layer.collect_unique_middleware_names(&server_instance);
-        
+
         // Should contain no middleware since both are Off
         assert!(!unique_names.contains(&"test_middleware".to_string()));
         assert!(!unique_names.contains(&"disabled_middleware".to_string()));
         assert_eq!(unique_names.len(), 0);
-        
+
         println!("Unique middleware names: {:?}", unique_names);
     }
 
@@ -580,7 +614,7 @@ mod tests {
         });
 
         let layer = DynamicModuleLoaderLayer::new(&empty_server_instance);
-        
+
         // Should have 0 middleware for empty server instance
         assert_eq!(layer.middleware_count(), 0);
     }
@@ -588,7 +622,7 @@ mod tests {
     #[test]
     fn test_default_implementation() {
         let layer = DynamicModuleLoaderLayer::default();
-        
+
         // Should create successfully even with dummy server instance
         assert_eq!(layer.middleware_count(), 0);
     }

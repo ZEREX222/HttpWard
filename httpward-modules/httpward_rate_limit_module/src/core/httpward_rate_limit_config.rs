@@ -1,3 +1,4 @@
+use super::RateLimitKeyKind;
 /// User-facing YAML configuration format for rate limiting.
 ///
 /// This is the primary configuration format for HttpWardRateLimitLayer.
@@ -21,11 +22,9 @@
 ///         max_requests: 50
 ///         window: 10s
 /// ```
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-use super::RateLimitKeyKind;
 
 /// Main rate limit configuration (YAML format).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,7 +282,9 @@ impl InternalRateLimitRule {
         match self.strategy {
             RateLimitStrategy::Sliding => {
                 // Gradual refill: window / capacity = refill interval
-                let refill_interval = self.refill_every.checked_div(self.capacity.max(1))
+                let refill_interval = self
+                    .refill_every
+                    .checked_div(self.capacity.max(1))
                     .unwrap_or(self.refill_every);
                 super::RateLimitRule {
                     capacity: self.capacity.max(1),
@@ -417,17 +418,17 @@ mod tests {
 
     #[test]
     fn test_parse_duration() {
-        assert_eq!(parse_duration("10s"),   Some(Duration::from_secs(10)));
-        assert_eq!(parse_duration("1m"),    Some(Duration::from_secs(60)));
+        assert_eq!(parse_duration("10s"), Some(Duration::from_secs(10)));
+        assert_eq!(parse_duration("1m"), Some(Duration::from_secs(60)));
         assert_eq!(parse_duration("100ms"), Some(Duration::from_millis(100)));
-        assert_eq!(parse_duration("2h"),    Some(Duration::from_secs(7_200)));
-        assert_eq!(parse_duration("30"),    Some(Duration::from_secs(30)));
+        assert_eq!(parse_duration("2h"), Some(Duration::from_secs(7_200)));
+        assert_eq!(parse_duration("30"), Some(Duration::from_secs(30)));
         assert_eq!(parse_duration("unknown"), None);
         // ms-value sanity checks
-        assert_eq!(parse_duration("10s").map(|d| d.as_millis()),   Some(10_000));
-        assert_eq!(parse_duration("1m").map(|d| d.as_millis()),    Some(60_000));
+        assert_eq!(parse_duration("10s").map(|d| d.as_millis()), Some(10_000));
+        assert_eq!(parse_duration("1m").map(|d| d.as_millis()), Some(60_000));
         assert_eq!(parse_duration("100ms").map(|d| d.as_millis()), Some(100));
-        assert_eq!(parse_duration("2h").map(|d| d.as_millis()),    Some(7_200_000));
+        assert_eq!(parse_duration("2h").map(|d| d.as_millis()), Some(7_200_000));
     }
 
     #[test]
@@ -438,7 +439,10 @@ mod tests {
             parse_rate_limit_key("header"),
             Some(RateLimitKeyKind::HeaderFingerprint)
         );
-        assert_eq!(parse_rate_limit_key("cookie"), Some(RateLimitKeyKind::Cookie));
+        assert_eq!(
+            parse_rate_limit_key("cookie"),
+            Some(RateLimitKeyKind::Cookie)
+        );
     }
 
     #[test]
@@ -482,7 +486,7 @@ mod tests {
         };
 
         let runtime_rule = rule.to_runtime_rule();
-        
+
         // Sliding: 10s / 50 = 200ms per token
         assert_eq!(runtime_rule.capacity, 50);
         assert_eq!(runtime_rule.refill_every, Duration::from_millis(200));
@@ -500,7 +504,7 @@ mod tests {
         };
 
         let runtime_rule = rule.to_runtime_rule();
-        
+
         // Burst: original parameters preserved
         assert_eq!(runtime_rule.capacity, 50);
         assert_eq!(runtime_rule.refill_every, Duration::from_secs(10));
@@ -518,7 +522,7 @@ mod tests {
         };
 
         let runtime_rule = rule.to_runtime_rule();
-        
+
         // Fixed: complete refill each period
         assert_eq!(runtime_rule.capacity, 50);
         assert_eq!(runtime_rule.refill_every, Duration::from_secs(10));
@@ -571,12 +575,12 @@ mod tests {
         };
 
         let internal = config.to_internal();
-        
+
         // Check global sliding rule
         assert_eq!(internal.global.len(), 1);
         assert_eq!(internal.global[0].strategy, RateLimitStrategy::Sliding);
         assert_eq!(internal.global[0].capacity, 50);
-        
+
         // Check site burst rule
         assert_eq!(internal.matched_route.len(), 1);
         assert_eq!(internal.matched_route[0].strategy, RateLimitStrategy::Burst);
@@ -596,4 +600,3 @@ mod tests {
         assert_eq!(default.strategy, RateLimitStrategy::Sliding);
     }
 }
-

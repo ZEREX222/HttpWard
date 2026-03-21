@@ -1,12 +1,14 @@
+use http::{HeaderMap, HeaderName, Uri};
 use rama::{
-    http::{Request as RamaRequest, Response as RamaResponse, Body as RamaBody, header, HeaderValue},
     http::client::EasyHttpWebClient,
     http::service::client::HttpClientExt,
+    http::{
+        Body as RamaBody, HeaderValue, Request as RamaRequest, Response as RamaResponse, header,
+    },
 };
-use http::{HeaderMap, HeaderName, Uri};
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use url::Url;
-use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProxyRequestKind {
@@ -56,7 +58,9 @@ fn normalize_request_headers(
         header::TRAILER.clone(),
         header::TRANSFER_ENCODING.clone(),
         header::UPGRADE.clone(),
-    ].into_iter().collect::<HashSet<_>>();
+    ]
+    .into_iter()
+    .collect::<HashSet<_>>();
 
     if request_kind == ProxyRequestKind::Http {
         hop_by_hop.insert(header::TE.clone());
@@ -86,16 +90,16 @@ fn normalize_request_headers(
     }
 
     // Ensure Host header equals upstream authority
-    headers.insert(
-        header::HOST,
-        HeaderValue::from_str(upstream_host)?,
-    );
+    headers.insert(header::HOST, HeaderValue::from_str(upstream_host)?);
 
     // Append or create X-Forwarded-For with IPv6 support
     if let Some(ip) = client_ip {
         let xff = HeaderName::from_static("x-forwarded-for");
-        let prev = headers.get(&xff).and_then(|v| v.to_str().ok()).unwrap_or("");
-        
+        let prev = headers
+            .get(&xff)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+
         // Validate IP format (supports both IPv4 and IPv6)
         let normalized_ip = if ip.contains(':') && ip.starts_with('[') && ip.ends_with(']') {
             // IPv6 in brackets [::1] -> ::1
@@ -103,7 +107,7 @@ fn normalize_request_headers(
         } else {
             ip // IPv4 or IPv6 without brackets
         };
-        
+
         let new_val = if prev.is_empty() {
             normalized_ip.to_string()
         } else {
@@ -121,7 +125,10 @@ fn normalize_request_headers(
     // Add Via header with configurable proxy identifier
     let via_name = HeaderName::from_static("via");
     let our_via = format!("{} {}", incoming_proto, proxy_id);
-    let via_prev = headers.get(&via_name).and_then(|v| v.to_str().ok()).unwrap_or("");
+    let via_prev = headers
+        .get(&via_name)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
     let via_val = if via_prev.is_empty() {
         our_via
     } else {
@@ -133,9 +140,7 @@ fn normalize_request_headers(
 }
 
 /// Remove hop-by-hop response headers and headers listed in Connection.
-fn normalize_response_headers(
-    mut headers: HeaderMap,
-) -> HeaderMap {
+fn normalize_response_headers(mut headers: HeaderMap) -> HeaderMap {
     let mut hop_by_hop = vec![
         header::CONNECTION.clone(),
         header::KEEP_ALIVE.clone(),
@@ -146,7 +151,9 @@ fn normalize_response_headers(
         header::TRANSFER_ENCODING.clone(),
         header::UPGRADE.clone(),
         HeaderName::from_static("proxy-connection"),
-    ].into_iter().collect::<HashSet<_>>();
+    ]
+    .into_iter()
+    .collect::<HashSet<_>>();
 
     if let Some(conn_val) = headers.get(header::CONNECTION) {
         if let Ok(s) = conn_val.to_str() {
@@ -186,17 +193,17 @@ impl ProxyHandler {
         params: &HashMap<String, String>,
     ) -> Result<String, ProxyError> {
         let mut result = backend.to_string();
-        
+
         // Replace named parameters like {param} and {*any}
         for (key, value) in params {
             let placeholder = format!("{{{}}}", key);
             result = result.replace(&placeholder, value);
-            
+
             // Also handle wildcard parameters {*any}
             let wildcard_placeholder = format!("{{*{}}}", key);
             result = result.replace(&wildcard_placeholder, value);
         }
-        
+
         Ok(result)
     }
 
@@ -226,7 +233,8 @@ impl ProxyHandler {
             ProxyRequestKind::Http,
             "httpward",
             None,
-        ).await
+        )
+        .await
     }
 
     /// Proxy gRPC request to upstream preserving gRPC-required headers.
@@ -245,7 +253,8 @@ impl ProxyHandler {
             ProxyRequestKind::Grpc,
             "httpward",
             None,
-        ).await
+        )
+        .await
     }
 
     /// Proxy HTTP request to upstream with client IP and proxy ID
@@ -267,7 +276,8 @@ impl ProxyHandler {
             ProxyRequestKind::Http,
             proxy_id,
             client_ip,
-        ).await
+        )
+        .await
     }
 
     async fn proxy_request_with_kind_and_client_ip(
@@ -288,10 +298,10 @@ impl ProxyHandler {
         *req.uri_mut() = new_uri;
 
         // Extract upstream authority and protocol from the already processed URI
-        let upstream_host = req.uri().authority()
-            .map(|a| a.as_str())
-            .ok_or_else(|| ProxyError::InvalidUrl("Missing upstream authority in processed URI".to_string()))?;
-        
+        let upstream_host = req.uri().authority().map(|a| a.as_str()).ok_or_else(|| {
+            ProxyError::InvalidUrl("Missing upstream authority in processed URI".to_string())
+        })?;
+
         let proto = req.uri().scheme().map(|s| s.as_str()).unwrap_or("http");
 
         // Normalize headers before sending upstream
@@ -302,10 +312,12 @@ impl ProxyHandler {
             proto,
             request_kind,
             proxy_id,
-        ).map_err(|e| ProxyError::Upstream(e.to_string()))?;
+        )
+        .map_err(|e| ProxyError::Upstream(e.to_string()))?;
 
         // Send request using Rama HTTP client
-        let resp = self.client
+        let resp = self
+            .client
             .request(req.method().clone(), req.uri().clone())
             .headers(normalized_headers)
             .body(req.into_body())
@@ -319,12 +331,9 @@ impl ProxyHandler {
 
         Ok(resp)
     }
-    
+
     /// Build upstream URI by combining processed backend URL with original request
-    fn build_upstream_url(
-        backend: &str,
-        orig: &Uri,
-    ) -> Result<Uri, ProxyError> {
+    fn build_upstream_url(backend: &str, orig: &Uri) -> Result<Uri, ProxyError> {
         let mut backend_url = Url::parse(backend)
             .map_err(|e| ProxyError::InvalidUrl(format!("invalid backend URL: {}", e)))?;
 
@@ -333,7 +342,7 @@ impl ProxyHandler {
             // Use original request path
             backend_url.set_path(orig.path());
         }
-        
+
         // Preserve original query string if present and backend doesn't have one
         if let Some(query) = orig.query() {
             if backend_url.query().is_none() {
@@ -342,10 +351,12 @@ impl ProxyHandler {
         }
 
         // Convert back to http::Uri
-        backend_url.as_str().parse()
+        backend_url
+            .as_str()
+            .parse()
             .map_err(|e| ProxyError::InvalidUrl(format!("failed to parse final URI: {}", e)))
     }
-    
+
     /// Check if request is for WebSocket upgrade
     pub fn is_websocket_upgrade(req: &RamaRequest<RamaBody>) -> bool {
         // Check Upgrade header
@@ -363,7 +374,7 @@ impl ProxyHandler {
         }
         false
     }
-    
+
     /// Check if request is gRPC
     pub fn is_grpc(req: &RamaRequest<RamaBody>) -> bool {
         // gRPC requests always use application/grpc* content types.
@@ -394,51 +405,55 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("id".to_string(), "123".to_string());
         params.insert("any".to_string(), "users/123".to_string());
-        
+
         // Test basic parameter replacement
         let backend = "http://backend:8080/api/users/{id}";
         let result = ProxyHandler::process_backend_url_with_params(backend, &params).unwrap();
         assert_eq!(result, "http://backend:8080/api/users/123");
-        
+
         // Test wildcard parameter replacement
         let backend2 = "http://zerex222.ru:8080/{*any}";
         let result2 = ProxyHandler::process_backend_url_with_params(backend2, &params).unwrap();
         assert_eq!(result2, "http://zerex222.ru:8080/users/123");
-        
+
         // Test regex group parameters (like {1}, {2})
         let mut regex_params = HashMap::new();
         regex_params.insert("1".to_string(), "my".to_string());
-        
+
         let backend3 = "http://zerex222.ru:8080/{1}";
-        let result3 = ProxyHandler::process_backend_url_with_params(backend3, &regex_params).unwrap();
+        let result3 =
+            ProxyHandler::process_backend_url_with_params(backend3, &regex_params).unwrap();
         assert_eq!(result3, "http://zerex222.ru:8080/my");
     }
-    
+
     #[test]
     fn test_build_upstream_url() {
         let backend = "http://backend:8080/api/users/123";
         let orig_uri = "/api/users/123?active=true".parse::<Uri>().unwrap();
-        
+
         let result = ProxyHandler::build_upstream_url(backend, &orig_uri).unwrap();
-        assert_eq!(result.to_string(), "http://backend:8080/api/users/123?active=true");
+        assert_eq!(
+            result.to_string(),
+            "http://backend:8080/api/users/123?active=true"
+        );
     }
-    
+
     #[test]
     fn test_build_upstream_url_user_case() {
         // Test case from user: path "/ip" should proxy to "http://zerex222.ru:8080/ip"
         let backend = "http://zerex222.ru:8080/ip";
         let orig_uri = "/ip".parse::<Uri>().unwrap();
-        
+
         let result = ProxyHandler::build_upstream_url(backend, &orig_uri).unwrap();
         assert_eq!(result.to_string(), "http://zerex222.ru:8080/ip");
-        
+
         // Test case: backend already contains full path
         let backend2 = "http://zerex222.ru:8080/ip/ololo";
         let orig_uri2 = "/ip/ololo".parse::<Uri>().unwrap();
         let result2 = ProxyHandler::build_upstream_url(backend2, &orig_uri2).unwrap();
         assert_eq!(result2.to_string(), "http://zerex222.ru:8080/ip/ololo");
     }
-    
+
     #[test]
     fn test_websocket_detection() {
         let mut req = RamaRequest::builder()
@@ -448,9 +463,9 @@ mod tests {
             .header("Connection", "upgrade")
             .body(RamaBody::empty())
             .unwrap();
-            
+
         assert!(ProxyHandler::is_websocket_upgrade(&req));
-        
+
         // Test case-insensitive
         let mut req2 = RamaRequest::builder()
             .method(Method::GET)
@@ -459,10 +474,10 @@ mod tests {
             .header("Connection", "Upgrade")
             .body(RamaBody::empty())
             .unwrap();
-            
+
         assert!(ProxyHandler::is_websocket_upgrade(&req2));
     }
-    
+
     #[test]
     fn test_grpc_detection() {
         let req = RamaRequest::builder()
@@ -471,7 +486,7 @@ mod tests {
             .header("Content-Type", "application/grpc")
             .body(RamaBody::empty())
             .unwrap();
-            
+
         assert!(ProxyHandler::is_grpc(&req));
     }
 
@@ -499,7 +514,8 @@ mod tests {
             "http",
             ProxyRequestKind::Http,
             "httpward",
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(!normalized.contains_key(header::TE));
     }
@@ -516,7 +532,8 @@ mod tests {
             "http",
             ProxyRequestKind::Grpc,
             "httpward",
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(
             normalized.get(header::TE).unwrap(),
@@ -527,13 +544,25 @@ mod tests {
     #[test]
     fn test_normalize_response_headers_removes_hop_by_hop() {
         let mut headers = HeaderMap::new();
-        headers.insert(header::CONNECTION, HeaderValue::from_static("keep-alive, x-hop"));
-        headers.insert(header::KEEP_ALIVE.clone(), HeaderValue::from_static("timeout=5"));
-        headers.insert(header::TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+        headers.insert(
+            header::CONNECTION,
+            HeaderValue::from_static("keep-alive, x-hop"),
+        );
+        headers.insert(
+            header::KEEP_ALIVE.clone(),
+            HeaderValue::from_static("timeout=5"),
+        );
+        headers.insert(
+            header::TRANSFER_ENCODING,
+            HeaderValue::from_static("chunked"),
+        );
         headers.insert(header::TRAILER, HeaderValue::from_static("x-trailer"));
         headers.insert(header::UPGRADE, HeaderValue::from_static("h2c"));
         headers.insert(header::TE, HeaderValue::from_static("trailers"));
-        headers.insert(HeaderName::from_static("x-hop"), HeaderValue::from_static("1"));
+        headers.insert(
+            HeaderName::from_static("x-hop"),
+            HeaderValue::from_static("1"),
+        );
 
         let normalized = normalize_response_headers(headers);
 
@@ -549,9 +578,18 @@ mod tests {
     #[test]
     fn test_normalize_response_headers_preserves_grpc_metadata() {
         let mut headers = HeaderMap::new();
-        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/grpc"));
-        headers.insert(HeaderName::from_static("grpc-status"), HeaderValue::from_static("0"));
-        headers.insert(HeaderName::from_static("grpc-message"), HeaderValue::from_static("ok"));
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/grpc"),
+        );
+        headers.insert(
+            HeaderName::from_static("grpc-status"),
+            HeaderValue::from_static("0"),
+        );
+        headers.insert(
+            HeaderName::from_static("grpc-message"),
+            HeaderValue::from_static("ok"),
+        );
         headers.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
 
         let normalized = normalize_response_headers(headers);
@@ -576,16 +614,16 @@ mod tests {
         // Test the example from user: "/my/{*any}" -> "http://zerex222.ru:8080/{*any}"
         let mut params = HashMap::new();
         params.insert("any".to_string(), "test/path".to_string());
-        
+
         let backend = "http://zerex222.ru:8080/{*any}";
         let result = ProxyHandler::process_backend_url_with_params(backend, &params).unwrap();
         assert_eq!(result, "http://zerex222.ru:8080/test/path");
-        
+
         // Test multiple parameters
         let mut params2 = HashMap::new();
         params2.insert("user".to_string(), "john".to_string());
         params2.insert("id".to_string(), "123".to_string());
-        
+
         let backend2 = "http://backend:8080/users/{user}/posts/{id}";
         let result2 = ProxyHandler::process_backend_url_with_params(backend2, &params2).unwrap();
         assert_eq!(result2, "http://backend:8080/users/john/posts/123");

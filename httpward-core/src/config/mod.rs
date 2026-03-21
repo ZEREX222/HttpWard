@@ -6,10 +6,10 @@ mod loader;
 mod site;
 pub mod strategy;
 
-pub use global::{GlobalConfig, Listener, Route, Match, Redirect, Tls, LogConfig};
+pub use global::{GlobalConfig, Listener, LogConfig, Match, Redirect, Route, Tls};
 pub use loader::{AppConfig, load};
 pub use site::SiteConfig;
 pub use strategy::{
-    Strategy, LegacyStrategyCollection as StrategyCollection, StrategyRef,
-    MiddlewareConfig, UniversalValue
+    LegacyStrategyCollection as StrategyCollection, MiddlewareConfig, Strategy, StrategyRef,
+    UniversalValue,
 };

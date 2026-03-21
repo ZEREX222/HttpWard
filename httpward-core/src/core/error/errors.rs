@@ -1,7 +1,7 @@
 // File: httpward-core/src/httpward_middleware/errors.rs
 
-use std::fmt;
 use rama::http::StatusCode;
+use std::fmt;
 
 /// Custom error types for HttpWard middleware
 #[derive(Debug, Clone)]
@@ -109,7 +109,7 @@ impl HttpWardMiddlewareError {
             Self::BusinessLogicError { code, .. } => *code,
             Self::Custom { code, .. } => *code,
         };
-        
+
         StatusCode::from_u16(code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
     }
 
@@ -140,7 +140,13 @@ impl HttpWardMiddlewareError {
 
 impl fmt::Display for HttpWardMiddlewareError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}] {}: {}", self.status_code().as_u16(), self.title(), self.description())
+        write!(
+            f,
+            "[{}] {}: {}",
+            self.status_code().as_u16(),
+            self.title(),
+            self.description()
+        )
     }
 }
 

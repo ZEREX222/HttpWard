@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::config::global::{Listener, Route};
-use crate::config::strategy::{Strategy, StrategyRef, LegacyStrategyCollection as StrategyCollection};
+use crate::config::strategy::{
+    LegacyStrategyCollection as StrategyCollection, Strategy, StrategyRef,
+};
 
 /// Configuration for one virtual host / site
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
@@ -62,5 +64,4 @@ impl SiteConfig {
             middleware: Arc::new(middleware.clone()),
         })
     }
-
 }

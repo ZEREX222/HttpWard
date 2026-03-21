@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 /// HttpWard Rate Limiter Core Algorithm
 ///
 /// Token Bucket Algorithm Implementation with:
@@ -6,9 +7,7 @@
 /// - Support for multiple fingerprint types (IP, JA4, Header-based)
 /// - Route-scoped and global rate limit rules
 /// - Optimized memory management with configurable cache size
-
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
@@ -208,12 +207,7 @@ impl RateLimiter {
     }
 
     /// Register a new rate limit rule
-    pub fn add_rule(
-        &mut self,
-        kind: RateLimitKeyKind,
-        scope: RateLimitScope,
-        rule: RateLimitRule,
-    ) {
+    pub fn add_rule(&mut self, kind: RateLimitKeyKind, scope: RateLimitScope, rule: RateLimitRule) {
         self.rules.insert(RuleId { kind, scope }, rule.sanitized());
     }
 
@@ -237,7 +231,8 @@ impl RateLimiter {
             // If expired, recreate
             if bucket.expired(self.idle_ttl) {
                 let mut new_bucket = TokenBucket::new(rule.capacity);
-                let allowed = new_bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount);
+                let allowed =
+                    new_bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount);
                 self.buckets.insert(key.clone(), new_bucket);
                 return allowed;
             }
@@ -259,12 +254,7 @@ impl RateLimiter {
     }
 
     /// Check rate limit by components
-    pub fn check(
-        &mut self,
-        kind: RateLimitKeyKind,
-        scope: RateLimitScope,
-        value: &str,
-    ) -> bool {
+    pub fn check(&mut self, kind: RateLimitKeyKind, scope: RateLimitScope, value: &str) -> bool {
         self.maybe_cleanup();
         let key = self.make_key(kind, scope, value);
         self.check_key(&key)
@@ -287,7 +277,9 @@ impl RateLimiter {
     }
 
     fn maybe_cleanup(&mut self) {
-        if self.buckets.len() >= self.max_entries || self.last_cleanup.elapsed() >= self.cleanup_interval {
+        if self.buckets.len() >= self.max_entries
+            || self.last_cleanup.elapsed() >= self.cleanup_interval
+        {
             self.cleanup();
         }
     }
@@ -410,7 +402,8 @@ mod tests {
 
     #[test]
     fn test_cleanup_removes_idle_buckets() {
-        let mut limiter = RateLimiter::new(100, Duration::from_millis(20), Duration::from_millis(5));
+        let mut limiter =
+            RateLimiter::new(100, Duration::from_millis(20), Duration::from_millis(5));
 
         limiter.add_rule(
             RateLimitKeyKind::Ip,
@@ -431,8 +424,3 @@ mod tests {
         assert_eq!(limiter.bucket_count(), 0);
     }
 }
-
-
-
-
-

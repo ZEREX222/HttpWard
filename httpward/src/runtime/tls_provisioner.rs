@@ -6,7 +6,9 @@ use tracing::{debug, info};
 
 /// Provisions a self-signed certificate for a list of domains in the temp directory.
 /// The primary directory name is created by concatenating all domains with * and . replaced by _.
-pub fn provision_self_signed(domains: &[String]) -> Result<TlsPaths, Box<dyn std::error::Error + Send + Sync>> {
+pub fn provision_self_signed(
+    domains: &[String],
+) -> Result<TlsPaths, Box<dyn std::error::Error + Send + Sync>> {
     if domains.is_empty() {
         return Err("No domains provided for self-signed certificate generation".into());
     }
@@ -32,8 +34,14 @@ pub fn provision_self_signed(domains: &[String]) -> Result<TlsPaths, Box<dyn std
     // actually contains all the requested domains, but for local dev,
     // checking existence is usually enough.
     if cert_path.exists() && key_path.exists() {
-        debug!("Using existing self-signed certs for {} at {:?}", primary_domain, temp_dir);
-        return Ok(TlsPaths { cert: cert_path, key: key_path });
+        debug!(
+            "Using existing self-signed certs for {} at {:?}",
+            primary_domain, temp_dir
+        );
+        return Ok(TlsPaths {
+            cert: cert_path,
+            key: key_path,
+        });
     }
 
     // 3. Prepare Subject Alternative Names (SANs)
@@ -46,7 +54,10 @@ pub fn provision_self_signed(domains: &[String]) -> Result<TlsPaths, Box<dyn std
         subject_alt_names.push("127.0.0.1".to_string());
     }
 
-    info!("Generating new self-signed certificate for domains: {:?}", subject_alt_names);
+    info!(
+        "Generating new self-signed certificate for domains: {:?}",
+        subject_alt_names
+    );
 
     // 4. Generate new certificate
     let cert = generate_simple_self_signed(subject_alt_names)?;

@@ -1,20 +1,20 @@
+mod core;
 mod runtime;
 mod server;
-mod core;
 
 use httpward_core::config::load;
-use std::sync::Arc;
-use std::path::Path;
 use std::env;
+use std::path::Path;
+use std::sync::Arc;
 
-use tracing::{info, debug, warn};
-use tracing_subscriber::{EnvFilter};
+use crate::core::middleware::basic::MiddlewareModuleLoadManager;
+use crate::server::manager::HttpWardServerManager;
+use httpward_core::core::server_models::server_instance::ServerInstance;
+use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use runtime::server_plan::build_server_plan;
 use server::http_server::HttpWardServer;
-use crate::server::manager::HttpWardServerManager;
-use crate::core::middleware::basic::MiddlewareModuleLoadManager;
-use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
-use httpward_core::core::server_models::server_instance::ServerInstance;
+use tracing::{debug, info, warn};
+use tracing_subscriber::EnvFilter;
 
 // !!! STATIC MODULES ONLY FOR DEBUG!!!
 // Import static modules ONLY FOR DEBUG
@@ -23,7 +23,9 @@ use httpward_log_module::HttpWardLogLayer;
 #[cfg(feature = "static_modules")]
 use httpward_rate_limit_module::HttpWardRateLimitLayer;
 
-fn load_middleware_manager(server_plans: &[ServerInstance]) -> Result<MiddlewareModuleLoadManager, Box<dyn std::error::Error + Send + Sync>> {
+fn load_middleware_manager(
+    server_plans: &[ServerInstance],
+) -> Result<MiddlewareModuleLoadManager, Box<dyn std::error::Error + Send + Sync>> {
     // !!! STATIC MODULES ONLY FOR DEBUG IF YOU WANT TO DEBUG YOUR MIDDLEWARE MODULE!!!
     if cfg!(feature = "static_modules") {
         info!("Using static module loading");
@@ -31,9 +33,16 @@ fn load_middleware_manager(server_plans: &[ServerInstance]) -> Result<Middleware
         let static_modules = vec![
             // !!! ADD YOUR MIDDLEWARE MODULE HERE FOR LOCAL DEBUG !!!
             #[cfg(feature = "static_modules")]
-            ("httpward_log_module", Arc::new(HttpWardLogLayer::new()) as Arc<dyn HttpWardMiddleware + Send + Sync>),
+            (
+                "httpward_log_module",
+                Arc::new(HttpWardLogLayer::new()) as Arc<dyn HttpWardMiddleware + Send + Sync>,
+            ),
             #[cfg(feature = "static_modules")]
-            ("httpward_rate_limit_module", Arc::new(HttpWardRateLimitLayer::new()) as Arc<dyn HttpWardMiddleware + Send + Sync>)
+            (
+                "httpward_rate_limit_module",
+                Arc::new(HttpWardRateLimitLayer::new())
+                    as Arc<dyn HttpWardMiddleware + Send + Sync>,
+            ),
         ];
 
         MiddlewareModuleLoadManager::from_server_instances_statically(server_plans, static_modules)
@@ -45,7 +54,7 @@ fn load_middleware_manager(server_plans: &[ServerInstance]) -> Result<Middleware
 
 fn find_config_file(base_path: &str) -> String {
     let path = Path::new(base_path);
-    
+
     // If the path already has an extension, try it directly
     if let Some(extension) = path.extension() {
         if extension == "yaml" || extension == "yml" {
@@ -54,11 +63,11 @@ fn find_config_file(base_path: &str) -> String {
             }
         }
     }
-    
+
     // Try .yaml first, then .yml
     let yaml_path = format!("{}.yaml", base_path);
     let yml_path = format!("{}.yml", base_path);
-    
+
     if Path::new(&yaml_path).exists() {
         yaml_path
     } else if Path::new(&yml_path).exists() {
@@ -99,7 +108,7 @@ fn parse_args() -> Args {
     let args: Vec<String> = env::args().collect();
     let mut config = None;
     let mut help = false;
-    
+
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -123,23 +132,23 @@ fn parse_args() -> Args {
             }
         }
     }
-    
+
     Args { config, help }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = parse_args();
-    
+
     // Handle --help flag
     if args.help {
         print_help();
         return Ok(());
     }
-    
+
     let config_base_path = args.config.unwrap_or_else(|| "httpward".to_string());
     let config_path = find_config_file(&config_base_path);
-    
+
     info!("Loading config from: {}", config_path);
     let config = load(&config_path)?;
     info!("Config loaded successfully from: {}", config_path);
@@ -148,22 +157,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(config.global.log.level.to_string()));
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .init();
-    
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+
     // Update logging level from config if needed
     // Note: In a real implementation, you might want to reconfigure the subscriber
 
     info!("HttpWard starting...");
 
     let server_plans = build_server_plan(&config);
-    
+
     for server in &server_plans {
-        let total_tls_mappings: usize = server.site_managers.iter()
+        let total_tls_mappings: usize = server
+            .site_managers
+            .iter()
             .map(|sm| sm.tls_mappings().len())
             .sum();
-        
+
         debug!(
             "Will start server on {}:{} ({} sites attached / {} TLS attached)",
             server.bind.host,
@@ -171,37 +180,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             server.site_managers.len(),
             total_tls_mappings
         );
-        
+
         // Detailed server configuration
         debug!("  Server details:");
         debug!("    Bind: {}:{}", server.bind.host, server.bind.port);
-
 
         // Sites details
         debug!("    Sites attached:");
         for (i, site_manager) in server.site_managers.iter().enumerate() {
             debug!("      Site {}: '{}'", i, site_manager.site_domains());
-            debug!("        Domains: {:?}", site_manager.site_config().get_all_domains());
-            debug!("        Listeners: {} listeners", site_manager.site_config().listeners.len());
-            debug!("        Routes: {} routes", site_manager.site_config().routes.len());
+            debug!(
+                "        Domains: {:?}",
+                site_manager.site_config().get_all_domains()
+            );
+            debug!(
+                "        Listeners: {} listeners",
+                site_manager.site_config().listeners.len()
+            );
+            debug!(
+                "        Routes: {} routes",
+                site_manager.site_config().routes.len()
+            );
         }
 
         // TLS details
         debug!("    TLS registry:");
         for (site_idx, site_manager) in server.site_managers.iter().enumerate() {
             for (i, tls_mapping) in site_manager.tls_mappings().iter().enumerate() {
-                debug!("      TLS {}.{}: domains={:?}, cert={:?}, key={:?}", 
-                    site_idx, i, tls_mapping.domains, tls_mapping.paths.cert, tls_mapping.paths.key);
+                debug!(
+                    "      TLS {}.{}: domains={:?}, cert={:?}, key={:?}",
+                    site_idx, i, tls_mapping.domains, tls_mapping.paths.cert, tls_mapping.paths.key
+                );
             }
         }
-        
+
         debug!(""); // Empty line for readability
     }
 
     let manager_result = load_middleware_manager(&server_plans);
 
     if let Ok(manager) = manager_result {
-        debug!("Successfully loaded {} middleware modules", manager.module_count());
+        debug!(
+            "Successfully loaded {} middleware modules",
+            manager.module_count()
+        );
 
         // Display loaded modules
         for module_name in manager.module_names() {
@@ -219,7 +241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let server = HttpWardServer::new(plan);
         instances.push(server);
     }
-    
+
     // 4. Run all servers concurrently
     HttpWardServerManager::start_all(instances).await?;
 

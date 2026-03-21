@@ -1,8 +1,8 @@
 // server/server_instance.rs
-use std::sync::Arc;
-use crate::config::{SiteConfig, GlobalConfig};
+use crate::config::{GlobalConfig, SiteConfig};
 use crate::core::server_models::listener::ListenerKey;
 use crate::core::server_models::site_manager::SiteManager;
+use std::sync::Arc;
 
 /// Runtime server instance description.
 #[derive(Debug, Clone)]

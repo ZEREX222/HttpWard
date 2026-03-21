@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod off_tests {
-    use crate::config::strategy::{MiddlewareConfig, supplement_middleware, filter_disabled_middleware};
+    use crate::config::strategy::{
+        MiddlewareConfig, filter_disabled_middleware, supplement_middleware,
+    };
     use serde_json::json;
 
     #[test]
@@ -37,19 +39,14 @@ mod off_tests {
     #[test]
     fn test_supplement_middleware_with_off() {
         // Current has rate_limit enabled, incoming has it disabled
-        let mut current = vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({"requests": 100, "window": "1m"})
-            ),
-        ];
+        let mut current = vec![MiddlewareConfig::new_named_json(
+            "rate_limit".to_string(),
+            json!({"requests": 100, "window": "1m"}),
+        )];
 
         let incoming = vec![
             MiddlewareConfig::new_off("rate_limit".to_string()),
-            MiddlewareConfig::new_named_json(
-                "logging".to_string(),
-                json!({"level": "info"})
-            ),
+            MiddlewareConfig::new_named_json("logging".to_string(), json!({"level": "info"})),
         ];
 
         supplement_middleware(&mut current, &incoming).unwrap();
@@ -68,16 +65,12 @@ mod off_tests {
     #[test]
     fn test_supplement_middleware_enable_disabled() {
         // Current has rate_limit disabled, incoming has it enabled
-        let mut current = vec![
-            MiddlewareConfig::new_off("rate_limit".to_string()),
-        ];
+        let mut current = vec![MiddlewareConfig::new_off("rate_limit".to_string())];
 
-        let incoming = vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({"requests": 200, "window": "2m"})
-            ),
-        ];
+        let incoming = vec![MiddlewareConfig::new_named_json(
+            "rate_limit".to_string(),
+            json!({"requests": 200, "window": "2m"}),
+        )];
 
         supplement_middleware(&mut current, &incoming).unwrap();
 
@@ -93,27 +86,15 @@ mod off_tests {
     fn test_filter_disabled_middleware() {
         // Current has some enabled and disabled middleware
         let mut current = vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({"requests": 100})
-            ),
+            MiddlewareConfig::new_named_json("rate_limit".to_string(), json!({"requests": 100})),
             MiddlewareConfig::new_off("logging".to_string()),
         ];
 
         // Parent has different states
         let parent = vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({"requests": 200})
-            ),
-            MiddlewareConfig::new_named_json(
-                "logging".to_string(),
-                json!({"level": "info"})
-            ),
-            MiddlewareConfig::new_named_json(
-                "cors".to_string(),
-                json!({"origins": ["*"]})
-            ),
+            MiddlewareConfig::new_named_json("rate_limit".to_string(), json!({"requests": 200})),
+            MiddlewareConfig::new_named_json("logging".to_string(), json!({"level": "info"})),
+            MiddlewareConfig::new_named_json("cors".to_string(), json!({"origins": ["*"]})),
         ];
 
         filter_disabled_middleware(&mut current, &parent).unwrap();
@@ -122,7 +103,7 @@ mod off_tests {
         // Logging: disabled in current, enabled in parent -> keep disabled (current takes precedence)
         // Cors: not in current, enabled in parent -> add from parent
         assert_eq!(current.len(), 3);
-        
+
         let names: Vec<String> = current.iter().map(|m| m.name().to_string()).collect();
         assert!(names.contains(&"rate_limit".to_string()));
         assert!(names.contains(&"logging".to_string()));
@@ -144,39 +125,32 @@ mod off_tests {
     #[test]
     fn test_real_scenario_off_inheritance() {
         // Test the exact scenario from user request
-        let mut current = vec![
-            MiddlewareConfig::new_off("rate_limit".to_string()),
-        ];
+        let mut current = vec![MiddlewareConfig::new_off("rate_limit".to_string())];
 
         // Site strategy that enables rate_limit
         let site = vec![
             MiddlewareConfig::new_named_json(
                 "rate_limit".to_string(),
-                json!({"requests": 166, "window": "00m", "lolo": "55m"})
+                json!({"requests": 166, "window": "00m", "lolo": "55m"}),
             ),
-            MiddlewareConfig::new_named_json(
-                "logging".to_string(),
-                json!({"level": "info"})
-            ),
+            MiddlewareConfig::new_named_json("logging".to_string(), json!({"level": "info"})),
         ];
 
         // Global strategy that has rate_limit enabled
-        let global = vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({"requests": 55, "window": "12m", "helou": "helou"})
-            ),
-        ];
+        let global = vec![MiddlewareConfig::new_named_json(
+            "rate_limit".to_string(),
+            json!({"requests": 55, "window": "12m", "helou": "helou"}),
+        )];
 
         // Apply site inheritance (should NOT enable rate_limit)
         supplement_middleware(&mut current, &site).unwrap();
-        
+
         // Then apply global inheritance (should NOT enable rate_limit)
         supplement_middleware(&mut current, &global).unwrap();
 
         // Final result should have rate_limit still disabled (inline takes precedence)
         assert_eq!(current.len(), 2);
-        
+
         let rate_limit = current.iter().find(|m| m.name() == "rate_limit").unwrap();
         assert!(rate_limit.is_off()); // Should remain disabled
 
@@ -192,35 +166,20 @@ mod off_tests {
         // Test complex inheritance: global -> site -> inline
         let mut current = vec![
             MiddlewareConfig::new_off("rate_limit".to_string()),
-            MiddlewareConfig::new_named_json(
-                "logging".to_string(),
-                json!({"level": "debug"})
-            ),
+            MiddlewareConfig::new_named_json("logging".to_string(), json!({"level": "debug"})),
         ];
 
         // Site strategy
         let site = vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({"requests": 166})
-            ),
+            MiddlewareConfig::new_named_json("rate_limit".to_string(), json!({"requests": 166})),
             MiddlewareConfig::new_off("cors".to_string()),
         ];
 
         // Global strategy
         let global = vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({"window": "12m"})
-            ),
-            MiddlewareConfig::new_named_json(
-                "cors".to_string(),
-                json!({"origins": ["*"]})
-            ),
-            MiddlewareConfig::new_named_json(
-                "auth".to_string(),
-                json!({"type": "jwt"})
-            ),
+            MiddlewareConfig::new_named_json("rate_limit".to_string(), json!({"window": "12m"})),
+            MiddlewareConfig::new_named_json("cors".to_string(), json!({"origins": ["*"]})),
+            MiddlewareConfig::new_named_json("auth".to_string(), json!({"type": "jwt"})),
         ];
 
         // Apply inheritance chain
@@ -242,7 +201,7 @@ mod off_tests {
 
         let rate_limit = current.iter().find(|m| m.name() == "rate_limit").unwrap();
         assert!(rate_limit.is_off()); // Should stay disabled (inline takes precedence)
-        
+
         let logging = current.iter().find(|m| m.name() == "logging").unwrap();
         assert!(!logging.is_off());
 
@@ -265,7 +224,7 @@ mod off_tests {
         "#;
 
         let strategies: Vec<MiddlewareConfig> = serde_yaml::from_str(yaml).unwrap();
-        
+
         assert_eq!(strategies.len(), 2);
         assert!(strategies[0].is_off()); // rate_limit: off
         assert!(!strategies[1].is_off()); // logging enabled
@@ -278,7 +237,7 @@ mod off_tests {
         "#;
 
         let strategies2: Vec<MiddlewareConfig> = serde_yaml::from_str(yaml2).unwrap();
-        
+
         assert_eq!(strategies2.len(), 2);
         assert!(!strategies2[0].is_off()); // rate_limit enabled
         assert!(strategies2[1].is_off()); // logging: false
@@ -309,26 +268,25 @@ mod off_tests {
 
     #[test]
     fn test_supplement_middleware_with_on_inherits_parent_config() {
-        let mut current = vec![
-            MiddlewareConfig::new_on("httpward_log_module".to_string()),
-        ];
+        let mut current = vec![MiddlewareConfig::new_on("httpward_log_module".to_string())];
 
-        let incoming = vec![
-            MiddlewareConfig::new_named_json(
-                "httpward_log_module".to_string(),
-                json!({"level": "info", "format": "json"})
-            ),
-        ];
+        let incoming = vec![MiddlewareConfig::new_named_json(
+            "httpward_log_module".to_string(),
+            json!({"level": "info", "format": "json"}),
+        )];
 
         supplement_middleware(&mut current, &incoming).unwrap();
 
         assert_eq!(current.len(), 1);
         assert_eq!(current[0].name(), "httpward_log_module");
         assert!(!current[0].is_off());
-        assert_eq!(current[0].config_as_json().unwrap(), json!({
-            "level": "info",
-            "format": "json"
-        }));
+        assert_eq!(
+            current[0].config_as_json().unwrap(),
+            json!({
+                "level": "info",
+                "format": "json"
+            })
+        );
 
         println!("✅ MiddlewareConfig on inherits parent config correctly");
     }

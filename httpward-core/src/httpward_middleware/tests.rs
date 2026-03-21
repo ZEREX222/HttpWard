@@ -2,10 +2,13 @@
 mod tests {
     use crate::httpward_middleware::HttpWardMiddlewarePipe;
     use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
-    use crate::httpward_middleware::types::BoxError;
     use crate::httpward_middleware::next::Next;
+    use crate::httpward_middleware::types::BoxError;
     use async_trait::async_trait;
-    use rama::{Context, http::{Request, Response, Body}};
+    use rama::{
+        Context,
+        http::{Body, Request, Response},
+    };
     use std::fmt::Debug;
 
     // Simple test middleware for testing purposes
@@ -14,7 +17,12 @@ mod tests {
 
     #[async_trait]
     impl HttpWardMiddleware for TestMiddleware {
-        async fn handle(&self, _ctx: Context<()>, _req: Request<Body>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
+        async fn handle(
+            &self,
+            _ctx: Context<()>,
+            _req: Request<Body>,
+            next: Next<'_>,
+        ) -> Result<Response<Body>, BoxError> {
             next.run(_ctx, _req).await
         }
 
@@ -45,7 +53,7 @@ mod tests {
         let pipe = HttpWardMiddlewarePipe::new()
             .add_layer(TestMiddleware)
             .unwrap();
-        
+
         assert_eq!(pipe.len(), 1);
     }
 }

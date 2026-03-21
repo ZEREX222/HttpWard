@@ -66,4 +66,3 @@ impl HttpWardRateLimitContext {
         self.ja4_fp = None;
     }
 }
-

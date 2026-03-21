@@ -109,14 +109,20 @@ fn schema_type_summary(node: &Value) -> String {
     }
 
     if let Some(variants) = union_variants(node) {
-        let non_null: Vec<&Value> = variants.iter().filter(|variant| !is_null_schema(variant)).collect();
+        let non_null: Vec<&Value> = variants
+            .iter()
+            .filter(|variant| !is_null_schema(variant))
+            .collect();
 
         if non_null.len() == 1 && variants.len() > 1 {
             return format!("optional {}", schema_type_summary(non_null[0]));
         }
 
         if !non_null.is_empty() {
-            let parts: Vec<String> = non_null.iter().map(|variant| schema_type_summary(variant)).collect();
+            let parts: Vec<String> = non_null
+                .iter()
+                .map(|variant| schema_type_summary(variant))
+                .collect();
             return format!("one of: {}", parts.join(" or "));
         }
     }
@@ -147,7 +153,11 @@ fn schema_type_summary(node: &Value) -> String {
     if let Some(values) = node.get("enum").and_then(Value::as_array) {
         return format!(
             "enum: {}",
-            values.iter().map(literal_markdown).collect::<Vec<_>>().join(", ")
+            values
+                .iter()
+                .map(literal_markdown)
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
 
@@ -196,7 +206,9 @@ fn default_summary(node: &Value) -> String {
         Some("array") => "`[]`".to_string(),
         Some("object") => "`{}`".to_string(),
         _ if node.get("additionalProperties").is_some() => "`{}`".to_string(),
-        _ if node.get("$ref").is_some() || union_variants(node).is_some() => "see examples".to_string(),
+        _ if node.get("$ref").is_some() || union_variants(node).is_some() => {
+            "see examples".to_string()
+        }
         _ => "—".to_string(),
     }
 }
@@ -223,7 +235,11 @@ fn render_properties_table(node: &Value) -> String {
             "| `{}` | {} | {} | {} | {} |\n",
             escape_md_text(field),
             schema_type_summary(schema),
-            if required.contains(field) { "yes" } else { "no" },
+            if required.contains(field) {
+                "yes"
+            } else {
+                "no"
+            },
             default_summary(schema),
             description,
         ));
@@ -239,7 +255,12 @@ fn render_yaml_example(title: &str, yaml: &str) -> String {
 }
 
 fn render_section(title: &str, body: &str) -> String {
-    format!("<a id=\"{}\"></a>\n\n## {}\n\n{}\n\n", anchor_for(title), title, body.trim())
+    format!(
+        "<a id=\"{}\"></a>\n\n## {}\n\n{}\n\n",
+        anchor_for(title),
+        title,
+        body.trim()
+    )
 }
 
 fn render_object_reference_section(
@@ -249,7 +270,11 @@ fn render_object_reference_section(
     examples: Vec<(String, String)>,
 ) -> String {
     let mut out = String::new();
-    out.push_str(&format!("<a id=\"{}\"></a>\n\n## `{}`\n\n", anchor_for(name), name));
+    out.push_str(&format!(
+        "<a id=\"{}\"></a>\n\n## `{}`\n\n",
+        anchor_for(name),
+        name
+    ));
 
     if !intro.trim().is_empty() {
         out.push_str(intro.trim());
@@ -306,7 +331,10 @@ redirect:
 
 fn render_route_section(def: &Value) -> String {
     let mut out = String::new();
-    out.push_str(&format!("<a id=\"{}\"></a>\n\n## `Route`\n\n", anchor_for("Route")));
+    out.push_str(&format!(
+        "<a id=\"{}\"></a>\n\n## `Route`\n\n",
+        anchor_for("Route")
+    ));
     out.push_str("A route decides what HttpWard should do with a matching request. In practice there are three forms: proxy to an upstream, serve static files, or return a redirect.\n\n");
     out.push_str("Common fields:\n\n");
     out.push_str("- `match` — path matcher. Prefer `path` when possible; use `path_regex` only when you really need regex behavior.\n");
@@ -318,7 +346,10 @@ fn render_route_section(def: &Value) -> String {
             let title = route_variant_name(variant);
             out.push_str(&format!("### {}\n\n", title));
             out.push_str(&render_properties_table(variant));
-            out.push_str(&render_yaml_example("Example", route_variant_example(title)));
+            out.push_str(&render_yaml_example(
+                "Example",
+                route_variant_example(title),
+            ));
         }
     }
 
@@ -328,11 +359,17 @@ fn render_route_section(def: &Value) -> String {
 
 fn render_strategy_ref_section() -> String {
     let mut out = String::new();
-    out.push_str(&format!("<a id=\"{}\"></a>\n\n## `StrategyRef`\n\n", anchor_for("StrategyRef")));
+    out.push_str(&format!(
+        "<a id=\"{}\"></a>\n\n## `StrategyRef`\n\n",
+        anchor_for("StrategyRef")
+    ));
     out.push_str("A strategy reference can be written in two user-friendly ways.\n\n");
     out.push_str("1. **Named strategy** — points to a strategy defined in `strategies.yml` or in a local `strategies:` map.\n");
     out.push_str("2. **Inline middleware list** — define middleware directly where the strategy is used.\n\n");
-    out.push_str(&render_yaml_example("Named strategy", "strategy: \"default\""));
+    out.push_str(&render_yaml_example(
+        "Named strategy",
+        "strategy: \"default\"",
+    ));
     out.push_str(&render_yaml_example(
         "Inline strategy",
         r#"strategy:
@@ -348,7 +385,10 @@ fn render_strategy_ref_section() -> String {
 
 fn render_middleware_config_section() -> String {
     let mut out = String::new();
-    out.push_str(&format!("<a id=\"{}\"></a>\n\n## `MiddlewareConfig`\n\n", anchor_for("MiddlewareConfig")));
+    out.push_str(&format!(
+        "<a id=\"{}\"></a>\n\n## `MiddlewareConfig`\n\n",
+        anchor_for("MiddlewareConfig")
+    ));
     out.push_str("Each middleware item in a strategy is a single-key YAML object. The key is the middleware name; the value is either its configuration, `off`, or `false`.\n\n");
     out.push_str(&render_yaml_example(
         "Enabled middleware",
@@ -377,7 +417,9 @@ fn read_optional_file(path: &Path) -> Option<String> {
 fn find_site_example(workspace_root: &Path) -> Option<(String, String)> {
     let sites_dir = workspace_root.join("sites-enabled");
     let entries = fs::read_dir(&sites_dir).ok()?;
-    let mut paths: Vec<PathBuf> = entries.filter_map(|entry| entry.ok().map(|entry| entry.path())).collect();
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .collect();
     paths.sort();
 
     for path in paths {
@@ -493,8 +535,12 @@ fn render_configuration_markdown(schema: &Value, workspace_root: &Path) -> Strin
         .or_else(|| read_optional_file(&workspace_root.join("strategies.yaml")));
     let site_example = find_site_example(workspace_root);
 
-    let global_def = defs.get("GlobalConfig").expect("GlobalConfig schema definition");
-    let site_def = defs.get("SiteConfig").expect("SiteConfig schema definition");
+    let global_def = defs
+        .get("GlobalConfig")
+        .expect("GlobalConfig schema definition");
+    let site_def = defs
+        .get("SiteConfig")
+        .expect("SiteConfig schema definition");
     let listener_def = defs.get("Listener").expect("Listener schema definition");
     let tls_def = defs.get("Tls").expect("Tls schema definition");
     let match_def = defs.get("Match").expect("Match schema definition");
@@ -538,21 +584,33 @@ fn render_configuration_markdown(schema: &Value, workspace_root: &Path) -> Strin
     let quick_start_body = format!(
         "Use this structure when you want to split config by domains:\n\n1. Keep global listeners, shared routes, and shared strategies in `httpward.yaml`.\n2. Set `sites_enabled: \"./sites-enabled\"` in `httpward.yaml`.\n3. Put one or more site files into `sites-enabled/` (for example `sites-enabled/test.local.yml`) with `domain` or `domains`.\n\n{}{}{}{}",
         render_yaml_example("Minimal `httpward.yaml`", minimal_httpward_yaml()),
-        render_yaml_example("Recommended multi-site `httpward.yaml`", multisite_httpward_yaml()),
+        render_yaml_example(
+            "Recommended multi-site `httpward.yaml`",
+            multisite_httpward_yaml()
+        ),
         render_yaml_example("Minimal `strategies.yml`", minimal_strategies_yaml()),
-        render_yaml_example("Recommended `sites-enabled/test.local.yml`", multisite_site_yaml()),
+        render_yaml_example(
+            "Recommended `sites-enabled/test.local.yml`",
+            multisite_site_yaml()
+        ),
     );
     md.push_str(&render_section("Quick start", &quick_start_body));
 
-    md.push_str(&render_section("How `domains` matching works", domains_matching_notes()));
+    md.push_str(&render_section(
+        "How `domains` matching works",
+        domains_matching_notes(),
+    ));
 
     let mut app_config_body = String::new();
     app_config_body.push_str("`AppConfig` is the combined in-memory model, not a file you write by hand. It is useful for tooling, validation, and the generated `config.schema.json`.\n\n");
     app_config_body.push_str("| Field | Type | Description |\n");
     app_config_body.push_str("|---|---|---|\n");
-    app_config_body.push_str("| `global` | [`GlobalConfig`](#globalconfig) | Parsed from `httpward.yaml` |\n");
+    app_config_body
+        .push_str("| `global` | [`GlobalConfig`](#globalconfig) | Parsed from `httpward.yaml` |\n");
     app_config_body.push_str("| `sites` | list of [`SiteConfig`](#siteconfig) | Parsed from the directory configured in `sites_enabled` |\n\n");
-    app_config_body.push_str("The JSON Schema generated from this type is written to `docs/config.schema.json`.\n");
+    app_config_body.push_str(
+        "The JSON Schema generated from this type is written to `docs/config.schema.json`.\n",
+    );
     md.push_str(&render_section("AppConfig", &app_config_body));
 
     let mut global_examples = vec![(
@@ -580,11 +638,19 @@ fn render_configuration_markdown(schema: &Value, workspace_root: &Path) -> Strin
         ),
     ];
     if let Some((name, example)) = &site_example {
-        site_examples.push((format!("Example from this repository: `sites-enabled/{}`", name), example.clone()));
+        site_examples.push((
+            format!("Example from this repository: `sites-enabled/{}`", name),
+            example.clone(),
+        ));
     }
     md.push_str(&format!("<a id=\"{}\"></a>\n\n## Global file: `httpward.yaml`\n\nThis section documents the fields of [`GlobalConfig`](#globalconfig).\n\n[↑ Back to top](#table-of-contents)\n\n", anchor_for("Global file: `httpward.yaml`")));
     md.push_str(&format!("<a id=\"{}\"></a>\n\n## Site files: `sites-enabled/*.yml`\n\nEach file in `sites-enabled/` describes one site or virtual host. For domain-based separation, set `sites_enabled: \"./sites-enabled\"` in `httpward.yaml` and keep per-domain configs here (for example `sites-enabled/test.local.yml`, `sites-enabled/api.example.com.yml`). Site settings can override global listeners, routes, and strategies when needed.\n\n", anchor_for("Site files: `sites-enabled/*.yml`")));
-    md.push_str(&render_object_reference_section("SiteConfig", "", site_def, site_examples));
+    md.push_str(&render_object_reference_section(
+        "SiteConfig",
+        "",
+        site_def,
+        site_examples,
+    ));
 
     let mut strategies_body = String::new();
     strategies_body.push_str("`strategies.yml` is a map of strategy name to an array of middleware entries. It is the best place for reusable policies such as logging, rate limiting, auth, or headers.\n\n");
@@ -592,10 +658,13 @@ fn render_configuration_markdown(schema: &Value, workspace_root: &Path) -> Strin
     strategies_body.push_str("- the top-level key is the strategy name;\n");
     strategies_body.push_str("- the value is a YAML list;\n");
     strategies_body.push_str("- each list item is a [`MiddlewareConfig`](#middlewareconfig);\n");
-    strategies_body.push_str("- you can reference a strategy by name with [`StrategyRef`](#strategyref).\n\n");
+    strategies_body
+        .push_str("- you can reference a strategy by name with [`StrategyRef`](#strategyref).\n\n");
     strategies_body.push_str(&render_yaml_example(
         "Reusable strategies",
-        strategies_example.as_deref().unwrap_or(minimal_strategies_yaml()),
+        strategies_example
+            .as_deref()
+            .unwrap_or(minimal_strategies_yaml()),
     ));
     strategies_body.push_str(&render_yaml_example(
         "Disable one inherited middleware",
@@ -606,7 +675,10 @@ fn render_configuration_markdown(schema: &Value, workspace_root: &Path) -> Strin
   - logging: off"#,
     ));
     strategies_body.push_str("[↑ Back to top](#table-of-contents)\n");
-    md.push_str(&render_section("Strategies file: `strategies.yml`", &strategies_body));
+    md.push_str(&render_section(
+        "Strategies file: `strategies.yml`",
+        &strategies_body,
+    ));
 
     md.push_str(&render_section(
         "Reusable types",
@@ -796,12 +868,18 @@ routes:
         repo_examples.push_str(&render_yaml_example("Current `strategies.yml`", &example));
     }
     if let Some((name, example)) = site_example {
-        repo_examples.push_str(&render_yaml_example(&format!("Current `sites-enabled/{}`", name), &example));
+        repo_examples.push_str(&render_yaml_example(
+            &format!("Current `sites-enabled/{}`", name),
+            &example,
+        ));
     }
     if repo_examples.is_empty() {
         repo_examples.push_str("No repository examples were found next to the generator.\n");
     }
-    md.push_str(&render_section("Examples from this repository", &repo_examples));
+    md.push_str(&render_section(
+        "Examples from this repository",
+        &repo_examples,
+    ));
 
     md
 }
@@ -809,7 +887,8 @@ routes:
 fn main() -> io::Result<()> {
     let schema = schema_for!(AppConfig);
     let json_schema = serde_json::to_string_pretty(&schema).expect("failed to serialize schema");
-    let schema_value: Value = serde_json::from_str(&json_schema).expect("failed to parse JSON schema");
+    let schema_value: Value =
+        serde_json::from_str(&json_schema).expect("failed to parse JSON schema");
 
     let workspace_root = workspace_root();
     let docs_dir = workspace_root.join("docs");
@@ -822,12 +901,18 @@ fn main() -> io::Result<()> {
     let configuration_md = render_configuration_markdown(&schema_value, &workspace_root);
     let configuration_path = docs_dir.join("configuration/configuration.md");
     fs::write(&configuration_path, configuration_md)?;
-    println!("Configuration reference successfully written -> {}", configuration_path.display());
+    println!(
+        "Configuration reference successfully written -> {}",
+        configuration_path.display()
+    );
 
     let examples_md = render_examples_markdown(&workspace_root);
     let examples_path = docs_dir.join("configuration/configuration-examples.md");
     fs::write(&examples_path, examples_md)?;
-    println!("Configuration examples successfully written -> {}", examples_path.display());
+    println!(
+        "Configuration examples successfully written -> {}",
+        examples_path.display()
+    );
 
     Ok(())
 }

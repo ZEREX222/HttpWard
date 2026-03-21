@@ -1,12 +1,12 @@
 // File: httpward-core/src/httpward_middleware/middleware_trait.rs
 
-use async_trait::async_trait;
-use std::sync::Arc;
 use crate::core::server_models::server_instance::ServerInstance;
-use crate::httpward_middleware::types::BoxError;
-use rama::http::{Body, Request, Response};
-use rama::Context;
 use crate::httpward_middleware::next::Next;
+use crate::httpward_middleware::types::BoxError;
+use async_trait::async_trait;
+use rama::Context;
+use rama::http::{Body, Request, Response};
+use std::sync::Arc;
 
 /// HttpWard middleware trait — object-safe, async.
 #[async_trait]
@@ -34,7 +34,7 @@ pub trait HttpWardMiddleware: Send + Sync + 'static {
     fn name(&self) -> Option<&'static str> {
         None
     }
-    
+
     /// Dependencies on other middleware (must be present earlier in pipe)
     fn dependencies(&self) -> Vec<&'static str> {
         Vec::new()

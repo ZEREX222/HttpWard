@@ -3,13 +3,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use notify::{Watcher, RecursiveMode, RecommendedWatcher, Event, EventKind};
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
-use tracing::{info, error};
+use tracing::{error, info};
 
+use super::tls::{FallbackSniResolver, TlsError, build_certified_key};
 use httpward_core::core::server_models::site_manager::TlsMapping;
-use super::tls::{FallbackSniResolver, build_certified_key, TlsError};
 use rama_tls_rustls::dep::rustls::sign::CertifiedKey;
 
 /// Global TlsFileWatcher manager to prevent duplicate watchers
@@ -23,17 +23,25 @@ pub struct TlsWatcherManager {
 impl TlsWatcherManager {
     /// Get or create the global watcher manager instance
     pub fn instance() -> Arc<Self> {
-        TLS_WATCHER_MANAGER.get_or_init(|| {
-            Arc::new(Self {
-                unique_files: Arc::new(tokio::sync::RwLock::new(std::collections::HashSet::new())),
+        TLS_WATCHER_MANAGER
+            .get_or_init(|| {
+                Arc::new(Self {
+                    unique_files: Arc::new(tokio::sync::RwLock::new(
+                        std::collections::HashSet::new(),
+                    )),
+                })
             })
-        }).clone()
+            .clone()
     }
 
     /// Register mappings and ensure unique watchers are created
-    pub async fn register_mappings(&self, mappings: Vec<TlsMapping>, resolver: Arc<FallbackSniResolver>) -> Result<(), TlsError> {
+    pub async fn register_mappings(
+        &self,
+        mappings: Vec<TlsMapping>,
+        resolver: Arc<FallbackSniResolver>,
+    ) -> Result<(), TlsError> {
         let mut unique_files = std::collections::HashSet::new();
-        
+
         // Collect all unique files from mappings
         for mapping in &mappings {
             unique_files.insert(mapping.paths.cert.clone());
@@ -56,7 +64,7 @@ impl TlsWatcherManager {
         if !files_to_watch.is_empty() {
             let watcher = TlsFileWatcher::new(mappings, resolver.clone())
                 .with_debounce_delay(Duration::from_millis(1000));
-            
+
             // Start the watcher in background
             tokio::spawn(async move {
                 if let Err(e) = watcher.run().await {
@@ -79,10 +87,7 @@ pub struct TlsFileWatcher {
 
 impl TlsFileWatcher {
     /// Create a new TLS file watcher
-    pub fn new(
-        mappings: Vec<TlsMapping>, 
-        resolver: Arc<FallbackSniResolver>,
-    ) -> Self {
+    pub fn new(mappings: Vec<TlsMapping>, resolver: Arc<FallbackSniResolver>) -> Self {
         let file_to_domains = Self::build_file_to_domains(&mappings);
         Self {
             mappings,
@@ -94,7 +99,7 @@ impl TlsFileWatcher {
 
     /// Create a new TLS file watcher with async callback
     pub fn new_with_async_callback(
-        mappings: Vec<TlsMapping>, 
+        mappings: Vec<TlsMapping>,
         resolver: Arc<FallbackSniResolver>,
     ) -> Self {
         let file_to_domains = Self::build_file_to_domains(&mappings);
@@ -109,7 +114,7 @@ impl TlsFileWatcher {
     /// Build reverse mapping: file path -> domains
     fn build_file_to_domains(mappings: &[TlsMapping]) -> HashMap<PathBuf, Vec<String>> {
         let mut file_to_domains: HashMap<PathBuf, Vec<String>> = HashMap::new();
-        
+
         for mapping in mappings {
             for domain in &mapping.domains {
                 file_to_domains
@@ -163,7 +168,7 @@ impl TlsFileWatcher {
                 watched_paths.insert(mapping.paths.cert.clone());
                 info!("Watching certificate file: {:?}", mapping.paths.cert);
             }
-            
+
             if !watched_paths.contains(&mapping.paths.key) {
                 watcher.watch(&mapping.paths.key, RecursiveMode::NonRecursive)?;
                 watched_paths.insert(mapping.paths.key.clone());
@@ -171,12 +176,15 @@ impl TlsFileWatcher {
             }
         }
 
-        info!("TLS file watcher started successfully with {}ms debounce delay", self.debounce_delay.as_millis());
+        info!(
+            "TLS file watcher started successfully with {}ms debounce delay",
+            self.debounce_delay.as_millis()
+        );
 
         // Process events with debouncing
         let mut pending_changes: HashMap<PathBuf, tokio::time::Instant> = HashMap::new();
         let mut debounce_task: Option<tokio::task::JoinHandle<()>> = None;
-        
+
         while let Some(path) = rx.recv().await {
             let now = tokio::time::Instant::now();
             pending_changes.insert(path.clone(), now);
@@ -192,24 +200,35 @@ impl TlsFileWatcher {
             let file_to_domains = self.file_to_domains.clone();
             let mappings = self.mappings.clone();
             let resolver = self.resolver.clone();
-            
+
             debounce_task = Some(tokio::spawn(async move {
                 sleep(debounce_delay).await;
-                
+
                 // Process all pending changes after debounce delay
                 for (path, _) in pending_paths {
                     if let Some(domains) = file_to_domains.get(&path) {
                         info!("Processing debounced file change: {:?}", path);
-                        
+
                         for domain in domains {
-                            if let Some(mapping) = mappings.iter().find(|m| m.domains.contains(domain)) {
+                            if let Some(mapping) =
+                                mappings.iter().find(|m| m.domains.contains(domain))
+                            {
                                 match Self::reload_single_mapping_static(mapping).await {
                                     Ok(certified_key) => {
-                                        resolver.update_domain_certificate(Some(&domain), certified_key);
-                                        info!("Successfully reloaded TLS certificate for domain: {}", domain);
+                                        resolver.update_domain_certificate(
+                                            Some(&domain),
+                                            certified_key,
+                                        );
+                                        info!(
+                                            "Successfully reloaded TLS certificate for domain: {}",
+                                            domain
+                                        );
                                     }
                                     Err(e) => {
-                                        error!("Failed to reload TLS certificate for domain {}: {:?}", domain, e);
+                                        error!(
+                                            "Failed to reload TLS certificate for domain {}: {:?}",
+                                            domain, e
+                                        );
                                     }
                                 }
                             }
@@ -223,7 +242,9 @@ impl TlsFileWatcher {
     }
 
     /// Static version of reload_single_mapping for use in async blocks
-    pub async fn reload_single_mapping_static(mapping: &TlsMapping) -> Result<Arc<CertifiedKey>, TlsError> {
+    pub async fn reload_single_mapping_static(
+        mapping: &TlsMapping,
+    ) -> Result<Arc<CertifiedKey>, TlsError> {
         build_certified_key(&mapping.paths.cert, &mapping.paths.key).await
     }
 }

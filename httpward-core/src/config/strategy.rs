@@ -1,10 +1,10 @@
-use serde::{Deserialize, Serialize, Deserializer};
-use std::collections::HashMap;
-use std::sync::Arc;
 use anyhow::Result;
 use schemars::JsonSchema;
-use serde_yaml::Value;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json;
+use serde_yaml::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Universal wrapper type for working with YAML and JSON values
 #[derive(Debug, Clone)]
@@ -20,42 +20,40 @@ impl UniversalValue {
             UniversalValue::Json(v) => Ok(v.clone()),
             UniversalValue::Yaml(v) => {
                 // Use direct conversion method via serde_json::to_value
-                serde_json::to_value(v).map_err(|e| {
-                    anyhow::anyhow!("Failed to convert YAML to JSON: {}", e)
-                })
+                serde_json::to_value(v)
+                    .map_err(|e| anyhow::anyhow!("Failed to convert YAML to JSON: {}", e))
             }
         }
     }
-    
+
     /// Convert to YAML Value
     pub fn as_yaml(&self) -> Result<serde_yaml::Value> {
         match self {
             UniversalValue::Yaml(v) => Ok(v.clone()),
             UniversalValue::Json(v) => {
                 // Use direct conversion method via serde_yaml::to_value
-                serde_yaml::to_value(v).map_err(|e| {
-                    anyhow::anyhow!("Failed to convert JSON to YAML: {}", e)
-                })
+                serde_yaml::to_value(v)
+                    .map_err(|e| anyhow::anyhow!("Failed to convert JSON to YAML: {}", e))
             }
         }
     }
-    
+
     /// Create from JSON Value
     pub fn from_json(value: serde_json::Value) -> Self {
         UniversalValue::Json(value)
     }
-    
+
     /// Create from YAML Value
     pub fn from_yaml(value: serde_yaml::Value) -> Self {
         UniversalValue::Yaml(value)
     }
-    
+
     /// Get as JSON string
     pub fn to_json_string(&self) -> Result<String> {
         let json_val = self.as_json()?;
         serde_json::to_string_pretty(&json_val).map_err(Into::into)
     }
-    
+
     /// Get as YAML string
     pub fn to_yaml_string(&self) -> Result<String> {
         let yaml_val = self.as_yaml()?;
@@ -66,7 +64,7 @@ impl UniversalValue {
 /// Deep merge YAML values - only add missing properties
 fn merge_yaml_missing_only(target: &mut Value, source: Value) {
     let is_null = matches!(target, Value::Null);
-    
+
     if let (Value::Mapping(target_map), Value::Mapping(source_map)) = (&mut *target, &source) {
         for (k, v) in source_map {
             if !target_map.contains_key(&k) {
@@ -96,8 +94,10 @@ fn merge_yaml_missing_only(target: &mut Value, source: Value) {
 /// Deep merge JSON values - only add missing properties
 fn merge_json_missing_only(target: &mut serde_json::Value, source: serde_json::Value) {
     let is_null = matches!(target, serde_json::Value::Null);
-    
-    if let (serde_json::Value::Object(target_map), serde_json::Value::Object(source_map)) = (&mut *target, &source) {
+
+    if let (serde_json::Value::Object(target_map), serde_json::Value::Object(source_map)) =
+        (&mut *target, &source)
+    {
         for (k, v) in source_map {
             if !target_map.contains_key(k) {
                 // Key doesn't exist at all - add it
@@ -160,14 +160,23 @@ pub fn supplement_middleware_configs(
 
     for new_middleware in incoming {
         let name = new_middleware.name();
-        
+
         if let Some(&pos) = index.get(name) {
             // Only merge existing middleware configs - don't add new ones
             match (&mut current[pos], new_middleware) {
-                (MiddlewareConfig::Named { config: existing_config, .. }, MiddlewareConfig::Named { config, .. }) => {
+                (
+                    MiddlewareConfig::Named {
+                        config: existing_config,
+                        ..
+                    },
+                    MiddlewareConfig::Named { config, .. },
+                ) => {
                     merge_universal_missing_only(existing_config, config.clone())?;
                 }
-                (current_on @ MiddlewareConfig::On { .. }, MiddlewareConfig::Named { name, config }) => {
+                (
+                    current_on @ MiddlewareConfig::On { .. },
+                    MiddlewareConfig::Named { name, config },
+                ) => {
                     *current_on = MiddlewareConfig::Named {
                         name: name.clone(),
                         config: config.clone(),
@@ -201,10 +210,10 @@ pub fn filter_disabled_middleware(
 
     // Process current middleware
     let mut result = Vec::new();
-    
+
     for middleware in current.iter() {
         let name = middleware.name();
-        
+
         match middleware {
             MiddlewareConfig::Off { .. } => {
                 // Current middleware is disabled - check parent
@@ -229,10 +238,10 @@ pub fn filter_disabled_middleware(
     // Add parent middleware that doesn't exist in current (if not disabled)
     for middleware in parent {
         let name = middleware.name();
-        
+
         // Check if this middleware exists in current
         let exists_in_current = current.iter().any(|m| m.name() == name);
-        
+
         if !exists_in_current {
             match middleware {
                 MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. } => {
@@ -269,27 +278,42 @@ pub fn supplement_middleware(
 
     for new_middleware in incoming {
         let name = new_middleware.name();
-        
+
         if let Some(&pos) = index.get(name) {
             // Middleware exists - check if we should merge or handle disabled state
             match (&mut current[pos], new_middleware) {
-                (MiddlewareConfig::Named { config: existing_config, .. }, MiddlewareConfig::Named { config, .. }) => {
+                (
+                    MiddlewareConfig::Named {
+                        config: existing_config,
+                        ..
+                    },
+                    MiddlewareConfig::Named { config, .. },
+                ) => {
                     // Both are enabled - merge configurations
                     merge_universal_missing_only(existing_config, config.clone())?;
                 }
-                (current_on @ MiddlewareConfig::On { .. }, MiddlewareConfig::Named { name, config }) => {
+                (
+                    current_on @ MiddlewareConfig::On { .. },
+                    MiddlewareConfig::Named { name, config },
+                ) => {
                     // Explicitly enabled without config - inherit missing config from parent.
                     *current_on = MiddlewareConfig::Named {
                         name: name.clone(),
                         config: config.clone(),
                     };
                 }
-                (MiddlewareConfig::Off { .. }, MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. }) => {
+                (
+                    MiddlewareConfig::Off { .. },
+                    MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. },
+                ) => {
                     // Current is disabled but incoming is enabled - DON'T enable it
                     // Current (inline/off) takes precedence over incoming (site/global)
                     // Do nothing - keep it disabled
                 }
-                (MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. }, MiddlewareConfig::Off { .. }) => {
+                (
+                    MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. },
+                    MiddlewareConfig::Off { .. },
+                ) => {
                     // Current is enabled but incoming is disabled - keep current enabled (takes precedence)
                     // Do nothing
                 }
@@ -413,7 +437,7 @@ impl MiddlewareConfig {
             config: UniversalValue::from_json(config),
         }
     }
-    
+
     /// Create new named middleware with YAML configuration
     pub fn new_named_yaml(name: String, config: serde_yaml::Value) -> Self {
         MiddlewareConfig::Named {
@@ -431,12 +455,12 @@ impl MiddlewareConfig {
     pub fn new_off(name: String) -> Self {
         MiddlewareConfig::Off { name }
     }
-    
+
     /// Check if middleware is disabled
     pub fn is_off(&self) -> bool {
         matches!(self, MiddlewareConfig::Off { .. })
     }
-    
+
     /// Get middleware name
     pub fn name(&self) -> &str {
         match self {
@@ -445,43 +469,59 @@ impl MiddlewareConfig {
             MiddlewareConfig::Off { name } => name,
         }
     }
-    
+
     /// Get configuration as JSON Value
     pub fn config_as_json(&self) -> Result<serde_json::Value> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.as_json(),
             MiddlewareConfig::On { .. } => Ok(serde_json::Value::Object(serde_json::Map::new())),
-            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
+            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!(
+                "Cannot get config from disabled middleware"
+            )),
         }
     }
-    
+
     /// Get configuration as YAML Value
     pub fn config_as_yaml(&self) -> Result<serde_yaml::Value> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.as_yaml(),
-            MiddlewareConfig::On { .. } => Ok(serde_yaml::Value::Mapping(serde_yaml::Mapping::new())),
-            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
+            MiddlewareConfig::On { .. } => {
+                Ok(serde_yaml::Value::Mapping(serde_yaml::Mapping::new()))
+            }
+            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!(
+                "Cannot get config from disabled middleware"
+            )),
         }
     }
-    
+
     /// Get configuration as JSON string
     pub fn config_to_json_string(&self) -> Result<String> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.to_json_string(),
-            MiddlewareConfig::On { .. } => serde_json::to_string_pretty(&serde_json::Value::Object(serde_json::Map::new())).map_err(Into::into),
-            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
+            MiddlewareConfig::On { .. } => {
+                serde_json::to_string_pretty(&serde_json::Value::Object(serde_json::Map::new()))
+                    .map_err(Into::into)
+            }
+            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!(
+                "Cannot get config from disabled middleware"
+            )),
         }
     }
-    
+
     /// Get configuration as YAML string
     pub fn config_to_yaml_string(&self) -> Result<String> {
         match self {
             MiddlewareConfig::Named { config, .. } => config.to_yaml_string(),
-            MiddlewareConfig::On { .. } => serde_yaml::to_string(&serde_yaml::Value::Mapping(serde_yaml::Mapping::new())).map_err(Into::into),
-            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Cannot get config from disabled middleware")),
+            MiddlewareConfig::On { .. } => {
+                serde_yaml::to_string(&serde_yaml::Value::Mapping(serde_yaml::Mapping::new()))
+                    .map_err(Into::into)
+            }
+            MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!(
+                "Cannot get config from disabled middleware"
+            )),
         }
     }
-    
+
     /// Convert configuration to specific type using serde
     pub fn config_into<T: for<'de> Deserialize<'de>>(&self) -> Result<T> {
         let json_val = self.config_as_json()?;
@@ -489,7 +529,7 @@ impl MiddlewareConfig {
     }
 
     /// Create middleware config from any serializable struct (super convenient!)
-    /// 
+    ///
     /// Usage:
     /// ```rust
     /// # use httpward_core::config::MiddlewareConfig;
@@ -506,7 +546,7 @@ impl MiddlewareConfig {
     }
 
     /// Create middleware config from YAML string (1-liner friendly)
-    /// 
+    ///
     /// Usage:
     /// ```rust
     /// # use httpward_core::config::MiddlewareConfig;
@@ -519,7 +559,7 @@ impl MiddlewareConfig {
     }
 
     /// Create middleware config from JSON string (1-liner friendly)
-    /// 
+    ///
     /// Usage:
     /// ```rust
     /// # use httpward_core::config::MiddlewareConfig;
@@ -532,7 +572,7 @@ impl MiddlewareConfig {
     }
 
     /// Parse config into specific type with elegant error handling
-    /// 
+    ///
     /// Usage:
     /// ```rust
     /// # use httpward_core::config::MiddlewareConfig;
@@ -552,8 +592,7 @@ impl<'de> Deserialize<'de> for MiddlewareConfig {
     where
         D: Deserializer<'de>,
     {
-        let map: HashMap<String, serde_yaml::Value> =
-            HashMap::deserialize(deserializer)?;
+        let map: HashMap<String, serde_yaml::Value> = HashMap::deserialize(deserializer)?;
 
         if map.len() != 1 {
             return Err(serde::de::Error::custom(
@@ -579,9 +618,9 @@ impl<'de> Deserialize<'de> for MiddlewareConfig {
             }
             _ => {
                 // Normal middleware configuration
-                Ok(MiddlewareConfig::Named { 
-                    name, 
-                    config: UniversalValue::from_yaml(yaml_value)
+                Ok(MiddlewareConfig::Named {
+                    name,
+                    config: UniversalValue::from_yaml(yaml_value),
                 })
             }
         }
@@ -606,7 +645,10 @@ impl Strategy {
 
         for middleware in other.middleware.iter() {
             let merged = Arc::make_mut(&mut result.middleware);
-            if let Some(pos) = merged.iter().position(|existing| existing.name() == middleware.name()) {
+            if let Some(pos) = merged
+                .iter()
+                .position(|existing| existing.name() == middleware.name())
+            {
                 merged[pos] = middleware.clone();
             } else {
                 merged.push(middleware.clone());
@@ -655,7 +697,7 @@ mod tests {
         });
 
         let universal = UniversalValue::from_json(json_val.clone());
-        
+
         // Convert back to JSON
         let converted = universal.as_json().unwrap();
         assert_eq!(json_val, converted);
@@ -670,7 +712,7 @@ nested:
 
         let yaml_val: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
         let universal = UniversalValue::from_yaml(yaml_val);
-        
+
         // Convert to JSON
         let json_val = universal.as_json().unwrap();
         assert_eq!(json_val["key"], "value");
@@ -686,12 +728,12 @@ nested:
         });
 
         let universal = UniversalValue::from_json(json_val);
-        
+
         // JSON string
         let json_str = universal.to_json_string().unwrap();
         assert!(json_str.contains("Hello, World!"));
         assert!(json_str.contains("100"));
-        
+
         // YAML string
         let yaml_str = universal.to_yaml_string().unwrap();
         assert!(yaml_str.contains("message: Hello, World!"));
@@ -705,24 +747,22 @@ nested:
             "window": "1m"
         });
 
-        let middleware = MiddlewareConfig::new_named_json(
-            "rate_limit".to_string(),
-            json_config.clone()
-        );
+        let middleware =
+            MiddlewareConfig::new_named_json("rate_limit".to_string(), json_config.clone());
 
         assert_eq!(middleware.name(), "rate_limit");
-        
+
         // Get as JSON
         let retrieved_json = middleware.config_as_json().unwrap();
         assert_eq!(json_config, retrieved_json);
-        
+
         // Convert to specific type
         #[derive(Deserialize)]
         struct RateLimitConfig {
             requests: u32,
             window: String,
         }
-        
+
         let rate_limit: RateLimitConfig = middleware.config_into().unwrap();
         assert_eq!(rate_limit.requests, 1000);
         assert_eq!(rate_limit.window, "1m");
@@ -741,19 +781,19 @@ nested:
 
         let middleware: Vec<MiddlewareConfig> = serde_yaml::from_str(yaml_str).unwrap();
         assert_eq!(middleware.len(), 2);
-        
+
         // Check first middleware
         let rate_limit = &middleware[0];
         assert_eq!(rate_limit.name(), "rate_limit");
-        
+
         let config_json = rate_limit.config_as_json().unwrap();
         assert_eq!(config_json["requests"], 500);
         assert_eq!(config_json["window"], "30s");
-        
+
         // Check second middleware
         let logging = &middleware[1];
         assert_eq!(logging.name(), "logging");
-        
+
         let config_json = logging.config_as_json().unwrap();
         assert_eq!(config_json["level"], "info");
         assert_eq!(config_json["format"], "json");
@@ -775,25 +815,25 @@ middleware:
         let strategy: Strategy = serde_yaml::from_str(yaml_strategy).unwrap();
         assert_eq!(strategy.name, "test_strategy");
         assert_eq!(strategy.middleware.len(), 2);
-        
+
         // Check auth middleware
         let auth = &strategy.middleware[0];
         assert_eq!(auth.name(), "auth");
-        
+
         #[derive(Deserialize)]
         struct AuthConfig {
             r#type: String,
             secret: String,
         }
-        
+
         let auth_config: AuthConfig = auth.config_into().unwrap();
         assert_eq!(auth_config.r#type, "jwt");
         assert_eq!(auth_config.secret, "my-secret");
-        
+
         // Check CORS middleware
         let cors = &strategy.middleware[1];
         assert_eq!(cors.name(), "cors");
-        
+
         let cors_json = cors.config_as_json().unwrap();
         assert_eq!(cors_json["origins"][0], "*");
         assert_eq!(cors_json["methods"][0], "GET");
@@ -814,30 +854,30 @@ middleware:
 
         let strategy_ref: StrategyRef = serde_yaml::from_str(inline_yaml).unwrap();
         let resolved = strategy_ref.resolve(&LegacyStrategyCollection::new());
-        
+
         assert!(resolved.is_some());
         let strategy = resolved.unwrap();
         assert_eq!(strategy.name, "inline");
         assert_eq!(strategy.middleware.len(), 2);
-        
+
         // Check rate_limit middleware
         let rate_limit = &strategy.middleware[0];
         assert_eq!(rate_limit.name(), "rate_limit");
-        
+
         #[derive(Deserialize)]
         struct RateLimitConfig {
             requests: u32,
             window: String,
         }
-        
+
         let rate_config: RateLimitConfig = rate_limit.config_into().unwrap();
         assert_eq!(rate_config.requests, 100);
         assert_eq!(rate_config.window, "1m");
-        
+
         // Check logging middleware
         let logging = &strategy.middleware[1];
         assert_eq!(logging.name(), "logging");
-        
+
         let logging_json = logging.config_as_json().unwrap();
         assert_eq!(logging_json["level"], "debug");
         assert_eq!(logging_json["format"], "json");
@@ -846,28 +886,27 @@ middleware:
     #[test]
     fn test_strategy_ref_named_vs_inline() {
         let mut strategies = LegacyStrategyCollection::new();
-        
+
         // Add a named strategy
-        strategies.insert("test".to_string(), vec![
-            MiddlewareConfig::new_named_json(
+        strategies.insert(
+            "test".to_string(),
+            vec![MiddlewareConfig::new_named_json(
                 "auth".to_string(),
-                json!({"type": "basic"})
-            )
-        ]);
-        
+                json!({"type": "basic"}),
+            )],
+        );
+
         // Test Named strategy
         let named_ref = StrategyRef::Named("test".to_string());
         let named_resolved = named_ref.resolve(&strategies).unwrap();
         assert_eq!(named_resolved.name, "test");
         assert_eq!(named_resolved.middleware.len(), 1);
-        
+
         // Test Inline middleware strategy
-        let inline_middleware = vec![
-            MiddlewareConfig::new_named_json(
-                "logging".to_string(),
-                json!({"level": "info"})
-            )
-        ];
+        let inline_middleware = vec![MiddlewareConfig::new_named_json(
+            "logging".to_string(),
+            json!({"level": "info"}),
+        )];
         let inline_ref = StrategyRef::InlineMiddleware(inline_middleware);
         let inline_resolved = inline_ref.resolve(&strategies).unwrap();
         assert_eq!(inline_resolved.name, "inline");
@@ -892,15 +931,15 @@ middleware:
         let yaml_val = universal1.as_yaml().unwrap();
         let universal2 = UniversalValue::from_yaml(yaml_val);
         let final_json = universal2.as_json().unwrap();
-        
+
         // Compare via string since key order may differ
         let original_str = serde_json::to_string(&original).unwrap();
         let final_str = serde_json::to_string(&final_json).unwrap();
-        
+
         // Parse both for value comparison
         let parsed_original: serde_json::Value = serde_json::from_str(&original_str).unwrap();
         let parsed_final: serde_json::Value = serde_json::from_str(&final_str).unwrap();
-        
+
         assert_eq!(parsed_original, parsed_final);
     }
 
@@ -913,15 +952,15 @@ middleware:
                     "requests": 1000,
                     "window": "1m",
                     "burst": 100
-                })
+                }),
             ),
             MiddlewareConfig::new_named_json(
                 "logging".to_string(),
                 json!({
                     "level": "info",
                     "format": "text"
-                })
-            )
+                }),
+            ),
         ];
 
         let incoming = vec![
@@ -930,15 +969,15 @@ middleware:
                 json!({
                     "requests": 2000,  // Should NOT be updated (exists)
                     "timeout": "30s"   // Should be added (missing)
-                })
+                }),
             ),
             MiddlewareConfig::new_named_json(
                 "cors".to_string(),
                 json!({
                     "origins": ["*"],
                     "methods": ["GET", "POST"]
-                })
-            )
+                }),
+            ),
         ];
 
         supplement_middleware(&mut current, &incoming).unwrap();
@@ -951,10 +990,10 @@ middleware:
         let rate_limit = current.iter().find(|m| m.name() == "rate_limit").unwrap();
         assert_eq!(rate_limit.name(), "rate_limit");
         let config = rate_limit.config_as_json().unwrap();
-        assert_eq!(config["requests"], 1000);  // NOT updated
-        assert_eq!(config["window"], "1m");    // Preserved
-        assert_eq!(config["burst"], 100);      // Preserved
-        assert_eq!(config["timeout"], "30s");  // Added (was missing)
+        assert_eq!(config["requests"], 1000); // NOT updated
+        assert_eq!(config["window"], "1m"); // Preserved
+        assert_eq!(config["burst"], 100); // Preserved
+        assert_eq!(config["timeout"], "30s"); // Added (was missing)
 
         // Check logging was preserved
         let logging = current.iter().find(|m| m.name() == "logging").unwrap();
@@ -974,15 +1013,13 @@ middleware:
     #[test]
     fn test_strategy_supplement_with_method() {
         let mut strategy = Strategy::new("test".to_string());
-        Arc::make_mut(&mut strategy.middleware).push(
-            MiddlewareConfig::new_named_json(
-                "auth".to_string(),
-                json!({
-                    "type": "basic",
-                    "realm": "protected"
-                })
-            )
-        );
+        Arc::make_mut(&mut strategy.middleware).push(MiddlewareConfig::new_named_json(
+            "auth".to_string(),
+            json!({
+                "type": "basic",
+                "realm": "protected"
+            }),
+        ));
 
         let incoming = vec![
             MiddlewareConfig::new_named_json(
@@ -991,14 +1028,14 @@ middleware:
                     "timeout": 300,      // Should be added (missing)
                     "max_attempts": 5,    // Should be added (missing)
                     "type": "jwt"         // Should NOT be updated (exists)
-                })
+                }),
             ),
             MiddlewareConfig::new_named_json(
                 "rate_limit".to_string(),
                 json!({
                     "requests": 100
-                })
-            )
+                }),
+            ),
         ];
 
         strategy.supplement_with(&incoming).unwrap();
@@ -1006,13 +1043,17 @@ middleware:
         assert_eq!(strategy.middleware.len(), 2);
 
         // Check auth was supplemented (not merged)
-        let auth = strategy.middleware.iter().find(|m| m.name() == "auth").unwrap();
+        let auth = strategy
+            .middleware
+            .iter()
+            .find(|m| m.name() == "auth")
+            .unwrap();
         assert_eq!(auth.name(), "auth");
         let config = auth.config_as_json().unwrap();
-        assert_eq!(config["type"], "basic");      // NOT updated
+        assert_eq!(config["type"], "basic"); // NOT updated
         assert_eq!(config["realm"], "protected"); // Preserved
-        assert_eq!(config["timeout"], 300);       // Added (was missing)
-        assert_eq!(config["max_attempts"], 5);     // Added (was missing)
+        assert_eq!(config["timeout"], 300); // Added (was missing)
+        assert_eq!(config["max_attempts"], 5); // Added (was missing)
 
         // Check rate_limit was inherited and prepended
         assert_eq!(strategy.middleware[0].name(), "rate_limit");
@@ -1024,70 +1065,65 @@ middleware:
 
     #[test]
     fn test_supplement_middleware_yaml_formats() {
-        let mut current = vec![
-            MiddlewareConfig::new_named_yaml(
-                "cache".to_string(),
-                serde_yaml::from_str(r#"
+        let mut current = vec![MiddlewareConfig::new_named_yaml(
+            "cache".to_string(),
+            serde_yaml::from_str(
+                r#"
 ttl: 300
 max_size: 1000
-"#).unwrap()
+"#,
             )
-        ];
+            .unwrap(),
+        )];
 
-        let incoming = vec![
-            MiddlewareConfig::new_named_json(
-                "cache".to_string(),
-                json!({
-                    "ttl": 600,        // Should NOT be updated (exists)
-                    "strategy": "lru"  // Should be added (missing)
-                })
-            )
-        ];
+        let incoming = vec![MiddlewareConfig::new_named_json(
+            "cache".to_string(),
+            json!({
+                "ttl": 600,        // Should NOT be updated (exists)
+                "strategy": "lru"  // Should be added (missing)
+            }),
+        )];
 
         supplement_middleware(&mut current, &incoming).unwrap();
 
         let cache = &current[0];
         assert_eq!(cache.name(), "cache");
         let config = cache.config_as_json().unwrap();
-        assert_eq!(config["ttl"], 300);        // NOT updated
-        assert_eq!(config["max_size"], 1000);  // Preserved
+        assert_eq!(config["ttl"], 300); // NOT updated
+        assert_eq!(config["max_size"], 1000); // Preserved
         assert_eq!(config["strategy"], "lru"); // Added (was missing)
     }
 
     #[test]
     fn test_supplement_middleware_no_overwrite() {
-        let mut current = vec![
-            MiddlewareConfig::new_named_json(
-                "test".to_string(),
-                json!({
-                    "existing_string": "old_value",
-                    "existing_number": 42,
-                    "existing_bool": true,
-                    "existing_null": null,
-                    "existing_array": [1, 2, 3],
-                    "existing_object": {"key": "value"}
-                })
-            )
-        ];
+        let mut current = vec![MiddlewareConfig::new_named_json(
+            "test".to_string(),
+            json!({
+                "existing_string": "old_value",
+                "existing_number": 42,
+                "existing_bool": true,
+                "existing_null": null,
+                "existing_array": [1, 2, 3],
+                "existing_object": {"key": "value"}
+            }),
+        )];
 
-        let incoming = vec![
-            MiddlewareConfig::new_named_json(
-                "test".to_string(),
-                json!({
-                    "existing_string": "new_value",    // Should NOT be updated
-                    "existing_number": 100,            // Should NOT be updated
-                    "existing_bool": false,             // Should NOT be updated
-                    "existing_null": "not_null",       // Should NOT be updated (null exists)
-                    "existing_array": [4, 5, 6],        // Should NOT be updated
-                    "existing_object": {"new_key": "new_value"}, // Should NOT be updated
-                    "new_string": "added",             // Should be added
-                    "new_number": 999,                 // Should be added
-                    "new_bool": false,                 // Should be added
-                    "new_array": [7, 8, 9],            // Should be added
-                    "new_object": {"added": "yes"}     // Should be added
-                })
-            )
-        ];
+        let incoming = vec![MiddlewareConfig::new_named_json(
+            "test".to_string(),
+            json!({
+                "existing_string": "new_value",    // Should NOT be updated
+                "existing_number": 100,            // Should NOT be updated
+                "existing_bool": false,             // Should NOT be updated
+                "existing_null": "not_null",       // Should NOT be updated (null exists)
+                "existing_array": [4, 5, 6],        // Should NOT be updated
+                "existing_object": {"new_key": "new_value"}, // Should NOT be updated
+                "new_string": "added",             // Should be added
+                "new_number": 999,                 // Should be added
+                "new_bool": false,                 // Should be added
+                "new_array": [7, 8, 9],            // Should be added
+                "new_object": {"added": "yes"}     // Should be added
+            }),
+        )];
 
         supplement_middleware(&mut current, &incoming).unwrap();
 
@@ -1100,7 +1136,10 @@ max_size: 1000
         assert_eq!(config["existing_bool"], true);
         assert_eq!(config["existing_null"], serde_json::Value::Null);
         assert_eq!(config["existing_array"], json!([1, 2, 3]));
-        assert_eq!(config["existing_object"], json!({"key": "value", "new_key": "new_value"}));
+        assert_eq!(
+            config["existing_object"],
+            json!({"key": "value", "new_key": "new_value"})
+        );
 
         // Check new values are added
         assert_eq!(config["new_string"], "added");
@@ -1119,9 +1158,9 @@ max_size: 1000
     - logging:
         level: debug
     "#;
-        
+
         let strategy_ref: StrategyRef = serde_yaml::from_str(yaml_str).unwrap();
-        
+
         match strategy_ref {
             StrategyRef::InlineMiddleware(middleware) => {
                 assert_eq!(middleware.len(), 2);
@@ -1141,10 +1180,10 @@ max_size: 1000
     - logging:
         level: info
     "#;
-        
+
         let strategy_ref: StrategyRef = serde_yaml::from_str(yaml_str).unwrap();
         let strategies = LegacyStrategyCollection::new();
-        
+
         let resolved = strategy_ref.resolve(&strategies).unwrap();
         assert_eq!(resolved.name, "inline");
         assert_eq!(resolved.middleware.len(), 2);
@@ -1154,10 +1193,8 @@ max_size: 1000
 
     #[test]
     fn test_from_yaml_str_convenience() {
-        let middleware = MiddlewareConfig::from_yaml_str(
-            "httpward_log_module", 
-            "level: warn"
-        ).unwrap();
+        let middleware =
+            MiddlewareConfig::from_yaml_str("httpward_log_module", "level: warn").unwrap();
 
         assert_eq!(middleware.name(), "httpward_log_module");
         assert!(!middleware.is_off());
@@ -1169,9 +1206,10 @@ max_size: 1000
     #[test]
     fn test_from_json_str_convenience() {
         let middleware = MiddlewareConfig::from_json_str(
-            "httpward_log_module", 
-            r#"{"level": "info", "tag": "api"}"#
-        ).unwrap();
+            "httpward_log_module",
+            r#"{"level": "info", "tag": "api"}"#,
+        )
+        .unwrap();
 
         assert_eq!(middleware.name(), "httpward_log_module");
         assert!(!middleware.is_off());
@@ -1194,10 +1232,8 @@ max_size: 1000
             tag: Some("test".to_string()),
         };
 
-        let middleware = MiddlewareConfig::from_serializable(
-            "httpward_log_module", 
-            config
-        ).unwrap();
+        let middleware =
+            MiddlewareConfig::from_serializable("httpward_log_module", config).unwrap();
 
         assert_eq!(middleware.name(), "httpward_log_module");
         assert!(!middleware.is_off());
@@ -1215,10 +1251,9 @@ max_size: 1000
             tag: Option<String>,
         }
 
-        let middleware = MiddlewareConfig::from_yaml_str(
-            "httpward_log_module", 
-            "level: warn\ntag: test"
-        ).unwrap();
+        let middleware =
+            MiddlewareConfig::from_yaml_str("httpward_log_module", "level: warn\ntag: test")
+                .unwrap();
 
         let config: LogConfig = middleware.parse_config().unwrap();
         assert_eq!(config.level, "warn");
@@ -1227,33 +1262,32 @@ max_size: 1000
 
     #[test]
     fn test_yaml_round_trip_convenience() {
-        let original = MiddlewareConfig::from_yaml_str(
-            "test_middleware", 
-            "level: warn\ntag: test"
-        ).unwrap();
+        let original =
+            MiddlewareConfig::from_yaml_str("test_middleware", "level: warn\ntag: test").unwrap();
 
         let yaml_string = original.config_to_yaml_string().unwrap();
         let restored = MiddlewareConfig::from_yaml_str("test_middleware", &yaml_string).unwrap();
 
         let original_config: serde_json::Value = original.config_as_json().unwrap();
         let restored_config: serde_json::Value = restored.config_as_json().unwrap();
-        
+
         assert_eq!(original_config, restored_config);
     }
 
     #[test]
     fn test_json_round_trip_convenience() {
         let original = MiddlewareConfig::from_json_str(
-            "test_middleware", 
-            r#"{"level": "warn", "tag": "test"}"#
-        ).unwrap();
+            "test_middleware",
+            r#"{"level": "warn", "tag": "test"}"#,
+        )
+        .unwrap();
 
         let json_string = original.config_to_json_string().unwrap();
         let restored = MiddlewareConfig::from_json_str("test_middleware", &json_string).unwrap();
 
         let original_config: serde_json::Value = original.config_as_json().unwrap();
         let restored_config: serde_json::Value = restored.config_as_json().unwrap();
-        
+
         assert_eq!(original_config, restored_config);
     }
 }

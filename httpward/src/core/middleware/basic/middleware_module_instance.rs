@@ -2,13 +2,13 @@
 // Module loader using libloading and raw pointers.
 // Comments/in-code text in English.
 
-use std::os::raw::c_char;
-use std::sync::Arc;
-use std::sync::Mutex;
-use libloading::Library;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use httpward_core::httpward_middleware::pipe::MiddlewareFatPtr;
 use httpward_core::module_logging::host_functions::*;
+use libloading::Library;
+use std::os::raw::c_char;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 /// Global mutex for thread-safe library loading
 static LIBRARY_LOADING_MUTEX: Mutex<()> = Mutex::new(());
@@ -17,11 +17,11 @@ static LIBRARY_LOADING_MUTEX: Mutex<()> = Mutex::new(());
 type CreateFn = unsafe extern "C" fn() -> MiddlewareFatPtr;
 type DestroyFn = unsafe extern "C" fn(MiddlewareFatPtr);
 type SetLoggerFn = unsafe extern "C" fn(
-    extern "C" fn(*const c_char),  // error
-    extern "C" fn(*const c_char),  // warn
-    extern "C" fn(*const c_char),  // info
-    extern "C" fn(*const c_char),  // debug
-    extern "C" fn(*const c_char),  // trace
+    extern "C" fn(*const c_char), // error
+    extern "C" fn(*const c_char), // warn
+    extern "C" fn(*const c_char), // info
+    extern "C" fn(*const c_char), // debug
+    extern "C" fn(*const c_char), // trace
 );
 
 /// Collected module exports required by the host.
@@ -31,7 +31,6 @@ struct ModuleExports {
     destroy: DestroyFn,
     set_logger: SetLoggerFn,
 }
-
 
 /// A middleware module instance.
 /// Keeps the `Library` alive as long as module is used.
@@ -46,7 +45,9 @@ impl MiddlewareModuleInstance {
     ///
     /// # Safety
     /// Host and module must agree on symbol names and ABI.
-    unsafe fn load_exports_unchecked(lib: &Library) -> Result<ModuleExports, Box<dyn std::error::Error + Send + Sync>> {
+    unsafe fn load_exports_unchecked(
+        lib: &Library,
+    ) -> Result<ModuleExports, Box<dyn std::error::Error + Send + Sync>> {
         // SAFETY: Symbol lookup relies on module ABI contract and exact symbol names.
         let set_logger: libloading::Symbol<SetLoggerFn> = unsafe { lib.get(b"module_set_logger")? };
         // SAFETY: Symbol lookup relies on module ABI contract and exact symbol names.
@@ -65,7 +66,9 @@ impl MiddlewareModuleInstance {
     ///
     /// # Safety
     /// `ptr` must be produced by `create_middleware` for the same trait layout expected by host.
-    unsafe fn fat_ptr_into_arc_unchecked(ptr: MiddlewareFatPtr) -> Arc<dyn HttpWardMiddleware + Send + Sync> {
+    unsafe fn fat_ptr_into_arc_unchecked(
+        ptr: MiddlewareFatPtr,
+    ) -> Arc<dyn HttpWardMiddleware + Send + Sync> {
         // SAFETY: The pointer pair is expected to be a valid trait-object fat pointer from module ABI.
         let raw = unsafe {
             std::mem::transmute::<
@@ -80,7 +83,9 @@ impl MiddlewareModuleInstance {
 
     /// Create middleware instance from Arc<Library>.
     /// Safety: host and module must agree on ABI.
-    pub unsafe fn create_from_arc(lib: Arc<Library>) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    pub unsafe fn create_from_arc(
+        lib: Arc<Library>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Ensure thread-safe symbol loading and module initialization sequence.
         let _guard = LIBRARY_LOADING_MUTEX
             .lock()

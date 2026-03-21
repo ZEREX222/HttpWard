@@ -1,13 +1,13 @@
+use httpward_core::error::ErrorHandler;
+use httpward_core::httpward_middleware::{HttpWardMiddlewareError, IsHttpWardError};
 use rama::{
+    Context,
+    http::{Body as RamaBody, Response as RamaResponse, StatusCode},
     layer::Layer,
     service::Service,
-    Context,
-    http::{Response as RamaResponse, Body as RamaBody, StatusCode},
 };
 use std::fmt::Debug;
-use tracing::{error, warn, info};
-use httpward_core::error::ErrorHandler;
-use httpward_core::httpward_middleware::{IsHttpWardError, HttpWardMiddlewareError};
+use tracing::{error, info, warn};
 
 /// Layer that provides consistent error handling
 #[derive(Clone, Debug)]
@@ -46,7 +46,10 @@ pub struct ErrorHandlerService<S> {
 
 impl<S> ErrorHandlerService<S> {
     pub fn new(inner: S, error_handler: ErrorHandler) -> Self {
-        Self { inner, error_handler }
+        Self {
+            inner,
+            error_handler,
+        }
     }
 
     /// Handle HttpWardMiddlewareError specifically
@@ -63,20 +66,21 @@ impl<S> ErrorHandlerService<S> {
                 let status = middleware_error.status_code();
                 let title = middleware_error.title();
                 let description = middleware_error.description();
-                
+
                 info!(
                     status = %status.as_u16(),
                     title = %title,
                     description = %description,
                     "Handling HttpWardMiddlewareError"
                 );
-                
-                return self.error_handler
+
+                return self
+                    .error_handler
                     .create_error_response(status, title, description)
                     .ok();
             }
         }
-        
+
         None
     }
 
@@ -112,14 +116,15 @@ where
             Ok(response) => Ok(response),
             Err(e) => {
                 error!("Service error occurred: {:?}", e);
-                
+
                 // Try to extract HttpWardMiddlewareError from the error
-                let error_response = self.handle_custom_error(&e)
-                    .unwrap_or_else(|| {
-                        warn!("Could not extract HttpWardMiddlewareError, using generic error handling");
-                        self.create_generic_error_response()
-                    });
-                
+                let error_response = self.handle_custom_error(&e).unwrap_or_else(|| {
+                    warn!(
+                        "Could not extract HttpWardMiddlewareError, using generic error handling"
+                    );
+                    self.create_generic_error_response()
+                });
+
                 Ok(error_response)
             }
         }

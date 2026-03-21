@@ -2,12 +2,12 @@
 // Generic module export utilities for HttpWard dynamic modules
 // Provides reusable export functions to eliminate boilerplate in module implementations
 
-use std::os::raw::c_void;
-use std::boxed::Box;
 use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use crate::httpward_middleware::pipe::MiddlewareFatPtr;
 use crate::module_logging::ModuleLogger;
 use crate::module_logging::module_setup;
+use std::boxed::Box;
+use std::os::raw::c_void;
 
 /// Generic module logger setup function
 /// This can be used directly by modules or through the export_middleware_module macro
@@ -15,21 +15,26 @@ use crate::module_logging::module_setup;
 
 /// Generic middleware creation function
 /// Creates a middleware instance of type T and returns it as a fat pointer
-pub unsafe extern "C" fn generic_create_middleware<T>() -> MiddlewareFatPtr 
-where 
+pub unsafe extern "C" fn generic_create_middleware<T>() -> MiddlewareFatPtr
+where
     T: HttpWardMiddleware + Send + Sync + 'static,
     T: Default,
 {
     let logger = module_setup::get_logger();
     logger.info("generic_create_middleware called");
-    logger.debug(&format!("creating new {} instance", std::any::type_name::<T>()));
-    
+    logger.debug(&format!(
+        "creating new {} instance",
+        std::any::type_name::<T>()
+    ));
+
     let boxed: Box<dyn HttpWardMiddleware + Send + Sync> = Box::new(T::default());
     let raw = Box::into_raw(boxed);
-    let (data, vtable) = unsafe { 
-        std::mem::transmute::<*mut (dyn HttpWardMiddleware + Send + Sync), (*mut c_void, *mut c_void)>(raw) 
+    let (data, vtable) = unsafe {
+        std::mem::transmute::<*mut (dyn HttpWardMiddleware + Send + Sync), (*mut c_void, *mut c_void)>(
+            raw,
+        )
     };
-    
+
     logger.info("middleware created successfully");
     logger.trace("middleware fat pointer created");
     MiddlewareFatPtr { data, vtable }
@@ -40,7 +45,7 @@ where
 pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
     let logger = module_setup::get_logger();
     logger.info("generic_destroy_middleware called");
-    
+
     // If either part is null, nothing to do.
     if ptr.data.is_null() || ptr.vtable.is_null() {
         logger.warn("generic_destroy_middleware: null ptr, skipping");
@@ -50,7 +55,10 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
     unsafe {
         // Reconstruct a raw fat pointer *mut (dyn Trait)
         // Transmute the tuple (data, vtable) back into a trait object pointer.
-        let raw = std::mem::transmute::<(*mut std::ffi::c_void, *mut std::ffi::c_void), *mut (dyn HttpWardMiddleware + Send + Sync)>((ptr.data, ptr.vtable));
+        let raw = std::mem::transmute::<
+            (*mut std::ffi::c_void, *mut std::ffi::c_void),
+            *mut (dyn HttpWardMiddleware + Send + Sync),
+        >((ptr.data, ptr.vtable));
 
         // Recreate the Box and drop it here inside the module.
         // This ensures free happens in the module's allocator.
@@ -166,21 +174,21 @@ macro_rules! export_middleware_module {
     ($middleware_type:ty) => {
         $crate::export_middleware_module!(env: "CARGO_PKG_NAME", $middleware_type);
     };
-    
+
     // Case 2: Environment variable + middleware type
     (env: $env_var:literal, $middleware_type:ty) => {
         $crate::export_middleware_module!(
-            env!($env_var), 
+            env!($env_var),
             $middleware_type
         );
     };
-    
+
     // Case 3: Explicit name + middleware type
     ($module_name:expr, $middleware_type:ty) => {
         #[unsafe(no_mangle)]
         pub extern "C" fn module_set_logger(
             error_fn: $crate::module_logging::HostLogErrorFn,
-            warn_fn: $crate::module_logging::HostLogWarnFn, 
+            warn_fn: $crate::module_logging::HostLogWarnFn,
             info_fn: $crate::module_logging::HostLogInfoFn,
             debug_fn: $crate::module_logging::HostLogDebugFn,
             trace_fn: $crate::module_logging::HostLogTraceFn,
@@ -244,20 +252,20 @@ macro_rules! export_module_with_custom_middleware {
     () => {
         $crate::export_module_with_custom_middleware!(env: "CARGO_PKG_NAME");
     };
-    
+
     // Case 2: Environment variable
     (env: $env_var:literal) => {
         $crate::export_module_with_custom_middleware!(
             env!($env_var)
         );
     };
-    
+
     // Case 3: Explicit name
     ($module_name:expr) => {
         #[unsafe(no_mangle)]
         pub extern "C" fn module_set_logger(
             error_fn: $crate::module_logging::HostLogErrorFn,
-            warn_fn: $crate::module_logging::HostLogWarnFn, 
+            warn_fn: $crate::module_logging::HostLogWarnFn,
             info_fn: $crate::module_logging::HostLogInfoFn,
             debug_fn: $crate::module_logging::HostLogDebugFn,
             trace_fn: $crate::module_logging::HostLogTraceFn,
@@ -281,14 +289,19 @@ macro_rules! export_module_with_custom_middleware {
 /// Helper trait for middleware that can be created with default constructor
 /// This is used by the generic_create_middleware function
 pub trait DefaultMiddleware: HttpWardMiddleware + Send + Sync + 'static {
-    fn create_default() -> Self where Self: Sized;
+    fn create_default() -> Self
+    where
+        Self: Sized;
 }
 
-impl<T> DefaultMiddleware for T 
-where 
+impl<T> DefaultMiddleware for T
+where
     T: HttpWardMiddleware + Send + Sync + 'static + Default,
 {
-    fn create_default() -> Self where Self: Sized {
+    fn create_default() -> Self
+    where
+        Self: Sized,
+    {
         T::default()
     }
 }
@@ -296,12 +309,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
-    use std::pin::Pin;
-    use rama::http::{Body, Request, Response};
-    use rama::Context;
     use crate::httpward_middleware::BoxError;
+    use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
     use crate::httpward_middleware::next::Next;
+    use rama::Context;
+    use rama::http::{Body, Request, Response};
+    use std::pin::Pin;
 
     // Test middleware for testing purposes
     #[derive(Debug, Default)]
@@ -327,10 +340,10 @@ mod tests {
     fn test_generic_create_destroy_middleware() {
         // Test that we can create and destroy middleware safely
         let ptr = unsafe { generic_create_middleware::<TestMiddleware>() };
-        
+
         assert!(!ptr.data.is_null(), "Data pointer should not be null");
         assert!(!ptr.vtable.is_null(), "VTable pointer should not be null");
-        
+
         unsafe { generic_destroy_middleware(ptr) };
     }
 

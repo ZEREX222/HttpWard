@@ -24,12 +24,15 @@ use httpward_core::module_logging::ModuleLogger;
 use httpward_core::{module_log_debug, module_log_error, module_log_info, module_log_warn};
 use rama::net::fingerprint::Ja4;
 use rama::net::tls::{ProtocolVersion, SecureTransport};
-use rama::{http::{Body, HeaderMap, Request, Response, StatusCode}, Context};
+use rama::{
+    Context,
+    http::{Body, HeaderMap, Request, Response, StatusCode},
+};
 use std::sync::Arc;
 
 use crate::core::{
-    init_global_manager, HttpWardRateLimitConfig, HttpWardRateLimitContext, RateLimitKeyKind,
-    RateLimitScope, RouteScopeKey,
+    HttpWardRateLimitConfig, HttpWardRateLimitContext, RateLimitKeyKind, RateLimitScope,
+    RouteScopeKey, init_global_manager,
 };
 
 /// Extract header fingerprint from specific headers
@@ -72,13 +75,11 @@ fn extract_header_fingerprint(headers: &HeaderMap) -> Option<String> {
     Some(format!("{:x}", hasher.finish()))
 }
 
-pub struct HttpWardRateLimitLayer {
-}
+pub struct HttpWardRateLimitLayer {}
 
 impl HttpWardRateLimitLayer {
     pub fn new() -> Self {
-        Self {
-        }
+        Self {}
     }
 }
 
@@ -113,8 +114,12 @@ fn status_code_or_default(status_code: u16) -> StatusCode {
 }
 
 /// Try to load rate limit config from matched route.
-fn load_config_from_context(httpward_ctx: &HttpWardContext) -> std::sync::Arc<HttpWardRateLimitConfig> {
-    match httpward_ctx.middleware_config_typed_from_matched_route::<HttpWardRateLimitConfig>(env!("CARGO_PKG_NAME")) {
+fn load_config_from_context(
+    httpward_ctx: &HttpWardContext,
+) -> std::sync::Arc<HttpWardRateLimitConfig> {
+    match httpward_ctx.middleware_config_typed_from_matched_route::<HttpWardRateLimitConfig>(env!(
+        "CARGO_PKG_NAME"
+    )) {
         Ok(Some(config)) => {
             module_log_debug!("Loaded rate-limit config from matched route");
             config
@@ -190,7 +195,9 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
         let config = if let Some(httpward_ctx) = httpward_ctx {
             load_config_from_context(httpward_ctx)
         } else {
-            module_log_warn!("HttpWardContext not found, rate limiter will use default site scope only");
+            module_log_warn!(
+                "HttpWardContext not found, rate limiter will use default site scope only"
+            );
             std::sync::Arc::new(HttpWardRateLimitConfig::default())
         };
 
@@ -265,11 +272,7 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
         }
 
         if let Some(ja4) = ja4_fp.as_ref() {
-            checks.push((
-                RateLimitKeyKind::Ja4,
-                RateLimitScope::Global,
-                ja4.clone(),
-            ));
+            checks.push((RateLimitKeyKind::Ja4, RateLimitScope::Global, ja4.clone()));
             if let Some(route_key) = route_key {
                 checks.push((
                     RateLimitKeyKind::Ja4,
@@ -316,7 +319,9 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
                     let status = status_code_or_default(internal_config.response.status_code);
                     match error_handler.create_error_response_with_code(status) {
                         Ok(response) => return Ok(response),
-                        Err(e) => return Err(format!("Failed to create error response: {}", e).into()),
+                        Err(e) => {
+                            return Err(format!("Failed to create error response: {}", e).into());
+                        }
                     }
                 }
             }
@@ -342,9 +347,3 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
         Some(env!("CARGO_PKG_NAME"))
     }
 }
-
-
-
-
-
-

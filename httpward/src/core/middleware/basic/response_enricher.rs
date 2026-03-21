@@ -1,19 +1,18 @@
 use rama::{
+    Context,
     http::{Request, Response},
     layer::Layer,
     service::Service,
-    Context,
 };
 use std::fmt::Debug;
 
-
+use httpward_core::core::HttpWardContext;
 use rama::http::Body;
 use rama::http::headers::ContentType;
 use std::str::FromStr;
-use httpward_core::core::HttpWardContext;
 
 /// Extract content type from response headers (generic version)
-fn extract_content_type_from_response_generic<T>(response: &T) -> ContentType 
+fn extract_content_type_from_response_generic<T>(response: &T) -> ContentType
 where
     T: std::any::Any,
 {
@@ -21,7 +20,8 @@ where
     if let Some(http_response) = (response as &dyn std::any::Any).downcast_ref::<Response<Body>>() {
         if let Some(headers) = http_response.headers().get("content-type") {
             if let Ok(content_type_str) = headers.to_str() {
-                return ContentType::from_str(content_type_str).unwrap_or_else(|_| ContentType::text());
+                return ContentType::from_str(content_type_str)
+                    .unwrap_or_else(|_| ContentType::text());
             }
         }
     }
@@ -85,7 +85,7 @@ where
         if let Ok(response) = &result {
             // Try to extract content type from response headers
             let response_content_type = extract_content_type_from_response_generic(response);
-            
+
             if let Some(hw_ctx) = ctx.get_mut::<HttpWardContext>() {
                 hw_ctx.response_content_type = response_content_type;
             }

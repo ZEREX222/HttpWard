@@ -6,10 +6,7 @@ use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use httpward_core::httpward_middleware::next::Next;
 use httpward_core::httpward_middleware::types::BoxError;
 use httpward_core::module_logging::ModuleLogger;
-use httpward_core::{
-    module_log_debug, module_log_error, module_log_info,
-    module_log_warn,
-};
+use httpward_core::{module_log_debug, module_log_error, module_log_info, module_log_warn};
 use rama::Context;
 use rama::http::{Body, Request, Response};
 use std::fmt::Debug;
@@ -23,43 +20,43 @@ pub struct HttpWardLogConfig {
     /// Show basic request information (URI, method, etc.)
     #[serde(default)]
     pub show_request: bool,
-    
+
     /// Log client IP address from HttpWardContext
     #[serde(default)]
     pub log_client_ip: bool,
-    
+
     /// Log current site information from HttpWardContext
     #[serde(default)]
     pub log_current_site: bool,
-    
+
     /// Log route matching details from HttpWardContext
     #[serde(default)]
     pub log_route_info: bool,
-    
+
     /// Log strategy information for matched routes
     #[serde(default)]
     pub log_strategy_info: bool,
-    
+
     /// Log middleware details for active strategy
     #[serde(default)]
     pub log_middleware_details: bool,
-    
+
     /// Log URL parameters extracted from route matching
     #[serde(default)]
     pub log_url_params: bool,
-    
+
     /// Log request headers from HttpWardContext
     #[serde(default)]
     pub log_request_headers: bool,
-    
+
     /// Log content type information
     #[serde(default)]
     pub log_content_type: bool,
-    
+
     /// Log response status code
     #[serde(default)]
     pub log_response_status: bool,
-    
+
     /// Log server instance information
     #[serde(default)]
     pub log_server_info: bool,
@@ -108,19 +105,27 @@ impl HttpWardMiddleware for HttpWardLogLayer {
         let request_path = req.uri().path();
 
         let config = if let Some(httpward_ctx) = httpward_ctx {
-            match httpward_ctx
-                .middleware_config_typed_from_matched_route::<HttpWardLogConfig>(env!("CARGO_PKG_NAME"))
-            {
+            match httpward_ctx.middleware_config_typed_from_matched_route::<HttpWardLogConfig>(
+                env!("CARGO_PKG_NAME"),
+            ) {
                 Ok(Some(config)) => {
-                    module_log_debug!("HttpWardLogLayer config loaded from HttpWardContext.matched_route: {:?}", config);
+                    module_log_debug!(
+                        "HttpWardLogLayer config loaded from HttpWardContext.matched_route: {:?}",
+                        config
+                    );
                     config
                 }
                 Ok(None) => {
-                    module_log_debug!("HttpWardLogLayer config not found in HttpWardContext.matched_route, using defaults");
+                    module_log_debug!(
+                        "HttpWardLogLayer config not found in HttpWardContext.matched_route, using defaults"
+                    );
                     std::sync::Arc::new(HttpWardLogConfig::default())
                 }
                 Err(e) => {
-                    module_log_error!("Failed to parse HttpWardLogLayer configuration from HttpWardContext.matched_route: {}, using defaults", e);
+                    module_log_error!(
+                        "Failed to parse HttpWardLogLayer configuration from HttpWardContext.matched_route: {}, using defaults",
+                        e
+                    );
                     std::sync::Arc::new(HttpWardLogConfig::default())
                 }
             }
@@ -143,7 +148,6 @@ impl HttpWardMiddleware for HttpWardLogLayer {
 
         // Get HttpWardContext for detailed logging
         if let Some(httpward_ctx) = httpward_ctx {
-
             // Log client IP address if enabled
             if config.log_client_ip {
                 module_log_info!("Client IP: {}", httpward_ctx.client_ip);
@@ -196,7 +200,6 @@ impl HttpWardMiddleware for HttpWardLogLayer {
                     }
                 }
             }
-
         }
 
         // Log route / strategy info from cached matched route in HttpWardContext.
@@ -231,7 +234,9 @@ impl HttpWardMiddleware for HttpWardLogLayer {
                     }
                 }
             } else {
-                module_log_debug!("Route info requested but HttpWardContext.matched_route is not set");
+                module_log_debug!(
+                    "Route info requested but HttpWardContext.matched_route is not set"
+                );
             }
         }
 

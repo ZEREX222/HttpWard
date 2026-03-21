@@ -1,40 +1,49 @@
+use crate::core::middleware::route::RouteError;
+use httpward_core::config::Route;
+use httpward_core::core::server_models::{MatchedRoute, MatcherType};
+use rama::http::dep::mime_guess;
+use rama::http::{Body as RamaBody, Request as RamaRequest, Response as RamaResponse, StatusCode};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use rama::http::{Request as RamaRequest, Response as RamaResponse, Body as RamaBody, StatusCode};
 use tokio::fs;
 use tracing::debug;
-use httpward_core::config::Route;
-use httpward_core::core::server_models::{MatchedRoute, MatcherType};
-use crate::core::middleware::route::RouteError;
-use rama::http::dep::mime_guess;
 
 /// Validate that the file path is within the allowed static directory
 /// Prevents directory traversal attacks
-fn validate_file_path(file_path: &std::path::Path, static_dir: &std::path::Path) -> Result<(), RouteError> {
+fn validate_file_path(
+    file_path: &std::path::Path,
+    static_dir: &std::path::Path,
+) -> Result<(), RouteError> {
     use std::path::Component;
-    
+
     // Canonicalize both paths to resolve symlinks and relative components
     let canonical_file_path = match file_path.canonicalize() {
         Ok(path) => path,
         Err(_) => return Err(RouteError::Static("File path does not exist".to_string())),
     };
-    
+
     let canonical_static_dir = match static_dir.canonicalize() {
         Ok(path) => path,
-        Err(_) => return Err(RouteError::Static("Static directory does not exist".to_string())),
+        Err(_) => {
+            return Err(RouteError::Static(
+                "Static directory does not exist".to_string(),
+            ));
+        }
     };
-    
+
     // Check if the file path starts with the static directory path
     if !canonical_file_path.starts_with(&canonical_static_dir) {
         return Err(RouteError::Static("Path traversal detected".to_string()));
     }
-    
+
     // Additional check: ensure no path components contain suspicious patterns
     for component in file_path.components() {
         match component {
             Component::ParentDir => {
-                return Err(RouteError::Static("Parent directory reference not allowed".to_string()));
+                return Err(RouteError::Static(
+                    "Parent directory reference not allowed".to_string(),
+                ));
             }
             Component::CurDir => {
                 // Current directory is fine, but we can be strict
@@ -43,7 +52,7 @@ fn validate_file_path(file_path: &std::path::Path, static_dir: &std::path::Path)
             _ => continue,
         }
     }
-    
+
     Ok(())
 }
 
@@ -53,21 +62,22 @@ pub fn process_static_dir_with_params(
     static_dir: &Path,
     params: &HashMap<String, String>,
 ) -> Result<std::path::PathBuf, RouteError> {
-    let static_dir_str = static_dir.to_str()
+    let static_dir_str = static_dir
+        .to_str()
         .ok_or_else(|| RouteError::Static("Invalid static directory path encoding".to_string()))?;
-    
+
     let mut result = static_dir_str.to_string();
-    
+
     // Replace named parameters like {param} and {*any}
     for (key, value) in params {
         let placeholder = format!("{{{}}}", key);
         result = result.replace(&placeholder, value);
-        
+
         // Also handle wildcard parameters {*any}
         let wildcard_placeholder = format!("{{*{}}}", key);
         result = result.replace(&wildcard_placeholder, value);
     }
-    
+
     Ok(std::path::PathBuf::from(result))
 }
 
@@ -78,39 +88,41 @@ pub async fn handle_static(
     matched_route: &MatchedRoute,
 ) -> Result<RamaResponse<RamaBody>, RouteError> {
     let request_path = request.uri().path();
-    debug!("Static file request: path={}, static_dir={:?}", request_path, static_dir);
-    
+    debug!(
+        "Static file request: path={}, static_dir={:?}",
+        request_path, static_dir
+    );
+
     // Process static directory path with matcher parameters (like proxy backend)
-    let processed_static_dir = match process_static_dir_with_params(static_dir, &matched_route.params) {
-        Ok(dir) => dir,
-        Err(e) => {
-            tracing::error!("Failed to process static directory with params: {}", e);
-            return Ok(RamaResponse::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(RamaBody::from("Static directory processing error"))
-                .unwrap());
-        }
-    };
-    
+    let processed_static_dir =
+        match process_static_dir_with_params(static_dir, &matched_route.params) {
+            Ok(dir) => dir,
+            Err(e) => {
+                tracing::error!("Failed to process static directory with params: {}", e);
+                return Ok(RamaResponse::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(RamaBody::from("Static directory processing error"))
+                    .unwrap());
+            }
+        };
+
     debug!("Processed static directory: {:?}", processed_static_dir);
-    
+
     // Get the matched path from the route
     let matched_path = match &*matched_route.route {
-        Route::Static { r#match, .. } => {
-            r#match.path.as_deref().unwrap_or("")
-        }
+        Route::Static { r#match, .. } => r#match.path.as_deref().unwrap_or(""),
         _ => "",
     };
-    
+
     debug!("Matched path: {}", matched_path);
     debug!("Route params: {:?}", matched_route.params);
-    
+
     // Determine the file path based on route parameters
     let file_path = if !matched_route.params.is_empty() {
         // Check if static_dir already contains parameters (like {path} or {*path})
         let static_dir_str = static_dir.to_str().unwrap_or("");
         let has_params_in_static_dir = static_dir_str.contains('{') && static_dir_str.contains('}');
-        
+
         if has_params_in_static_dir {
             // If static_dir already contains parameters, the processed_static_dir already has the full path
             // Just serve the file directly from processed_static_dir
@@ -118,8 +130,12 @@ pub async fn handle_static(
         } else {
             // If static_dir doesn't contain parameters, use the parameter value as relative path
             let empty_string = "".to_string();
-            let path_param = matched_route.params.values().next().unwrap_or(&empty_string);
-            
+            let path_param = matched_route
+                .params
+                .values()
+                .next()
+                .unwrap_or(&empty_string);
+
             if path_param.is_empty() {
                 // If parameter is empty, serve index.html
                 processed_static_dir.join("index.html")
@@ -135,10 +151,10 @@ pub async fn handle_static(
         } else {
             request_path
         };
-        
+
         let clean_path = relative_path.trim_start_matches('/');
         debug!("Relative path after removing prefix: '{}'", clean_path);
-        
+
         // Prevent directory traversal and other dangerous patterns
         if clean_path.contains("..") || clean_path.contains("\\") || clean_path.starts_with('/') {
             tracing::warn!("Suspicious path pattern detected: '{}'", clean_path);
@@ -147,7 +163,7 @@ pub async fn handle_static(
                 .body(RamaBody::from("Forbidden"))
                 .unwrap());
         }
-        
+
         // If path is empty (requesting exactly the route), try index.html
         // Otherwise, serve the requested file
         if clean_path.is_empty() {
@@ -156,18 +172,22 @@ pub async fn handle_static(
             processed_static_dir.join(clean_path)
         }
     };
-    
+
     debug!("Trying to serve file: {:?}", file_path);
-    
+
     // Validate file path is within static directory (path traversal protection)
     if let Err(e) = validate_file_path(&file_path, &processed_static_dir) {
-        tracing::warn!("Path traversal attempt detected: file_path={:?}, error={}", file_path, e);
+        tracing::warn!(
+            "Path traversal attempt detected: file_path={:?}, error={}",
+            file_path,
+            e
+        );
         return Ok(RamaResponse::builder()
             .status(StatusCode::FORBIDDEN)
             .body(RamaBody::from("Forbidden"))
             .unwrap());
     }
-    
+
     // Check if file exists and is within static_dir
     match fs::metadata(&file_path).await {
         Ok(metadata) => {
@@ -177,21 +197,19 @@ pub async fn handle_static(
                     .body(RamaBody::from("Not Found"))
                     .unwrap());
             }
-            
+
             // Try to determine content type using mime_guess library
             let content_type = mime_guess::from_path(&file_path)
                 .first_or_octet_stream()
                 .to_string();
-            
+
             match fs::read(&file_path).await {
                 Ok(contents) => {
                     let response = RamaResponse::builder()
                         .status(StatusCode::OK)
                         .header("Content-Type", content_type);
-                    
-                    Ok(response
-                        .body(RamaBody::from(contents))
-                        .unwrap())
+
+                    Ok(response.body(RamaBody::from(contents)).unwrap())
                 }
                 Err(e) => {
                     tracing::error!("Failed to read static file: {}", e);
@@ -202,47 +220,44 @@ pub async fn handle_static(
                 }
             }
         }
-        Err(_) => {
-            Ok(RamaResponse::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(RamaBody::from("Not Found"))
-                .unwrap())
-        }
+        Err(_) => Ok(RamaResponse::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(RamaBody::from("Not Found"))
+            .unwrap()),
     }
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use rama::http::{Method};
     use httpward_core::config::Match;
-    
+    use rama::http::Method;
+    use std::path::PathBuf;
+
     #[test]
     fn test_process_static_dir_with_params() {
         let mut params = HashMap::new();
         params.insert("path".to_string(), "style.css".to_string());
-        
+
         let static_dir = Path::new("C:/myprojects/html/{*path}");
         let result = process_static_dir_with_params(static_dir, &params).unwrap();
         assert_eq!(result, Path::new("C:/myprojects/html/style.css"));
-        
+
         // Test nested path
         params.insert("path".to_string(), "css/style.css".to_string());
         let result2 = process_static_dir_with_params(static_dir, &params).unwrap();
         assert_eq!(result2, Path::new("C:/myprojects/html/css/style.css"));
-        
+
         // Test multiple parameters
         let mut params2 = HashMap::new();
         params2.insert("user".to_string(), "john".to_string());
         params2.insert("theme".to_string(), "dark".to_string());
-        
+
         let static_dir2 = Path::new("C:/myprojects/html/{user}/{theme}");
         let result3 = process_static_dir_with_params(static_dir2, &params2).unwrap();
         assert_eq!(result3, Path::new("C:/myprojects/html/john/dark"));
     }
-    
+
     #[tokio::test]
     async fn test_static_file_with_params() {
         let matched_route = MatchedRoute {
@@ -266,18 +281,23 @@ mod tests {
             },
             matcher_type: httpward_core::core::server_models::MatcherType::Path,
         };
-        
+
         // Test requesting a subpath with parameters
         let request = RamaRequest::builder()
             .method(Method::GET)
             .uri("/site/style.css")
             .body(RamaBody::empty())
             .unwrap();
-            
-        // This should try to serve C:/test/html/style.css 
+
+        // This should try to serve C:/test/html/style.css
         // (processed static_dir already contains the full path, no need to add param again)
-        let result = handle_static(&request, &PathBuf::from("C:/test/html/{*path}"), &matched_route).await;
-        
+        let result = handle_static(
+            &request,
+            &PathBuf::from("C:/test/html/{*path}"),
+            &matched_route,
+        )
+        .await;
+
         match result {
             Ok(response) => {
                 assert_eq!(response.status(), StatusCode::FORBIDDEN);
@@ -286,7 +306,7 @@ mod tests {
                 // Also acceptable
             }
         }
-        
+
         // Test with empty parameter (should serve index.html)
         let matched_route2 = MatchedRoute {
             route: Arc::new(Route::Static {
@@ -309,16 +329,21 @@ mod tests {
             },
             matcher_type: httpward_core::core::server_models::MatcherType::Path,
         };
-        
+
         let request2 = RamaRequest::builder()
             .method(Method::GET)
             .uri("/site")
             .body(RamaBody::empty())
             .unwrap();
-            
+
         // This should try to serve C:/test/html/ (empty param)
-        let result2 = handle_static(&request2, &PathBuf::from("C:/test/html/{*path}"), &matched_route2).await;
-        
+        let result2 = handle_static(
+            &request2,
+            &PathBuf::from("C:/test/html/{*path}"),
+            &matched_route2,
+        )
+        .await;
+
         match result2 {
             Ok(response) => {
                 assert_eq!(response.status(), StatusCode::FORBIDDEN);

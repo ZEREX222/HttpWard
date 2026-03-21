@@ -1,11 +1,11 @@
 // File: httpward-core/src/httpward_middleware/adapter.rs
 
-use std::pin::Pin;
-use std::future::Future;
 use crate::httpward_middleware::types::{BoxError, BoxService};
+use rama::Context;
 use rama::http::{Body, Request, Response};
 use rama::service::Service;
-use rama::Context;
+use std::future::Future;
+use std::pin::Pin;
 
 /// Helper: convert a concrete S into a BoxService
 pub fn box_service_from<S>(svc: S) -> BoxService

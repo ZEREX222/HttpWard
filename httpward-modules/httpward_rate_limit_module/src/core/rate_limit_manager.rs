@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 
-use super::rate_limiter::{RateLimiter, RateLimitKeyKind, RateLimitScope, RouteScopeKey};
+use super::rate_limiter::{RateLimitKeyKind, RateLimitScope, RateLimiter, RouteScopeKey};
 
 #[derive(Debug, Clone, Copy)]
 pub struct SiteRateLimitSettings {
@@ -24,7 +24,9 @@ impl Default for SiteRateLimitSettings {
     }
 }
 
-impl From<&super::httpward_rate_limit_config::InternalRateLimitStoreConfig> for SiteRateLimitSettings {
+impl From<&super::httpward_rate_limit_config::InternalRateLimitStoreConfig>
+    for SiteRateLimitSettings
+{
     fn from(value: &super::httpward_rate_limit_config::InternalRateLimitStoreConfig) -> Self {
         Self {
             max_entries: value.max_entries.max(1),
@@ -159,9 +161,9 @@ impl RateLimitManager {
         self.init_site(site_name, SiteRateLimitSettings::from(&internal.store))?;
 
         let site = self.get_site_state_sync(site_name)?;
-        let mut site = site
-            .try_lock()
-            .map_err(|_| format!("Rate-limit site '{site_name}' state is busy during startup init"))?;
+        let mut site = site.try_lock().map_err(|_| {
+            format!("Rate-limit site '{site_name}' state is busy during startup init")
+        })?;
 
         if !internal.global.is_empty() && !site.global_rules_initialized {
             for rule in &internal.global {
@@ -373,5 +375,3 @@ mod tests {
         assert!(!manager.check_all("test.local", &checks).await.unwrap());
     }
 }
-
-

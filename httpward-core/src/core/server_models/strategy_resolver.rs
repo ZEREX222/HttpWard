@@ -1,15 +1,16 @@
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
-use anyhow::Result;
-use tracing::{debug, trace, instrument};
+use tracing::{debug, instrument, trace};
 
 use crate::config::strategy::{
-    Strategy, StrategyRef,
-    supplement_middleware,         // now accepts &[MiddlewareConfig]
     LegacyStrategyCollection,
+    Strategy,
+    StrategyRef,
+    supplement_middleware, // now accepts &[MiddlewareConfig]
 };
 
-use crate::config::{SiteConfig, GlobalConfig, Route, MiddlewareConfig};
+use crate::config::{GlobalConfig, MiddlewareConfig, Route, SiteConfig};
 
 pub type StrategyCollection = HashMap<String, Arc<Vec<MiddlewareConfig>>>;
 
@@ -21,13 +22,13 @@ pub struct StrategyResolver {
 }
 
 impl StrategyResolver {
-
     #[instrument(skip(site, global))]
     pub fn new(site: &SiteConfig, global: &GlobalConfig) -> Result<Self> {
         debug!("Creating StrategyResolver for site: {}", site.domain);
 
         // Convert global strategies — clone only the Arc pointers (cheap).
-        let global_map: StrategyCollection = global.strategies
+        let global_map: StrategyCollection = global
+            .strategies
             .iter()
             .map(|(name, vec)| (name.clone(), Arc::new(vec.clone())))
             .collect();
@@ -71,12 +72,8 @@ impl StrategyResolver {
         let mut resolved_routes = Vec::with_capacity(site.routes.len());
 
         for (index, route) in site.routes.iter().enumerate() {
-            let resolved = Self::resolve_route_strategy(
-                route,
-                site,
-                &merged_site,
-                &global.strategy,
-            )?;
+            let resolved =
+                Self::resolve_route_strategy(route, site, &merged_site, &global.strategy)?;
 
             trace!(
                 "Precomputed strategy for route {}: {:?}",
@@ -102,9 +99,9 @@ impl StrategyResolver {
         merged_site: &StrategyCollection,
         global_default: &Option<StrategyRef>,
     ) -> Result<Option<Arc<Strategy>>> {
-
         // Determine effective StrategyRef in order: route -> site -> global default
-        let strategy_ref = route.get_strategy()
+        let strategy_ref = route
+            .get_strategy()
             .cloned()
             .or_else(|| site.strategy.clone())
             .or_else(|| global_default.clone());
@@ -113,30 +110,32 @@ impl StrategyResolver {
             Some(StrategyRef::InlineMiddleware(m)) => {
                 // Inline middleware should inherit from site strategy first, then global default
                 let mut merged = m.clone();
-                
+
                 // First, supplement with site strategy if it exists
                 if let Some(StrategyRef::Named(site_strategy_name)) = &site.strategy {
                     if let Some(site_strategy_vec) = merged_site.get(site_strategy_name) {
                         supplement_middleware(&mut merged, site_strategy_vec.as_ref().as_slice())?;
                     }
                 }
-                
+
                 // Then, supplement with global default strategy if it exists and is different
                 if let Some(StrategyRef::Named(default_strategy_name)) = &global_default {
                     // Only supplement if site strategy is different from global default
-                    let site_strategy_name = site.strategy.as_ref()
-                        .and_then(|s| match s {
-                            StrategyRef::Named(name) => Some(name.clone()),
-                            _ => None,
-                        });
-                    
+                    let site_strategy_name = site.strategy.as_ref().and_then(|s| match s {
+                        StrategyRef::Named(name) => Some(name.clone()),
+                        _ => None,
+                    });
+
                     if site_strategy_name.as_ref() != Some(default_strategy_name) {
                         if let Some(global_default_vec) = merged_site.get(default_strategy_name) {
-                            supplement_middleware(&mut merged, global_default_vec.as_ref().as_slice())?;
+                            supplement_middleware(
+                                &mut merged,
+                                global_default_vec.as_ref().as_slice(),
+                            )?;
                         }
                     }
                 }
-                
+
                 // Filter out disabled middleware after inheritance
                 // Remove any middleware that was added by inheritance but should be disabled by inline
                 let mut filtered = Vec::new();
@@ -145,7 +144,7 @@ impl StrategyResolver {
                         filtered.push(middleware);
                     }
                 }
-                
+
                 Some(Arc::new(Strategy {
                     name: "inline".to_string(),
                     middleware: Arc::new(filtered),
@@ -171,12 +170,12 @@ impl StrategyResolver {
                 }
 
                 // Otherwise, use merged_site version if exists (reuse parent's Arc<Vec<...>> directly).
-                merged_site
-                    .get(&name)
-                    .map(|v| Arc::new(Strategy {
+                merged_site.get(&name).map(|v| {
+                    Arc::new(Strategy {
                         name,
                         middleware: v.clone(), // clone Arc (cheap)
-                    }))
+                    })
+                })
             }
 
             None => None,
@@ -187,10 +186,7 @@ impl StrategyResolver {
 
     #[instrument(skip(self))]
     pub fn resolve_for_route(&self, route_index: usize) -> Option<Arc<Strategy>> {
-        self.resolved_routes
-            .get(route_index)
-            .cloned()
-            .flatten()
+        self.resolved_routes.get(route_index).cloned().flatten()
     }
 
     #[instrument(skip(self, site))]
@@ -200,17 +196,20 @@ impl StrategyResolver {
                 name: "inline".into(),
                 middleware: Arc::new(m.clone()),
             }))),
-            Some(StrategyRef::Named(name)) => Ok(self.merged_site.get(name).map(|v| Arc::new(Strategy {
-                name: name.clone(),
-                middleware: v.clone(),
-            }))),
+            Some(StrategyRef::Named(name)) => Ok(self.merged_site.get(name).map(|v| {
+                Arc::new(Strategy {
+                    name: name.clone(),
+                    middleware: v.clone(),
+                })
+            })),
             None => Ok(None),
         }
     }
 
     pub fn get_all_strategies(&self) -> LegacyStrategyCollection {
         // Collect global (clone Vecs) then overwrite with merged_site (site-level merges).
-        let mut all = self.global
+        let mut all = self
+            .global
             .iter()
             .map(|(n, v)| (n.clone(), (**v).clone()))
             .collect::<LegacyStrategyCollection>();
@@ -226,8 +225,8 @@ impl StrategyResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::global::{GlobalConfig, Route, Match};
-    use crate::config::strategy::{StrategyRef, MiddlewareConfig};
+    use crate::config::global::{GlobalConfig, Match, Route};
+    use crate::config::strategy::{MiddlewareConfig, StrategyRef};
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -243,37 +242,43 @@ mod tests {
             strategy: Some(StrategyRef::Named("default".to_string())),
             strategies: {
                 let mut strategies = std::collections::HashMap::new();
-                strategies.insert("default".to_string(), vec![
-                    MiddlewareConfig::new_named_json(
-                        "rate_limit".to_string(),
-                        json!({
-                            "requests": 1000,
-                            "window": "1m"
-                        })
-                    ),
-                    MiddlewareConfig::new_named_json(
-                        "logging".to_string(),
-                        json!({
-                            "level": "info",
-                            "format": "json"
-                        })
-                    )
-                ]);
-                strategies.insert("strict".to_string(), vec![
-                    MiddlewareConfig::new_named_json(
-                        "rate_limit".to_string(),
-                        json!({
-                            "requests": 100,
-                            "window": "1m"
-                        })
-                    ),
-                    MiddlewareConfig::new_named_json(
-                        "auth".to_string(),
-                        json!({
-                            "type": "jwt"
-                        })
-                    )
-                ]);
+                strategies.insert(
+                    "default".to_string(),
+                    vec![
+                        MiddlewareConfig::new_named_json(
+                            "rate_limit".to_string(),
+                            json!({
+                                "requests": 1000,
+                                "window": "1m"
+                            }),
+                        ),
+                        MiddlewareConfig::new_named_json(
+                            "logging".to_string(),
+                            json!({
+                                "level": "info",
+                                "format": "json"
+                            }),
+                        ),
+                    ],
+                );
+                strategies.insert(
+                    "strict".to_string(),
+                    vec![
+                        MiddlewareConfig::new_named_json(
+                            "rate_limit".to_string(),
+                            json!({
+                                "requests": 100,
+                                "window": "1m"
+                            }),
+                        ),
+                        MiddlewareConfig::new_named_json(
+                            "auth".to_string(),
+                            json!({
+                                "type": "jwt"
+                            }),
+                        ),
+                    ],
+                );
                 strategies
             },
         }
@@ -307,36 +312,42 @@ mod tests {
             strategy: Some(StrategyRef::Named("site_default".to_string())),
             strategies: {
                 let mut strategies = std::collections::HashMap::new();
-                strategies.insert("site_default".to_string(), vec![
-                    MiddlewareConfig::new_named_json(
-                        "rate_limit".to_string(),
-                        json!({
-                            "requests": 500,
-                            "window": "30s"
-                        })
-                    ),
-                    MiddlewareConfig::new_named_json(
-                        "cors".to_string(),
-                        json!({
-                            "origins": ["*"]
-                        })
-                    )
-                ]);
-                strategies.insert("api".to_string(), vec![
-                    MiddlewareConfig::new_named_json(
-                        "auth".to_string(),
-                        json!({
-                            "type": "api_key"
-                        })
-                    ),
-                    MiddlewareConfig::new_named_json(
-                        "rate_limit".to_string(),
-                        json!({
-                            "requests": 200,
-                            "window": "1m"
-                        })
-                    )
-                ]);
+                strategies.insert(
+                    "site_default".to_string(),
+                    vec![
+                        MiddlewareConfig::new_named_json(
+                            "rate_limit".to_string(),
+                            json!({
+                                "requests": 500,
+                                "window": "30s"
+                            }),
+                        ),
+                        MiddlewareConfig::new_named_json(
+                            "cors".to_string(),
+                            json!({
+                                "origins": ["*"]
+                            }),
+                        ),
+                    ],
+                );
+                strategies.insert(
+                    "api".to_string(),
+                    vec![
+                        MiddlewareConfig::new_named_json(
+                            "auth".to_string(),
+                            json!({
+                                "type": "api_key"
+                            }),
+                        ),
+                        MiddlewareConfig::new_named_json(
+                            "rate_limit".to_string(),
+                            json!({
+                                "requests": 200,
+                                "window": "1m"
+                            }),
+                        ),
+                    ],
+                );
                 strategies
             },
         }
@@ -405,52 +416,59 @@ mod tests {
         let mut site = create_test_site_config();
 
         // Modify global default strategy
-        global.strategies.insert("default".to_string(), vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({
-                    "requests": 1000,
-                    "window": "1m",
-                    "burst": 200
-                })
-            ),
-            MiddlewareConfig::new_named_json(
-                "logging".to_string(),
-                json!({
-                    "level": "info"
-                })
-            )
-        ]);
+        global.strategies.insert(
+            "default".to_string(),
+            vec![
+                MiddlewareConfig::new_named_json(
+                    "rate_limit".to_string(),
+                    json!({
+                        "requests": 1000,
+                        "window": "1m",
+                        "burst": 200
+                    }),
+                ),
+                MiddlewareConfig::new_named_json(
+                    "logging".to_string(),
+                    json!({
+                        "level": "info"
+                    }),
+                ),
+            ],
+        );
 
         // Modify site strategy to inherit from global default
-        site.strategies.insert("site_default".to_string(), vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({
-                    "requests": 500  // Override
-                })
-            ),
-            MiddlewareConfig::new_named_json(
-                "cors".to_string(),
-                json!({
-                    "origins": ["*"]  // New middleware
-                })
-            )
-        ]);
+        site.strategies.insert(
+            "site_default".to_string(),
+            vec![
+                MiddlewareConfig::new_named_json(
+                    "rate_limit".to_string(),
+                    json!({
+                        "requests": 500  // Override
+                    }),
+                ),
+                MiddlewareConfig::new_named_json(
+                    "cors".to_string(),
+                    json!({
+                        "origins": ["*"]  // New middleware
+                    }),
+                ),
+            ],
+        );
 
         let resolver = StrategyResolver::new(&site, &global).unwrap();
         let site_strategy = resolver.resolve_for_site(&site).unwrap().unwrap();
-        
+
         // Check that rate_limit was supplemented (not merged) with global default
-        let rate_limit_config = site_strategy.middleware
+        let rate_limit_config = site_strategy
+            .middleware
             .iter()
             .find(|m| m.name() == "rate_limit")
             .unwrap()
             .config_as_json()
             .unwrap();
-        assert_eq!(rate_limit_config["requests"], 500);  // Site override preserved
-        assert_eq!(rate_limit_config["window"], "1m");   // Supplemented from global
-        assert_eq!(rate_limit_config["burst"], 200);    // Supplemented from global
+        assert_eq!(rate_limit_config["requests"], 500); // Site override preserved
+        assert_eq!(rate_limit_config["window"], "1m"); // Supplemented from global
+        assert_eq!(rate_limit_config["burst"], 200); // Supplemented from global
 
         // Check that logging was added from global default
         assert_eq!(site_strategy.middleware.len(), 3);
@@ -478,8 +496,8 @@ mod tests {
                     json!({
                         "requests": 10,
                         "window": "1s"
-                    })
-                )
+                    }),
+                ),
             ])),
             strategies: None,
         });
@@ -515,21 +533,24 @@ mod tests {
             strategy: Some(StrategyRef::Named("strict".to_string())),
             strategies: {
                 let mut strategies = std::collections::HashMap::new();
-                strategies.insert("strict".to_string(), vec![
-                    MiddlewareConfig::new_named_json(
-                        "auth".to_string(),
-                        json!({
-                            "type": "basic",
-                            "realm": "Admin Area"
-                        })
-                    ),
-                    MiddlewareConfig::new_named_json(
-                        "audit".to_string(),
-                        json!({
-                            "enabled": true
-                        })
-                    )
-                ]);
+                strategies.insert(
+                    "strict".to_string(),
+                    vec![
+                        MiddlewareConfig::new_named_json(
+                            "auth".to_string(),
+                            json!({
+                                "type": "basic",
+                                "realm": "Admin Area"
+                            }),
+                        ),
+                        MiddlewareConfig::new_named_json(
+                            "audit".to_string(),
+                            json!({
+                                "enabled": true
+                            }),
+                        ),
+                    ],
+                );
                 Some(strategies)
             },
         });
@@ -541,7 +562,8 @@ mod tests {
         assert_eq!(admin_strategy.middleware.len(), 3); // auth (route) + audit (route) + rate_limit (global)
 
         // Check that route auth overrides global auth
-        let auth_config = admin_strategy.middleware
+        let auth_config = admin_strategy
+            .middleware
             .iter()
             .find(|m| m.name() == "auth")
             .unwrap()
@@ -551,7 +573,8 @@ mod tests {
         assert_eq!(auth_config["realm"], "Admin Area");
 
         // Check that rate_limit was supplemented from global strict strategy
-        let rate_limit_config = admin_strategy.middleware
+        let rate_limit_config = admin_strategy
+            .middleware
             .iter()
             .find(|m| m.name() == "rate_limit")
             .unwrap()
@@ -568,7 +591,7 @@ mod tests {
         let resolver = StrategyResolver::new(&site, &global).unwrap();
 
         let all_strategies = resolver.get_all_strategies();
-        
+
         // Should contain all strategies: global + merged site
         assert_eq!(all_strategies.len(), 4);
         assert!(all_strategies.contains_key("default"));
@@ -585,13 +608,13 @@ mod tests {
     fn test_no_global_default_strategy() {
         let mut global = create_test_global_config();
         global.strategy = None; // No global default
-        
+
         let site = create_test_site_config();
         let resolver = StrategyResolver::new(&site, &global).unwrap();
 
         // Should still work correctly
         assert_eq!(resolver.resolved_routes.len(), 2);
-        
+
         // Route with explicit strategy should still resolve
         let api_strategy = resolver.resolve_for_route(0).unwrap();
         assert_eq!(api_strategy.name, "api");
@@ -603,11 +626,11 @@ mod tests {
         let site = SiteConfig::default();
 
         let resolver = StrategyResolver::new(&site, &global).unwrap();
-        
+
         assert_eq!(resolver.global.len(), 0);
         assert_eq!(resolver.merged_site.len(), 0);
         assert_eq!(resolver.resolved_routes.len(), 0);
-        
+
         let all_strategies = resolver.get_all_strategies();
         assert_eq!(all_strategies.len(), 0);
     }
@@ -615,49 +638,55 @@ mod tests {
     #[test]
     fn test_strategy_resolver_with_complex_merging() {
         let mut global = create_test_global_config();
-        
+
         // Global strategies with overlapping middleware names
-        global.strategies.insert("base".to_string(), vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({
-                    "requests": 1000,
-                    "window": "1m",
-                    "burst": 200
-                })
-            ),
-            MiddlewareConfig::new_named_json(
-                "logging".to_string(),
-                json!({
-                    "level": "info",
-                    "format": "json"
-                })
-            ),
-            MiddlewareConfig::new_named_json(
-                "cors".to_string(),
-                json!({
-                    "origins": ["https://example.com"]
-                })
-            )
-        ]);
+        global.strategies.insert(
+            "base".to_string(),
+            vec![
+                MiddlewareConfig::new_named_json(
+                    "rate_limit".to_string(),
+                    json!({
+                        "requests": 1000,
+                        "window": "1m",
+                        "burst": 200
+                    }),
+                ),
+                MiddlewareConfig::new_named_json(
+                    "logging".to_string(),
+                    json!({
+                        "level": "info",
+                        "format": "json"
+                    }),
+                ),
+                MiddlewareConfig::new_named_json(
+                    "cors".to_string(),
+                    json!({
+                        "origins": ["https://example.com"]
+                    }),
+                ),
+            ],
+        );
 
         let mut site = create_test_site_config();
-        
+
         // Site strategies that inherit and override
-        site.strategies.insert("enhanced".to_string(), vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({
-                    "requests": 500  // Override
-                })
-            ),
-            MiddlewareConfig::new_named_json(
-                "auth".to_string(),
-                json!({
-                    "type": "oauth2"  // New middleware
-                })
-            )
-        ]);
+        site.strategies.insert(
+            "enhanced".to_string(),
+            vec![
+                MiddlewareConfig::new_named_json(
+                    "rate_limit".to_string(),
+                    json!({
+                        "requests": 500  // Override
+                    }),
+                ),
+                MiddlewareConfig::new_named_json(
+                    "auth".to_string(),
+                    json!({
+                        "type": "oauth2"  // New middleware
+                    }),
+                ),
+            ],
+        );
 
         site.strategy = Some(StrategyRef::Named("enhanced".to_string()));
 
@@ -667,19 +696,21 @@ mod tests {
         assert_eq!(enhanced_strategy.name, "enhanced");
         assert_eq!(enhanced_strategy.middleware.len(), 3); // rate_limit + auth + logging (from global base)
 
-        // Check rate_limit: site override + global default supplementation  
-        let rate_limit_config = enhanced_strategy.middleware
+        // Check rate_limit: site override + global default supplementation
+        let rate_limit_config = enhanced_strategy
+            .middleware
             .iter()
             .find(|m| m.name() == "rate_limit")
             .unwrap()
             .config_as_json()
             .unwrap();
-        assert_eq!(rate_limit_config["requests"], 500);  // Site override
-        assert_eq!(rate_limit_config["window"], "1m");   // From global default
+        assert_eq!(rate_limit_config["requests"], 500); // Site override
+        assert_eq!(rate_limit_config["window"], "1m"); // From global default
         // Note: burst field doesn't exist because global default doesn't have it
 
         // Check auth: site only
-        let auth_config = enhanced_strategy.middleware
+        let auth_config = enhanced_strategy
+            .middleware
             .iter()
             .find(|m| m.name() == "auth")
             .unwrap()
@@ -688,7 +719,8 @@ mod tests {
         assert_eq!(auth_config["type"], "oauth2");
 
         // Check logging: from global base
-        let logging_config = enhanced_strategy.middleware
+        let logging_config = enhanced_strategy
+            .middleware
             .iter()
             .find(|m| m.name() == "logging")
             .unwrap()
@@ -701,7 +733,7 @@ mod tests {
     #[test]
     fn test_performance_large_scale() {
         let mut strategies = std::collections::HashMap::new();
-        
+
         // Create large global config with many strategies and middleware
         for i in 0..20 {
             let mut middleware = Vec::new();
@@ -712,7 +744,7 @@ mod tests {
                         "param1": format!("value_{}_{}", i, j),
                         "param2": j * 10,
                         "param3": format!("config_{}_{}", i, j)
-                    })
+                    }),
                 ));
             }
             strategies.insert(format!("strategy_{}", i), middleware);
@@ -752,7 +784,7 @@ mod tests {
                     json!({
                         "site_param": format!("site_value_{}_{}", i, j),
                         "site_index": j
-                    })
+                    }),
                 ));
             }
             site_strategies.insert(format!("site_strategy_{}", i), middleware);
@@ -768,9 +800,15 @@ mod tests {
         };
 
         println!("Performance test setup:");
-        println!("- Global strategies: {} with 50 middleware each", global.strategies.len());
+        println!(
+            "- Global strategies: {} with 50 middleware each",
+            global.strategies.len()
+        );
         println!("- Site routes: {}", site.routes.len());
-        println!("- Site strategies: {} with 10 middleware each", site.strategies.len());
+        println!(
+            "- Site strategies: {} with 10 middleware each",
+            site.strategies.len()
+        );
 
         let start = std::time::Instant::now();
         let resolver = StrategyResolver::new(&site, &global).unwrap();
@@ -786,16 +824,26 @@ mod tests {
         }
         let resolution_time = start.elapsed();
 
-        println!("Route resolution ({} routes): {:?}", site.routes.len(), resolution_time);
-        println!("Average per route: {:?}", resolution_time / site.routes.len() as u32);
+        println!(
+            "Route resolution ({} routes): {:?}",
+            site.routes.len(),
+            resolution_time
+        );
+        println!(
+            "Average per route: {:?}",
+            resolution_time / site.routes.len() as u32
+        );
 
         // Verify correctness
         assert_eq!(resolver.resolved_routes.len(), site.routes.len());
-        
+
         // All routes should have strategies (either explicit or inherited)
         for i in 0..site.routes.len() {
-            assert!(resolver.resolve_for_route(i).is_some(), 
-                   "Route {} should have a strategy", i);
+            assert!(
+                resolver.resolve_for_route(i).is_some(),
+                "Route {} should have a strategy",
+                i
+            );
         }
 
         println!("\n✅ Performance test completed successfully!");
@@ -803,8 +851,14 @@ mod tests {
         println!("✅ All routes properly resolved with inheritance");
 
         // Performance assertion - should be fast even with large configs
-        assert!(creation_time.as_millis() < 100, "StrategyResolver creation should be fast even with large configs");
-        assert!(resolution_time.as_millis() < 50, "Route resolution should be very fast");
+        assert!(
+            creation_time.as_millis() < 100,
+            "StrategyResolver creation should be fast even with large configs"
+        );
+        assert!(
+            resolution_time.as_millis() < 50,
+            "Route resolution should be very fast"
+        );
     }
 
     #[test]
@@ -824,8 +878,8 @@ mod tests {
                     "auth".to_string(),
                     json!({
                         "type": "basic"
-                    })
-                )
+                    }),
+                ),
             ])),
             strategies: None,
         });
@@ -834,7 +888,7 @@ mod tests {
         let inline_strategy = resolver.resolve_for_route(2).unwrap();
 
         assert_eq!(inline_strategy.name, "inline");
-        
+
         // Should have inline middleware + site strategy + global default middleware
         assert_eq!(inline_strategy.middleware.len(), 4); // logging (global) + rate_limit,cors (site) + auth (inline)
         assert_eq!(inline_strategy.middleware[0].name(), "logging"); // From global default
@@ -849,7 +903,7 @@ mod tests {
     fn test_inline_strategy_with_no_global_default() {
         let mut global = create_test_global_config();
         global.strategy = None; // No global default
-        
+
         let mut site = create_test_site_config();
 
         // Add route with inline middleware
@@ -864,8 +918,8 @@ mod tests {
                     "auth".to_string(),
                     json!({
                         "type": "basic"
-                    })
-                )
+                    }),
+                ),
             ])),
             strategies: None,
         });
@@ -874,7 +928,7 @@ mod tests {
         let inline_strategy = resolver.resolve_for_route(2).unwrap();
 
         assert_eq!(inline_strategy.name, "inline");
-        
+
         // Should have inline middleware + site strategy middleware (no global default)
         assert_eq!(inline_strategy.middleware.len(), 3); // rate_limit,cors (site strategy) + auth (inline)
         assert_eq!(inline_strategy.middleware[0].name(), "rate_limit"); // From site strategy
@@ -886,16 +940,16 @@ mod tests {
 
     // Include the off inheritance tests
     mod off_inheritance_tests;
-    
+
     // Include the user scenario test
     mod user_scenario_test;
-    
+
     // Include the comprehensive inheritance tests
     mod comprehensive_inheritance_tests;
-    
+
     // Include the hierarchical inheritance tests
     mod hierarchical_inheritance_tests;
-    
+
     /// Comprehensive test for complete hierarchy validation and middleware sequence
     /// This test validates the entire inheritance chain: global -> site -> route -> inline
     /// and ensures correct middleware ordering and supplementation behavior
@@ -903,103 +957,115 @@ mod tests {
     fn test_complete_hierarchy_and_middleware_sequence() {
         // Create comprehensive global configuration
         let mut global = create_test_global_config();
-        
+
         // Define global strategies with overlapping middleware names
-        global.strategies.insert("base".to_string(), vec![
-            MiddlewareConfig::new_named_json(
-                "logging".to_string(),
-                json!({
-                    "level": "info",
-                    "format": "json",
-                    "source": "global_base"
-                })
-            ),
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({
-                    "requests": 1000,
-                    "window": "1m",
-                    "burst": 200,
-                    "source": "global_base"
-                })
-            ),
-            MiddlewareConfig::new_named_json(
-                "cors".to_string(),
-                json!({
-                    "origins": ["https://api.example.com"],
-                    "max_age": 3600,
-                    "source": "global_base"
-                })
-            )
-        ]);
-        
-        global.strategies.insert("security".to_string(), vec![
-            MiddlewareConfig::new_named_json(
-                "auth".to_string(),
-                json!({
-                    "type": "oauth2",
-                    "provider": "global_auth",
-                    "source": "global_security"
-                })
-            ),
-            MiddlewareConfig::new_named_json(
-                "audit".to_string(),
-                json!({
-                    "enabled": true,
-                    "log_level": "debug",
-                    "source": "global_security"
-                })
-            )
-        ]);
-        
+        global.strategies.insert(
+            "base".to_string(),
+            vec![
+                MiddlewareConfig::new_named_json(
+                    "logging".to_string(),
+                    json!({
+                        "level": "info",
+                        "format": "json",
+                        "source": "global_base"
+                    }),
+                ),
+                MiddlewareConfig::new_named_json(
+                    "rate_limit".to_string(),
+                    json!({
+                        "requests": 1000,
+                        "window": "1m",
+                        "burst": 200,
+                        "source": "global_base"
+                    }),
+                ),
+                MiddlewareConfig::new_named_json(
+                    "cors".to_string(),
+                    json!({
+                        "origins": ["https://api.example.com"],
+                        "max_age": 3600,
+                        "source": "global_base"
+                    }),
+                ),
+            ],
+        );
+
+        global.strategies.insert(
+            "security".to_string(),
+            vec![
+                MiddlewareConfig::new_named_json(
+                    "auth".to_string(),
+                    json!({
+                        "type": "oauth2",
+                        "provider": "global_auth",
+                        "source": "global_security"
+                    }),
+                ),
+                MiddlewareConfig::new_named_json(
+                    "audit".to_string(),
+                    json!({
+                        "enabled": true,
+                        "log_level": "debug",
+                        "source": "global_security"
+                    }),
+                ),
+            ],
+        );
+
         // Set global default strategy
         global.strategy = Some(StrategyRef::Named("base".to_string()));
-        
+
         // Create comprehensive site configuration
         let mut site = create_test_site_config();
-        
+
         // Define site strategies that inherit from and override global
-        site.strategies.insert("site_enhanced".to_string(), vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({
-                    "requests": 500,  // Override global value
-                    "window": "30s",  // Override global value
-                    "source": "site_enhanced"
-                })
-            ),
-            MiddlewareConfig::new_named_json(
-                "compression".to_string(),
-                json!({
-                    "enabled": true,
-                    "level": "gzip",
-                    "source": "site_enhanced"
-                })
-            )
-        ]);
-        
-        site.strategies.insert("api_public".to_string(), vec![
-            MiddlewareConfig::new_named_json(
-                "rate_limit".to_string(),
-                json!({
-                    "requests": 100,
-                    "window": "1m",
-                    "source": "site_api_public"
-                })
-            ),
-            MiddlewareConfig::new_named_json(
-                "cache".to_string(),
-                json!({
-                    "ttl": 300,
-                    "strategy": "lru",
-                    "source": "site_api_public"
-                })
-            )
-        ]);
-        
+        site.strategies.insert(
+            "site_enhanced".to_string(),
+            vec![
+                MiddlewareConfig::new_named_json(
+                    "rate_limit".to_string(),
+                    json!({
+                        "requests": 500,  // Override global value
+                        "window": "30s",  // Override global value
+                        "source": "site_enhanced"
+                    }),
+                ),
+                MiddlewareConfig::new_named_json(
+                    "compression".to_string(),
+                    json!({
+                        "enabled": true,
+                        "level": "gzip",
+                        "source": "site_enhanced"
+                    }),
+                ),
+            ],
+        );
+
+        site.strategies.insert(
+            "api_public".to_string(),
+            vec![
+                MiddlewareConfig::new_named_json(
+                    "rate_limit".to_string(),
+                    json!({
+                        "requests": 100,
+                        "window": "1m",
+                        "source": "site_api_public"
+                    }),
+                ),
+                MiddlewareConfig::new_named_json(
+                    "cache".to_string(),
+                    json!({
+                        "ttl": 300,
+                        "strategy": "lru",
+                        "source": "site_api_public"
+                    }),
+                ),
+            ],
+        );
+
         // Set site default strategy
         site.strategy = Some(StrategyRef::Named("site_enhanced".to_string()));
-        
+
         // Add comprehensive routes with different strategy scenarios
         site.routes = vec![
             // Route 1: Uses site default strategy (inherits from global base)
@@ -1012,7 +1078,6 @@ mod tests {
                 strategy: None, // Will inherit site strategy
                 strategies: None,
             },
-            
             // Route 2: Uses named site strategy
             Route::Proxy {
                 r#match: Match {
@@ -1023,7 +1088,6 @@ mod tests {
                 strategy: Some(StrategyRef::Named("api_public".to_string())),
                 strategies: None,
             },
-            
             // Route 3: Uses global named strategy directly
             Route::Proxy {
                 r#match: Match {
@@ -1034,7 +1098,6 @@ mod tests {
                 strategy: Some(StrategyRef::Named("security".to_string())),
                 strategies: None,
             },
-            
             // Route 4: Inline strategy with inheritance
             Route::Static {
                 r#match: Match {
@@ -1048,7 +1111,7 @@ mod tests {
                         json!({
                             "param": "inline_value",
                             "source": "inline_route_4"
-                        })
+                        }),
                     ),
                     MiddlewareConfig::new_named_json(
                         "rate_limit".to_string(),
@@ -1056,12 +1119,11 @@ mod tests {
                             "requests": 10,
                             "window": "1s",
                             "source": "inline_override"
-                        })
-                    )
+                        }),
+                    ),
                 ])),
                 strategies: None,
             },
-            
             // Route 5: Named strategy with local override
             Route::Proxy {
                 r#match: Match {
@@ -1072,147 +1134,196 @@ mod tests {
                 strategy: Some(StrategyRef::Named("api_public".to_string())),
                 strategies: {
                     let mut route_strategies = std::collections::HashMap::new();
-                    route_strategies.insert("api_public".to_string(), vec![
-                        MiddlewareConfig::new_named_json(
-                            "auth".to_string(),
-                            json!({
-                                "type": "basic",
-                                "realm": "Admin Area",
-                                "source": "route_local_override"
-                            })
-                        ),
-                        MiddlewareConfig::new_named_json(
-                            "admin_audit".to_string(),
-                            json!({
-                                "detailed": true,
-                                "source": "route_local_override"
-                            })
-                        )
-                    ]);
+                    route_strategies.insert(
+                        "api_public".to_string(),
+                        vec![
+                            MiddlewareConfig::new_named_json(
+                                "auth".to_string(),
+                                json!({
+                                    "type": "basic",
+                                    "realm": "Admin Area",
+                                    "source": "route_local_override"
+                                }),
+                            ),
+                            MiddlewareConfig::new_named_json(
+                                "admin_audit".to_string(),
+                                json!({
+                                    "detailed": true,
+                                    "source": "route_local_override"
+                                }),
+                            ),
+                        ],
+                    );
                     Some(route_strategies)
                 },
-            }
+            },
         ];
-        
+
         // Create StrategyResolver
-        let resolver = StrategyResolver::new(&site, &global).expect("Failed to create StrategyResolver");
-        
+        let resolver =
+            StrategyResolver::new(&site, &global).expect("Failed to create StrategyResolver");
+
         println!("=== COMPREHENSIVE HIERARCHY TEST ===");
-        println!("Global strategies: {:?}", resolver.global.keys().collect::<Vec<_>>());
-        println!("Merged site strategies: {:?}", resolver.merged_site.keys().collect::<Vec<_>>());
+        println!(
+            "Global strategies: {:?}",
+            resolver.global.keys().collect::<Vec<_>>()
+        );
+        println!(
+            "Merged site strategies: {:?}",
+            resolver.merged_site.keys().collect::<Vec<_>>()
+        );
         println!("Resolved routes: {}", resolver.resolved_routes.len());
-        
+
         // Test 1: Route with site default strategy inheritance
-        let public_strategy = resolver.resolve_for_route(0)
+        let public_strategy = resolver
+            .resolve_for_route(0)
             .expect("Route 0 should have a strategy");
-        
+
         println!("\n--- Route 1 (/public) - Site Default Inheritance ---");
         println!("Strategy name: {}", public_strategy.name);
         println!("Middleware count: {}", public_strategy.middleware.len());
-        println!("Middleware sequence: {:?}", 
-                public_strategy.middleware.iter().map(|m| m.name()).collect::<Vec<_>>());
-        
+        println!(
+            "Middleware sequence: {:?}",
+            public_strategy
+                .middleware
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>()
+        );
+
         // Should inherit from site strategy + global base supplementation
         assert_eq!(public_strategy.name, "site_enhanced");
         assert_eq!(public_strategy.middleware.len(), 4); // logging, cors (global) + rate_limit, compression (site)
-        
+
         // Verify sequence: global base middleware first, then site middleware
         assert_eq!(public_strategy.middleware[0].name(), "logging"); // From global base
         assert_eq!(public_strategy.middleware[1].name(), "cors"); // From global base
         assert_eq!(public_strategy.middleware[2].name(), "rate_limit"); // From site (overrides global)
         assert_eq!(public_strategy.middleware[3].name(), "compression"); // From site
-        
+
         // Verify rate_limit supplementation (site override + global base fields)
         let rate_limit_config = public_strategy.middleware[2].config_as_json().unwrap();
         assert_eq!(rate_limit_config["requests"], 500); // Site override
         assert_eq!(rate_limit_config["window"], "30s"); // Site override
         assert_eq!(rate_limit_config["burst"], 200); // Supplemented from global base
         assert_eq!(rate_limit_config["source"], "site_enhanced"); // Source preserved
-        
+
         // Test 2: Route with named site strategy
-        let api_strategy = resolver.resolve_for_route(1)
+        let api_strategy = resolver
+            .resolve_for_route(1)
             .expect("Route 1 should have a strategy");
-        
+
         println!("\n--- Route 2 (/api) - Named Site Strategy ---");
         println!("Strategy name: {}", api_strategy.name);
         println!("Middleware count: {}", api_strategy.middleware.len());
-        println!("Middleware sequence: {:?}", 
-                api_strategy.middleware.iter().map(|m| m.name()).collect::<Vec<_>>());
-        
+        println!(
+            "Middleware sequence: {:?}",
+            api_strategy
+                .middleware
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>()
+        );
+
         assert_eq!(api_strategy.name, "api_public");
         assert_eq!(api_strategy.middleware.len(), 4); // logging, cors (global) + rate_limit, cache (site)
-        
+
         // Verify sequence and supplementation
         assert_eq!(api_strategy.middleware[0].name(), "logging"); // From global base
         assert_eq!(api_strategy.middleware[1].name(), "cors"); // From global base
         assert_eq!(api_strategy.middleware[2].name(), "rate_limit"); // From site
         assert_eq!(api_strategy.middleware[3].name(), "cache"); // From site
-        
+
         // Test 3: Route with global named strategy
-        let secure_strategy = resolver.resolve_for_route(2)
+        let secure_strategy = resolver
+            .resolve_for_route(2)
             .expect("Route 2 should have a strategy");
-        
+
         println!("\n--- Route 3 (/secure) - Global Named Strategy ---");
         println!("Strategy name: {}", secure_strategy.name);
         println!("Middleware count: {}", secure_strategy.middleware.len());
-        println!("Middleware sequence: {:?}", 
-                secure_strategy.middleware.iter().map(|m| m.name()).collect::<Vec<_>>());
-        
+        println!(
+            "Middleware sequence: {:?}",
+            secure_strategy
+                .middleware
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>()
+        );
+
         assert_eq!(secure_strategy.name, "security");
         assert_eq!(secure_strategy.middleware.len(), 2); // auth, audit (global only)
         assert_eq!(secure_strategy.middleware[0].name(), "auth");
         assert_eq!(secure_strategy.middleware[1].name(), "audit");
-        
+
         // Test 4: Route with inline strategy inheritance
-        let static_strategy = resolver.resolve_for_route(3)
+        let static_strategy = resolver
+            .resolve_for_route(3)
             .expect("Route 3 should have a strategy");
-        
+
         println!("\n--- Route 4 (/static) - Inline Strategy Inheritance ---");
         println!("Strategy name: {}", static_strategy.name);
         println!("Middleware count: {}", static_strategy.middleware.len());
-        println!("Middleware sequence: {:?}", 
-                static_strategy.middleware.iter().map(|m| m.name()).collect::<Vec<_>>());
-        
+        println!(
+            "Middleware sequence: {:?}",
+            static_strategy
+                .middleware
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>()
+        );
+
         assert_eq!(static_strategy.name, "inline");
         assert_eq!(static_strategy.middleware.len(), 5); // Complete inheritance chain
-        
+
         // Verify complete inheritance sequence
         let expected_sequence = vec![
-            "logging",      // Global base
-            "cors",         // Global base  
-            "compression",  // Site strategy
+            "logging",           // Global base
+            "cors",              // Global base
+            "compression",       // Site strategy
             "custom_middleware", // Inline
-            "rate_limit"    // Inline override (should be last)
+            "rate_limit",        // Inline override (should be last)
         ];
-        
-        let actual_sequence = static_strategy.middleware.iter()
+
+        let actual_sequence = static_strategy
+            .middleware
+            .iter()
             .map(|m| m.name())
             .collect::<Vec<_>>();
-        
+
         assert_eq!(actual_sequence, expected_sequence);
-        
+
         // Verify inline rate_limit takes precedence
         let inline_rate_limit = &static_strategy.middleware[4];
         let config = inline_rate_limit.config_as_json().unwrap();
         assert_eq!(config["requests"], 10); // Inline value
         assert_eq!(config["window"], "1s"); // Inline value
         assert_eq!(config["source"], "inline_override"); // Inline source
-        
+
         // Test 5: Route with local strategy override
-        let admin_strategy = resolver.resolve_for_route(4)
+        let admin_strategy = resolver
+            .resolve_for_route(4)
             .expect("Route 4 should have a strategy");
-        
+
         println!("\n--- Route 5 (/admin) - Local Strategy Override ---");
         println!("Strategy name: {}", admin_strategy.name);
         println!("Middleware count: {}", admin_strategy.middleware.len());
-        println!("Middleware sequence: {:?}", 
-                admin_strategy.middleware.iter().map(|m| m.name()).collect::<Vec<_>>());
-        
+        println!(
+            "Middleware sequence: {:?}",
+            admin_strategy
+                .middleware
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>()
+        );
+
         assert_eq!(admin_strategy.name, "api_public");
         assert_eq!(admin_strategy.middleware.len(), 6); // logging, cors (global) + rate_limit, cache (site) + auth, admin_audit (route)
-        
+
         // Verify local override
-        let auth_config = admin_strategy.middleware.iter()
+        let auth_config = admin_strategy
+            .middleware
+            .iter()
             .find(|m| m.name() == "auth")
             .unwrap()
             .config_as_json()
@@ -1220,21 +1331,28 @@ mod tests {
         assert_eq!(auth_config["type"], "basic"); // Local override
         assert_eq!(auth_config["realm"], "Admin Area"); // Local override
         assert_eq!(auth_config["source"], "route_local_override"); // Local source
-        
+
         // Test 6: Site-level strategy resolution
-        let site_strategy = resolver.resolve_for_site(&site)
+        let site_strategy = resolver
+            .resolve_for_site(&site)
             .expect("Site should have a strategy")
             .expect("Site strategy should not be None");
-        
+
         println!("\n--- Site Strategy Resolution ---");
         println!("Strategy name: {}", site_strategy.name);
         println!("Middleware count: {}", site_strategy.middleware.len());
-        println!("Middleware sequence: {:?}", 
-                site_strategy.middleware.iter().map(|m| m.name()).collect::<Vec<_>>());
-        
+        println!(
+            "Middleware sequence: {:?}",
+            site_strategy
+                .middleware
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>()
+        );
+
         assert_eq!(site_strategy.name, "site_enhanced");
         assert_eq!(site_strategy.middleware.len(), 4); // Same as Route 1
-        
+
         // Test 7: All strategies collection
         let all_strategies = resolver.get_all_strategies();
         println!("\n--- All Strategies Collection ---");
@@ -1242,44 +1360,51 @@ mod tests {
         for (name, middleware) in &all_strategies {
             println!("  {}: {} middleware", name, middleware.len());
         }
-        
+
         // Should contain all strategies: global + merged site
         assert!(all_strategies.contains_key("base"));
         assert!(all_strategies.contains_key("security"));
         assert!(all_strategies.contains_key("site_enhanced"));
         assert!(all_strategies.contains_key("api_public"));
-        
+
         // Test 8: Validate middleware configuration integrity
         println!("\n--- Configuration Integrity Validation ---");
-        
+
         // Verify no duplicate middleware names within any strategy
         for (name, middleware) in &all_strategies {
             let mut seen_names = std::collections::HashSet::new();
             for m in middleware {
-                assert!(!seen_names.contains(m.name()), 
-                       "Duplicate middleware '{}' in strategy '{}'", m.name(), name);
+                assert!(
+                    !seen_names.contains(m.name()),
+                    "Duplicate middleware '{}' in strategy '{}'",
+                    m.name(),
+                    name
+                );
                 seen_names.insert(m.name());
             }
         }
-        
+
         // Verify all middleware have valid configurations
         for strategy_name in ["base", "security", "site_enhanced", "api_public"] {
             if let Some(middleware) = all_strategies.get(strategy_name) {
                 for m in middleware {
-                    assert!(m.config_as_json().is_ok(), 
-                           "Middleware '{}' in strategy '{}' should have valid JSON config", 
-                           m.name(), strategy_name);
+                    assert!(
+                        m.config_as_json().is_ok(),
+                        "Middleware '{}' in strategy '{}' should have valid JSON config",
+                        m.name(),
+                        strategy_name
+                    );
                 }
             }
         }
-        
+
         println!("\n✅ COMPLETE HIERARCHY TEST PASSED");
         println!("✅ All inheritance chains validated");
         println!("✅ Middleware sequencing correct");
         println!("✅ Supplementation behavior verified");
         println!("✅ Local overrides working properly");
         println!("✅ Configuration integrity maintained");
-        
+
         // Final assertions for test completeness
         assert_eq!(resolver.resolved_routes.len(), 5); // All routes resolved
         assert!(resolver.resolve_for_route(0).is_some()); // All routes have strategies
@@ -1289,4 +1414,3 @@ mod tests {
         assert!(resolver.resolve_for_route(4).is_some());
     }
 }
-

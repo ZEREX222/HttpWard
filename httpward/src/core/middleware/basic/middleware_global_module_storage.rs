@@ -1,8 +1,8 @@
+use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
+use libloading::Library;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use tracing::{info, warn};
-use libloading::Library;
-use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 
 /// Global storage for loaded middleware modules
 /// Thread-safe initialization with OnceLock + Mutex
@@ -49,7 +49,10 @@ impl ModuleRecord {
 /// Common registry API for module lookup and lifecycle operations.
 pub trait ModuleRegistry {
     fn add_module(&mut self, module: ModuleRecord);
-    fn get_middleware_instance(&self, name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>>;
+    fn get_middleware_instance(
+        &self,
+        name: &str,
+    ) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>>;
     fn has_module(&self, name: &str) -> bool;
     fn remove_module(&mut self, name: &str) -> Option<ModuleRecord>;
     fn module_names(&self) -> Vec<String>;
@@ -68,15 +71,18 @@ impl GlobalModuleStorage {
             modules: HashMap::new(),
         }
     }
-    
+
     /// Add a module to storage
     pub fn add_module(&mut self, module: ModuleRecord) {
         info!(target: "global_module_storage", "Adding module '{}' to global storage", module.name);
         self.modules.insert(module.name.clone(), module);
     }
-    
+
     /// Get middleware instance by name
-    pub fn get_middleware_instance(&self, name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
+    pub fn get_middleware_instance(
+        &self,
+        name: &str,
+    ) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
         if let Some(record) = self.modules.get(name) {
             info!(target: "global_module_storage", "Returning middleware instance for '{}'", name);
             Some(record.instance.clone())
@@ -85,7 +91,7 @@ impl GlobalModuleStorage {
             None
         }
     }
-    
+
     /// Check if module exists
     pub fn has_module(&self, name: &str) -> bool {
         self.modules.contains_key(name)
@@ -100,7 +106,7 @@ impl GlobalModuleStorage {
     pub fn module_names(&self) -> Vec<String> {
         self.modules.keys().cloned().collect()
     }
-    
+
     /// Get module count
     pub fn module_count(&self) -> usize {
         self.modules.len()
@@ -112,7 +118,10 @@ impl ModuleRegistry for GlobalModuleStorage {
         GlobalModuleStorage::add_module(self, module);
     }
 
-    fn get_middleware_instance(&self, name: &str) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
+    fn get_middleware_instance(
+        &self,
+        name: &str,
+    ) -> Option<Arc<dyn HttpWardMiddleware + Send + Sync>> {
         GlobalModuleStorage::get_middleware_instance(self, name)
     }
 
@@ -144,11 +153,11 @@ pub fn get_middleware_instance(name: &str) -> Option<Arc<dyn HttpWardMiddleware 
 pub fn initialize_global_storage() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let was_already_initialized = GLOBAL_MODULE_STORAGE.get().is_some();
     let _storage = GLOBAL_MODULE_STORAGE.get_or_init(|| Mutex::new(GlobalModuleStorage::new()));
-    
+
     if !was_already_initialized {
         info!(target: "global_module_storage", "Global module storage initialized");
     }
-    
+
     Ok(())
 }
 
@@ -158,7 +167,8 @@ where
     F: FnOnce(&mut GlobalModuleStorage) -> R,
 {
     let storage = GLOBAL_MODULE_STORAGE.get_or_init(|| Mutex::new(GlobalModuleStorage::new()));
-    let mut guard = storage.lock()
+    let mut guard = storage
+        .lock()
         .map_err(|e| format!("Failed to acquire global storage lock: {}", e))?;
     Ok(f(&mut guard))
 }

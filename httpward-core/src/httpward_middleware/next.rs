@@ -1,11 +1,11 @@
 // httpward-core/src/httpward_middleware/next.rs
 
-use std::sync::Arc;
-use crate::httpward_middleware::types::BoxError;
 use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
-use rama::http::{Body, Request, Response};
-use rama::Context;
+use crate::httpward_middleware::types::BoxError;
 use crate::httpward_middleware::types::BoxService;
+use rama::Context;
+use rama::http::{Body, Request, Response};
+use std::sync::Arc;
 
 pub struct Next<'a> {
     middlewares: &'a [Arc<dyn HttpWardMiddleware>],
@@ -14,10 +14,7 @@ pub struct Next<'a> {
 }
 
 impl<'a> Next<'a> {
-    pub fn new(
-        middlewares: &'a [Arc<dyn HttpWardMiddleware>],
-        inner: &'a BoxService,
-    ) -> Self {
+    pub fn new(middlewares: &'a [Arc<dyn HttpWardMiddleware>], inner: &'a BoxService) -> Self {
         Self {
             middlewares,
             index: 0,
@@ -38,16 +35,12 @@ impl<'a> Next<'a> {
         ctx: Context<()>,
         req: Request<Body>,
     ) -> Result<Response<Body>, BoxError> {
-
         if let Some(mw_box) = self.middlewares.get(self.index) {
-
             let middleware = mw_box.as_ref();
             let next = self.advance();
 
             middleware.handle(ctx, req, next).await
-
         } else {
-
             // Call the inner service as a function since BoxService is a Fn
             (self.inner)(ctx, req).await
         }

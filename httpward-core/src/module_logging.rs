@@ -16,19 +16,19 @@ pub type HostLogTraceFn = extern "C" fn(*const c_char);
 pub trait ModuleLogger {
     /// Log error message
     fn error(&self, msg: &str);
-    
+
     /// Log warning message  
     fn warn(&self, msg: &str);
-    
+
     /// Log info message
     fn info(&self, msg: &str);
-    
+
     /// Log debug message
     fn debug(&self, msg: &str);
-    
+
     /// Log trace message
     fn trace(&self, msg: &str);
-    
+
     /// Log general message (defaults to info level)
     fn log(&self, msg: &str) {
         self.info(msg);
@@ -59,7 +59,7 @@ impl DefaultModuleLogger {
             module_name: String::new(),
         }
     }
-    
+
     /// Create a new module logger with custom name
     pub fn with_name(name: &str) -> Self {
         Self {
@@ -71,17 +71,17 @@ impl DefaultModuleLogger {
             module_name: name.to_string(),
         }
     }
-    
+
     /// Set module name
     pub fn set_module_name(&mut self, name: &str) {
         self.module_name = name.to_string();
     }
-    
+
     /// Get module name
     pub fn module_name(&self) -> &str {
         &self.module_name
     }
-    
+
     /// Set host logging callbacks
     pub fn set_host_callbacks(
         &mut self,
@@ -97,7 +97,7 @@ impl DefaultModuleLogger {
         self.host_log_debug = Some(debug_fn);
         self.host_log_trace = Some(trace_fn);
     }
-    
+
     /// Get static reference to global logger instance
     pub fn global() -> *mut DefaultModuleLogger {
         static mut GLOBAL_LOGGER: DefaultModuleLogger = DefaultModuleLogger::new();
@@ -118,7 +118,7 @@ impl ModuleLogger for DefaultModuleLogger {
         } else {
             format!("[{}]", self.module_name)
         };
-        
+
         if let Some(cb) = self.host_log_error {
             let c = CString::new(format!("{} {}", prefix, msg)).unwrap();
             unsafe { cb(c.as_ptr()) };
@@ -127,14 +127,14 @@ impl ModuleLogger for DefaultModuleLogger {
             tracing::error!("{} {}", prefix, msg);
         }
     }
-    
+
     fn warn(&self, msg: &str) {
         let prefix = if self.module_name.is_empty() {
             "[module]".to_string()
         } else {
             format!("[{}]", self.module_name)
         };
-        
+
         if let Some(cb) = self.host_log_warn {
             let c = CString::new(format!("{} {}", prefix, msg)).unwrap();
             unsafe { cb(c.as_ptr()) };
@@ -142,14 +142,14 @@ impl ModuleLogger for DefaultModuleLogger {
             tracing::warn!("{} {}", prefix, msg);
         }
     }
-    
+
     fn info(&self, msg: &str) {
         let prefix = if self.module_name.is_empty() {
             "[module]".to_string()
         } else {
             format!("[{}]", self.module_name)
         };
-        
+
         if let Some(cb) = self.host_log_info {
             let c = CString::new(format!("{} {}", prefix, msg)).unwrap();
             unsafe { cb(c.as_ptr()) };
@@ -157,14 +157,14 @@ impl ModuleLogger for DefaultModuleLogger {
             tracing::info!("{} {}", prefix, msg);
         }
     }
-    
+
     fn debug(&self, msg: &str) {
         let prefix = if self.module_name.is_empty() {
             "[module]".to_string()
         } else {
             format!("[{}]", self.module_name)
         };
-        
+
         if let Some(cb) = self.host_log_debug {
             let c = CString::new(format!("{} {}", prefix, msg)).unwrap();
             unsafe { cb(c.as_ptr()) };
@@ -172,14 +172,14 @@ impl ModuleLogger for DefaultModuleLogger {
             tracing::debug!("{} {}", prefix, msg);
         }
     }
-    
+
     fn trace(&self, msg: &str) {
         let prefix = if self.module_name.is_empty() {
             "[module]".to_string()
         } else {
             format!("[{}]", self.module_name)
         };
-        
+
         if let Some(cb) = self.host_log_trace {
             let c = CString::new(format!("{} {}", prefix, msg)).unwrap();
             unsafe { cb(c.as_ptr()) };
@@ -192,7 +192,7 @@ impl ModuleLogger for DefaultModuleLogger {
 /// Host logging functions that modules can call
 pub mod host_functions {
     use super::*;
-    
+
     /// Host logging function for error level
     #[unsafe(no_mangle)]
     pub extern "C" fn host_log_error(ptr: *const c_char) {
@@ -247,7 +247,7 @@ pub mod host_functions {
 /// Module setup utilities
 pub mod module_setup {
     use super::*;
-    
+
     /// Type for module logger setter function
     pub type SetLoggerFn = unsafe extern "C" fn(
         HostLogErrorFn,
@@ -256,7 +256,7 @@ pub mod module_setup {
         HostLogDebugFn,
         HostLogTraceFn,
     );
-    
+
     /// Setup module logger with host callbacks
     /// This should be called from module_set_logger function
     pub unsafe fn setup_module_logger(
@@ -271,7 +271,7 @@ pub mod module_setup {
             (*logger).set_host_callbacks(error_fn, warn_fn, info_fn, debug_fn, trace_fn);
         }
     }
-    
+
     /// Set module name for the global logger
     pub fn set_module_name(name: &str) {
         let logger = DefaultModuleLogger::global();
@@ -279,7 +279,7 @@ pub mod module_setup {
             (*logger).set_module_name(name);
         }
     }
-    
+
     /// Setup module logger with host callbacks and module name
     /// This should be called from module_set_logger function
     pub unsafe fn setup_module_logger_with_name(
@@ -296,7 +296,7 @@ pub mod module_setup {
             (*logger).set_host_callbacks(error_fn, warn_fn, info_fn, debug_fn, trace_fn);
         }
     }
-    
+
     /// Get global module logger instance
     pub fn get_logger() -> &'static DefaultModuleLogger {
         unsafe { &*DefaultModuleLogger::global() }

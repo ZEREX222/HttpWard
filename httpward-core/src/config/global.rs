@@ -1,9 +1,11 @@
+use crate::config::site::SiteConfig;
+use crate::config::strategy::{
+    LegacyStrategyCollection as StrategyCollection, Strategy, StrategyRef,
+};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use schemars::JsonSchema;
-use crate::config::site::SiteConfig;
-use crate::config::strategy::{Strategy, StrategyRef, LegacyStrategyCollection as StrategyCollection};
 
 /// Global application configuration (loaded from httpward.yaml)
 /// Inherits all fields from SiteConfig plus global-specific settings
@@ -241,16 +243,20 @@ fn default_proxy_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::strategy::StrategyRef;
     use crate::config::MiddlewareConfig;
+    use crate::config::strategy::StrategyRef;
 
     #[test]
     fn test_global_default_strategy() {
         let config = GlobalConfig::default();
-        
+
         // Should have Some(StrategyRef::Named("default")) by default
-        assert!(config.strategy.is_some(), "Strategy should be Some, got {:?}", config.strategy);
-        
+        assert!(
+            config.strategy.is_some(),
+            "Strategy should be Some, got {:?}",
+            config.strategy
+        );
+
         match config.strategy.unwrap() {
             StrategyRef::Named(name) => assert_eq!(name, "default"),
             _ => panic!("Expected Named strategy"),
@@ -260,19 +266,20 @@ mod tests {
     #[test]
     fn test_global_strategy_resolution() {
         let mut config = GlobalConfig::default();
-        
+
         // Add a default strategy to the collection
-        config.strategies.insert("default".to_string(), vec![
-            crate::config::strategy::MiddlewareConfig::new_named_json(
+        config.strategies.insert(
+            "default".to_string(),
+            vec![crate::config::strategy::MiddlewareConfig::new_named_json(
                 "logging".to_string(),
-                serde_json::json!({"level": "info"})
-            )
-        ]);
-        
+                serde_json::json!({"level": "info"}),
+            )],
+        );
+
         // Should resolve the default strategy
         let resolved = config.get_default_strategy();
         assert!(resolved.is_some());
-        
+
         let strategy = resolved.unwrap();
         assert_eq!(strategy.name, "default");
         assert_eq!(strategy.middleware.len(), 1);
@@ -282,37 +289,37 @@ mod tests {
     #[test]
     fn test_global_inline_strategy() {
         let mut config = GlobalConfig::default();
-        
+
         // Set an inline strategy using Strategy
         let inline_strategy = Strategy {
             name: "inline_test".to_string(),
             middleware: Arc::new(vec![
                 crate::config::strategy::MiddlewareConfig::new_named_json(
                     "rate_limit".to_string(),
-                    serde_json::json!({"requests": 1000, "window": "1m"})
+                    serde_json::json!({"requests": 1000, "window": "1m"}),
                 ),
                 crate::config::strategy::MiddlewareConfig::new_named_json(
                     "logging".to_string(),
-                    serde_json::json!({"level": "debug"})
-                )
-            ])
+                    serde_json::json!({"level": "debug"}),
+                ),
+            ]),
         };
-        
+
         config.strategy = Some(StrategyRef::InlineMiddleware(vec![
             MiddlewareConfig::new_named_json(
                 "rate_limit".to_string(),
-                serde_json::json!({"requests": 1000, "window": "1m"})
+                serde_json::json!({"requests": 1000, "window": "1m"}),
             ),
             MiddlewareConfig::new_named_json(
                 "logging".to_string(),
-                serde_json::json!({"level": "debug"})
-            )
+                serde_json::json!({"level": "debug"}),
+            ),
         ]));
-        
+
         // Should resolve the inline strategy
         let resolved = config.get_default_strategy();
         assert!(resolved.is_some());
-        
+
         let strategy = resolved.unwrap();
         assert_eq!(strategy.name, "inline");
         assert_eq!(strategy.middleware.len(), 2);

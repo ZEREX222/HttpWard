@@ -1,24 +1,24 @@
-use rama::{
-    layer::Layer,
-    service::Service,
-    Context,
-    http::{Request as RamaRequest, Response as RamaResponse, Body as RamaBody, StatusCode},
-};
-use std::fmt::Debug;
-use std::sync::Arc;
-use thiserror::Error;
-use tracing::{debug, error};
-use httpward_core::config::{GlobalConfig, Redirect, Route};
-use httpward_core::core::HttpWardContext;
-use httpward_core::core::server_models::server_instance::ServerInstance;
-use httpward_core::core::server_models::listener::ListenerKey;
-use httpward_core::error::ErrorHandler;
 use super::{
     proxy::{ProxyError, ProxyHandler},
     static_files,
     websocket::{WebSocketError, WebSocketHandler},
 };
+use httpward_core::config::{GlobalConfig, Redirect, Route};
+use httpward_core::core::HttpWardContext;
+use httpward_core::core::server_models::listener::ListenerKey;
+use httpward_core::core::server_models::server_instance::ServerInstance;
 use httpward_core::core::server_models::{SiteManager, SiteManagerError};
+use httpward_core::error::ErrorHandler;
+use rama::{
+    Context,
+    http::{Body as RamaBody, Request as RamaRequest, Response as RamaResponse, StatusCode},
+    layer::Layer,
+    service::Service,
+};
+use std::fmt::Debug;
+use std::sync::Arc;
+use thiserror::Error;
+use tracing::{debug, error};
 
 #[derive(Error, Debug)]
 pub enum RouteError {
@@ -82,7 +82,10 @@ impl<S> RouteService<S> {
 
 impl<S, State> Service<State, RamaRequest<RamaBody>> for RouteService<S>
 where
-    S: Service<State, RamaRequest<RamaBody>, Response = RamaResponse<RamaBody>> + Send + Sync + 'static,
+    S: Service<State, RamaRequest<RamaBody>, Response = RamaResponse<RamaBody>>
+        + Send
+        + Sync
+        + 'static,
     S::Error: Debug + Send + 'static,
     State: Clone + Send + Sync + 'static,
 {
@@ -100,11 +103,15 @@ where
             None => {
                 // Log warning and return 404 if no context available
                 tracing::warn!("No HttpWardContext found in request context");
-                return Ok(self.error_handler.create_error_response_with_code(StatusCode::NOT_FOUND)
-                    .unwrap_or_else(|_| RamaResponse::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(RamaBody::from("Service not available"))
-                        .unwrap()));
+                return Ok(self
+                    .error_handler
+                    .create_error_response_with_code(StatusCode::NOT_FOUND)
+                    .unwrap_or_else(|_| {
+                        RamaResponse::builder()
+                            .status(StatusCode::NOT_FOUND)
+                            .body(RamaBody::from("Service not available"))
+                            .unwrap()
+                    }));
             }
         };
 
@@ -116,7 +123,7 @@ where
         };
 
         let path = request.uri().path().to_string();
-        
+
         // Use cached matched_route if available (set by DynamicModuleLoaderLayer)
         // This avoids duplicate route resolution per request
         let matched_route_result = if let Some(cached) = &httpward_ctx.matched_route {
@@ -138,44 +145,84 @@ where
                         let is_grpc = ProxyHandler::is_grpc(&request);
 
                         if is_websocket {
-                            match ProxyHandler::build_proxy_uri(&backend, &matched_route.params, request.uri()) {
+                            match ProxyHandler::build_proxy_uri(
+                                &backend,
+                                &matched_route.params,
+                                request.uri(),
+                            ) {
                                 Ok(upstream_uri) => {
                                     let upstream_uri_string = upstream_uri.to_string();
                                     match WebSocketHandler::http_to_ws_url(&upstream_uri_string) {
                                         Ok(ws_url) => {
-                                            match self.websocket_handler.proxy_websocket(&ctx, request, &ws_url, Some(&httpward_ctx.request_headers)).await {
+                                            match self
+                                                .websocket_handler
+                                                .proxy_websocket(
+                                                    &ctx,
+                                                    request,
+                                                    &ws_url,
+                                                    Some(&httpward_ctx.request_headers),
+                                                )
+                                                .await
+                                            {
                                                 Ok(response) => return Ok(response),
                                                 Err(e) => {
                                                     tracing::error!(error = %e, upstream = %ws_url, "WebSocket proxy error");
                                                     let status = match &e {
-                                                        WebSocketError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+                                                        WebSocketError::InvalidRequest(_) => {
+                                                            StatusCode::BAD_REQUEST
+                                                        }
                                                         WebSocketError::ConnectionFailed(_)
                                                         | WebSocketError::WebSocket(_)
-                                                        | WebSocketError::Io(_) => StatusCode::BAD_GATEWAY,
-                                                        WebSocketError::InvalidUrl(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                                                        | WebSocketError::Io(_) => {
+                                                            StatusCode::BAD_GATEWAY
+                                                        }
+                                                        WebSocketError::InvalidUrl(_) => {
+                                                            StatusCode::INTERNAL_SERVER_ERROR
+                                                        }
                                                     };
 
-                                                    return Ok(self.create_error_response(status, "WebSocket proxy error"));
+                                                    return Ok(self.create_error_response(
+                                                        status,
+                                                        "WebSocket proxy error",
+                                                    ));
                                                 }
                                             }
                                         }
                                         Err(e) => {
                                             tracing::error!(error = %e, backend = %upstream_uri_string, "Failed to convert backend URL to WebSocket URL");
-                                            return Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Invalid WebSocket URL"));
+                                            return Ok(self.create_error_response(
+                                                StatusCode::INTERNAL_SERVER_ERROR,
+                                                "Invalid WebSocket URL",
+                                            ));
                                         }
                                     }
                                 }
                                 Err(e) => {
                                     tracing::error!(error = %e, backend = %backend, "Failed to build WebSocket upstream URL");
-                                    return Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Invalid WebSocket URL"));
+                                    return Ok(self.create_error_response(
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                        "Invalid WebSocket URL",
+                                    ));
                                 }
                             }
                         } else if is_grpc {
-                            match self.proxy_handler.proxy_grpc_request(request, &backend, &matched_route.params, Some(httpward_ctx.request_headers.clone())).await {
+                            match self
+                                .proxy_handler
+                                .proxy_grpc_request(
+                                    request,
+                                    &backend,
+                                    &matched_route.params,
+                                    Some(httpward_ctx.request_headers.clone()),
+                                )
+                                .await
+                            {
                                 Ok(response) => return Ok(response),
                                 Err(e) => {
                                     tracing::error!("gRPC proxy error: {}", e);
-                                    return Ok(self.create_error_response(StatusCode::BAD_GATEWAY, "gRPC proxy error"));
+                                    return Ok(self.create_error_response(
+                                        StatusCode::BAD_GATEWAY,
+                                        "gRPC proxy error",
+                                    ));
                                 }
                             }
                         } else {
@@ -183,31 +230,56 @@ where
                             let client_ip = Some(httpward_ctx.client_ip.to_string());
                             // Extract proxy_id from global config
                             let proxy_id = &httpward_ctx.server_instance.global.proxy_id;
-                            
-                            match self.proxy_handler.proxy_request_with_client_ip_and_proxy_id(request, &backend, &matched_route.params, Some(httpward_ctx.request_headers.clone()), client_ip.as_deref(), proxy_id).await {
+
+                            match self
+                                .proxy_handler
+                                .proxy_request_with_client_ip_and_proxy_id(
+                                    request,
+                                    &backend,
+                                    &matched_route.params,
+                                    Some(httpward_ctx.request_headers.clone()),
+                                    client_ip.as_deref(),
+                                    proxy_id,
+                                )
+                                .await
+                            {
                                 Ok(response) => return Ok(response),
                                 Err(e) => {
                                     tracing::error!("Proxy error: {}", e);
-                                    return Ok(self.create_error_response(StatusCode::BAD_GATEWAY, "Proxy error"));
+                                    return Ok(self.create_error_response(
+                                        StatusCode::BAD_GATEWAY,
+                                        "Proxy error",
+                                    ));
                                 }
                             }
                         }
                     }
                     Route::Static { static_dir, .. } => {
-                        match static_files::handle_static(&request, static_dir, &matched_route).await {
+                        match static_files::handle_static(&request, static_dir, &matched_route)
+                            .await
+                        {
                             Ok(response) => return Ok(response),
                             Err(e) => {
                                 error!("Static file error: {}", e);
-                                return Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Static file error"));
+                                return Ok(self.create_error_response(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "Static file error",
+                                ));
                             }
                         }
                     }
                     Route::Redirect { redirect, .. } => {
-                        match self.handle_redirect(request, &redirect, &matched_route.params).await {
+                        match self
+                            .handle_redirect(request, &redirect, &matched_route.params)
+                            .await
+                        {
                             Ok(response) => return Ok(response),
                             Err(e) => {
                                 error!("Redirect error: {}", e);
-                                return Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Redirect error"));
+                                return Ok(self.create_error_response(
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    "Redirect error",
+                                ));
                             }
                         }
                     }
@@ -220,7 +292,9 @@ where
             }
             Err(e) => {
                 error!("Route matching error: {}", e);
-                return Ok(self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Routing error"));
+                return Ok(
+                    self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Routing error")
+                );
             }
         }
     }
@@ -230,11 +304,14 @@ impl<S> RouteService<S> {
     /// Helper method to create error responses with consistent format
     fn create_error_response(&self, status: StatusCode, message: &str) -> RamaResponse<RamaBody> {
         let message_owned = message.to_string();
-        self.error_handler.create_error_response_with_code(status)
-            .unwrap_or_else(|_| RamaResponse::builder()
-                .status(status)
-                .body(RamaBody::from(message_owned))
-                .unwrap())
+        self.error_handler
+            .create_error_response_with_code(status)
+            .unwrap_or_else(|_| {
+                RamaResponse::builder()
+                    .status(status)
+                    .body(RamaBody::from(message_owned))
+                    .unwrap()
+            })
     }
 
     /// Handle redirects
@@ -250,12 +327,12 @@ impl<S> RouteService<S> {
             // Handle regular parameters like {param}
             let placeholder = format!("{{{}}}", key);
             location = location.replace(&placeholder, value);
-            
+
             // Also handle wildcard parameters {*param}
             let wildcard_placeholder = format!("{{*{}}}", key);
             location = location.replace(&wildcard_placeholder, value);
         }
-        
+
         Ok(RamaResponse::builder()
             .status(StatusCode::from_u16(redirect.code).unwrap_or(StatusCode::FOUND))
             .header("Location", location)
@@ -267,14 +344,16 @@ impl<S> RouteService<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use httpward_core::config::{Match, SiteConfig};
+    use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_static_route_matching() {
         // Create global config with default strategy
         let global_config = httpward_core::config::GlobalConfig {
-            strategy: Some(httpward_core::config::StrategyRef::Named("default".to_string())),
+            strategy: Some(httpward_core::config::StrategyRef::Named(
+                "default".to_string(),
+            )),
             strategies: {
                 let mut strategies = std::collections::HashMap::new();
                 strategies.insert("default".to_string(), vec![]);
@@ -282,7 +361,7 @@ mod tests {
             },
             ..Default::default()
         };
-        
+
         // Create site config with static routes
         let site_config = SiteConfig {
             domain: "test-site".to_string(),
@@ -312,25 +391,29 @@ mod tests {
             strategy: None,
             strategies: std::collections::HashMap::new(),
         };
-        
+
         // Create SiteManager with global config
-        let site_manager = SiteManager::new(std::sync::Arc::new(site_config), Some(&global_config)).unwrap();
-        
+        let site_manager =
+            SiteManager::new(std::sync::Arc::new(site_config), Some(&global_config)).unwrap();
+
         // Test matching exact route
         let result = site_manager.get_route("/site");
         assert!(result.is_ok(), "Failed to match /site route");
-        
+
         let matched_route = result.unwrap();
         assert!(matches!(&*matched_route.route, &Route::Static { .. }));
-        
+
         // Test with subpath (should match wildcard route)
         let result2 = site_manager.get_route("/site/style.css");
         assert!(result2.is_ok(), "Failed to match /site/style.css route");
-        
+
         let matched_route2 = result2.unwrap();
         assert!(matches!(&*matched_route2.route, &Route::Static { .. }));
-        assert_eq!(matched_route2.params.get("path"), Some(&"style.css".to_string()));
-        
+        assert_eq!(
+            matched_route2.params.get("path"),
+            Some(&"style.css".to_string())
+        );
+
         // Test non-matching path
         let result3 = site_manager.get_route("/other");
         assert!(result3.is_err(), "Should not match /other path");
@@ -340,7 +423,9 @@ mod tests {
     async fn test_redirect_parameter_substitution() {
         // Create global config with default strategy
         let global_config = httpward_core::config::GlobalConfig {
-            strategy: Some(httpward_core::config::StrategyRef::Named("default".to_string())),
+            strategy: Some(httpward_core::config::StrategyRef::Named(
+                "default".to_string(),
+            )),
             strategies: {
                 let mut strategies = std::collections::HashMap::new();
                 strategies.insert("default".to_string(), vec![]);
@@ -348,61 +433,80 @@ mod tests {
             },
             ..Default::default()
         };
-        
+
         // Create site config with redirect route
         let site_config = SiteConfig {
             domain: "test-site".to_string(),
             domains: vec![],
             listeners: vec![],
-            routes: vec![
-                Route::Redirect {
-                    r#match: Match {
-                        path: Some("/search/{*request}".to_string()),
-                        path_regex: None,
-                    },
-                    redirect: httpward_core::config::Redirect {
-                        to: "https://www.google.com/search?q={*request}".to_string(),
-                        code: 301,
-                    },
-                    strategy: None,
-                    strategies: None,
+            routes: vec![Route::Redirect {
+                r#match: Match {
+                    path: Some("/search/{*request}".to_string()),
+                    path_regex: None,
                 },
-            ],
+                redirect: httpward_core::config::Redirect {
+                    to: "https://www.google.com/search?q={*request}".to_string(),
+                    code: 301,
+                },
+                strategy: None,
+                strategies: None,
+            }],
             strategy: None,
             strategies: std::collections::HashMap::new(),
         };
-        
+
         // Create SiteManager with global config
-        let site_manager = SiteManager::new(std::sync::Arc::new(site_config), Some(&global_config)).unwrap();
-        
+        let site_manager =
+            SiteManager::new(std::sync::Arc::new(site_config), Some(&global_config)).unwrap();
+
         // Test matching redirect route
         let result = site_manager.get_route("/search/httpward+rust");
-        assert!(result.is_ok(), "Failed to match /search/httpward+rust route");
-        
+        assert!(
+            result.is_ok(),
+            "Failed to match /search/httpward+rust route"
+        );
+
         let matched_route = result.unwrap();
         assert!(matches!(&*matched_route.route, &Route::Redirect { .. }));
-        assert_eq!(matched_route.params.get("request"), Some(&"httpward+rust".to_string()));
-        
+        assert_eq!(
+            matched_route.params.get("request"),
+            Some(&"httpward+rust".to_string())
+        );
+
         // Test with complex query including URL-encoded characters
         let result2 = site_manager.get_route("/search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8");
-        assert!(result2.is_ok(), "Failed to match /search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8 route");
-        
+        assert!(
+            result2.is_ok(),
+            "Failed to match /search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8 route"
+        );
+
         let matched_route2 = result2.unwrap();
-        assert_eq!(matched_route2.params.get("request"), Some(&"%D0%BA%D0%BE%D1%88%D0%BA%D0%B8".to_string()));
-        
+        assert_eq!(
+            matched_route2.params.get("request"),
+            Some(&"%D0%BA%D0%BE%D1%88%D0%BA%D0%B8".to_string())
+        );
+
         // Test with space encoded
         let result3 = site_manager.get_route("/search/what%20is%20httpward");
-        assert!(result3.is_ok(), "Failed to match /search/what%20is%20httpward route");
-        
+        assert!(
+            result3.is_ok(),
+            "Failed to match /search/what%20is%20httpward route"
+        );
+
         let matched_route3 = result3.unwrap();
-        assert_eq!(matched_route3.params.get("request"), Some(&"what%20is%20httpward".to_string()));
+        assert_eq!(
+            matched_route3.params.get("request"),
+            Some(&"what%20is%20httpward".to_string())
+        );
     }
 
     #[tokio::test]
     async fn test_redirect_url_generation_with_wildcard() {
         // Create global config with default strategy
         let global_config = httpward_core::config::GlobalConfig {
-            strategy: Some(httpward_core::config::StrategyRef::Named("default".to_string())),
+            strategy: Some(httpward_core::config::StrategyRef::Named(
+                "default".to_string(),
+            )),
             strategies: {
                 let mut strategies = std::collections::HashMap::new();
                 strategies.insert("default".to_string(), vec![]);
@@ -410,40 +514,42 @@ mod tests {
             },
             ..Default::default()
         };
-        
+
         // Create site config with redirect route using wildcard
         let site_config = SiteConfig {
             domain: "test-site".to_string(),
             domains: vec![],
             listeners: vec![],
-            routes: vec![
-                Route::Redirect {
-                    r#match: Match {
-                        path: Some("/search/{*query}".to_string()),
-                        path_regex: None,
-                    },
-                    redirect: httpward_core::config::Redirect {
-                        to: "https://www.google.com/search?q={*query}".to_string(),
-                        code: 301,
-                    },
-                    strategy: None,
-                    strategies: None,
+            routes: vec![Route::Redirect {
+                r#match: Match {
+                    path: Some("/search/{*query}".to_string()),
+                    path_regex: None,
                 },
-            ],
+                redirect: httpward_core::config::Redirect {
+                    to: "https://www.google.com/search?q={*query}".to_string(),
+                    code: 301,
+                },
+                strategy: None,
+                strategies: None,
+            }],
             strategy: None,
             strategies: std::collections::HashMap::new(),
         };
-        
+
         // Create SiteManager with global config
-        let site_manager = SiteManager::new(std::sync::Arc::new(site_config), Some(&global_config)).unwrap();
-        
+        let site_manager =
+            SiteManager::new(std::sync::Arc::new(site_config), Some(&global_config)).unwrap();
+
         // Create RouteService to test redirect URL generation
         let route_service = RouteService::new(());
-        
+
         // Test redirect URL generation with URL-encoded Cyrillic characters
         let result = site_manager.get_route("/search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8");
-        assert!(result.is_ok(), "Failed to match /search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8 route");
-        
+        assert!(
+            result.is_ok(),
+            "Failed to match /search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8 route"
+        );
+
         let matched_route = result.unwrap();
         if let Route::Redirect { redirect, .. } = &*matched_route.route {
             // Create a dummy request for the redirect handler
@@ -452,21 +558,35 @@ mod tests {
                 .uri("/search/%D0%BA%D0%BE%D1%88%D0%BA%D0%B8")
                 .body(RamaBody::empty())
                 .unwrap();
-            
+
             // Test redirect URL generation
-            let redirect_response = route_service.handle_redirect(dummy_request, redirect, &matched_route.params).await.unwrap();
-            
+            let redirect_response = route_service
+                .handle_redirect(dummy_request, redirect, &matched_route.params)
+                .await
+                .unwrap();
+
             // Check that Location header contains the substituted URL
-            let location = redirect_response.headers().get("Location").unwrap().to_str().unwrap();
-            assert_eq!(location, "https://www.google.com/search?q=%D0%BA%D0%BE%D1%88%D0%BA%D0%B8");
+            let location = redirect_response
+                .headers()
+                .get("Location")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert_eq!(
+                location,
+                "https://www.google.com/search?q=%D0%BA%D0%BE%D1%88%D0%BA%D0%B8"
+            );
         } else {
             panic!("Expected Redirect route");
         }
-        
+
         // Test with regular text
         let result2 = site_manager.get_route("/search/rust+programming");
-        assert!(result2.is_ok(), "Failed to match /search/rust+programming route");
-        
+        assert!(
+            result2.is_ok(),
+            "Failed to match /search/rust+programming route"
+        );
+
         let matched_route2 = result2.unwrap();
         if let Route::Redirect { redirect, .. } = &*matched_route2.route {
             let dummy_request2 = RamaRequest::builder()
@@ -474,11 +594,22 @@ mod tests {
                 .uri("/search/rust+programming")
                 .body(RamaBody::empty())
                 .unwrap();
-            
-            let redirect_response2 = route_service.handle_redirect(dummy_request2, redirect, &matched_route2.params).await.unwrap();
-            
-            let location2 = redirect_response2.headers().get("Location").unwrap().to_str().unwrap();
-            assert_eq!(location2, "https://www.google.com/search?q=rust+programming");
+
+            let redirect_response2 = route_service
+                .handle_redirect(dummy_request2, redirect, &matched_route2.params)
+                .await
+                .unwrap();
+
+            let location2 = redirect_response2
+                .headers()
+                .get("Location")
+                .unwrap()
+                .to_str()
+                .unwrap();
+            assert_eq!(
+                location2,
+                "https://www.google.com/search?q=rust+programming"
+            );
         } else {
             panic!("Expected Redirect route");
         }

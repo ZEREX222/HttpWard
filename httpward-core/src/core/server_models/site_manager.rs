@@ -1,15 +1,15 @@
-use std::any::{Any, TypeId};
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::RwLock;
-use std::path::PathBuf;
+use super::strategy_resolver::StrategyResolver;
+use crate::config::strategy::{MiddlewareConfig, Strategy, UniversalValue};
+use crate::config::{GlobalConfig, Route, SiteConfig};
 use matchit::Router;
 use regex::{Regex, RegexSet};
-use thiserror::Error;
-use crate::config::{SiteConfig, Route, GlobalConfig};
-use crate::config::strategy::{MiddlewareConfig, Strategy, UniversalValue};
-use super::strategy_resolver::StrategyResolver;
 use serde::de::DeserializeOwned;
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::RwLock;
+use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct TlsPaths {
@@ -64,7 +64,10 @@ impl RouteWithStrategy {
     /// Deserialize and cache typed middleware config for this route.
     ///
     /// Returns `Ok(None)` when middleware is not present or explicitly `Off`.
-    pub fn middleware_config_typed<T>(&self, middleware_name: &str) -> anyhow::Result<Option<Arc<T>>>
+    pub fn middleware_config_typed<T>(
+        &self,
+        middleware_name: &str,
+    ) -> anyhow::Result<Option<Arc<T>>>
     where
         T: DeserializeOwned + Send + Sync + 'static,
     {
@@ -73,7 +76,10 @@ impl RouteWithStrategy {
             None => return Ok(None),
         };
 
-        if matches!(self.active_strategy.middleware[idx], MiddlewareConfig::Off { .. }) {
+        if matches!(
+            self.active_strategy.middleware[idx],
+            MiddlewareConfig::Off { .. }
+        ) {
             return Ok(None);
         }
 
@@ -91,7 +97,9 @@ impl RouteWithStrategy {
             }
         }
 
-        let parsed = Arc::new(parse_middleware_config_typed::<T>(&self.active_strategy.middleware[idx])?);
+        let parsed = Arc::new(parse_middleware_config_typed::<T>(
+            &self.active_strategy.middleware[idx],
+        )?);
 
         self.typed_cache
             .write()
@@ -113,8 +121,10 @@ where
             UniversalValue::Yaml(v) => serde_yaml::from_value(v.clone())
                 .map_err(|e| anyhow::anyhow!("Failed to parse middleware YAML config: {}", e)),
         },
-        MiddlewareConfig::On { .. } => serde_json::from_value(serde_json::Value::Object(serde_json::Map::new()))
-            .map_err(|e| anyhow::anyhow!("Failed to parse default middleware config: {}", e)),
+        MiddlewareConfig::On { .. } => {
+            serde_json::from_value(serde_json::Value::Object(serde_json::Map::new()))
+                .map_err(|e| anyhow::anyhow!("Failed to parse default middleware config: {}", e))
+        }
         MiddlewareConfig::Off { .. } => Err(anyhow::anyhow!("Middleware is disabled")),
     }
 }
@@ -176,7 +186,10 @@ pub struct SiteManager {
 
 impl SiteManager {
     /// Create a new site manager with global config for strategy resolution
-    pub fn new(site_config: Arc<SiteConfig>, global_config: Option<&GlobalConfig>) -> Result<Self, SiteManagerError> {
+    pub fn new(
+        site_config: Arc<SiteConfig>,
+        global_config: Option<&GlobalConfig>,
+    ) -> Result<Self, SiteManagerError> {
         let routes = site_config.routes.clone();
         let mut path_router = Router::new();
         let mut regex_raw: Vec<(String, usize)> = Vec::new();
@@ -211,7 +224,7 @@ impl SiteManager {
             let patterns: Vec<String> = regex_raw.iter().map(|(p, _)| p.clone()).collect();
             let set = RegexSet::new(&patterns)
                 .map_err(|e| SiteManagerError::InvalidRegex(format!("RegexSet: {}", e)))?;
-            
+
             // Compile individual regexes for captures
             for (pat, idx) in regex_raw.into_iter() {
                 let r = Regex::new(&pat)
@@ -246,7 +259,7 @@ impl SiteManager {
             regex_list,
             regex_set,
             routes_with_strategy,
-            tls_mappings: Vec::new()
+            tls_mappings: Vec::new(),
         })
     }
 
@@ -283,7 +296,7 @@ impl SiteManager {
                     let (regex, route_index) = &self.regex_list[pat_idx];
                     if let Some(caps) = regex.captures(path) {
                         let mut params = HashMap::new();
-                        
+
                         // Try named capture groups first
                         let mut has_named = false;
                         for name in regex.capture_names().flatten() {
@@ -292,7 +305,7 @@ impl SiteManager {
                                 has_named = true;
                             }
                         }
-                        
+
                         // Fallback to numeric groups if no named groups
                         if !has_named {
                             for (i, m) in caps.iter().enumerate().skip(1) {
@@ -317,7 +330,7 @@ impl SiteManager {
             for (regex, route_index) in &self.regex_list {
                 if let Some(caps) = regex.captures(path) {
                     let mut params = HashMap::new();
-                    
+
                     // Try named capture groups first
                     let mut has_named = false;
                     for name in regex.capture_names().flatten() {
@@ -326,7 +339,7 @@ impl SiteManager {
                             has_named = true;
                         }
                     }
-                    
+
                     // Fallback to numeric groups if no named groups
                     if !has_named {
                         for (i, m) in caps.iter().enumerate().skip(1) {
@@ -352,7 +365,10 @@ impl SiteManager {
 
     /// Get all routes (for debugging)
     pub fn routes(&self) -> Vec<Arc<Route>> {
-        self.routes_with_strategy.iter().map(|rws| rws.route.clone()).collect()
+        self.routes_with_strategy
+            .iter()
+            .map(|rws| rws.route.clone())
+            .collect()
     }
 
     /// Get all routes with their resolved strategies (for middleware loading)
@@ -363,7 +379,7 @@ impl SiteManager {
     /// Get all unique active middleware names used by strategies in this site (excludes Off middleware)
     pub fn get_active_middleware_names(&self) -> Vec<String> {
         use std::collections::HashSet;
-        
+
         let mut middleware_names = HashSet::new();
         for route_with_strategy in &self.routes_with_strategy {
             for middleware_config in route_with_strategy.active_strategy.middleware.iter() {
@@ -371,14 +387,14 @@ impl SiteManager {
                     crate::config::strategy::MiddlewareConfig::Named { name, .. }
                     | crate::config::strategy::MiddlewareConfig::On { name } => {
                         middleware_names.insert(name.clone());
-                    },
+                    }
                     crate::config::strategy::MiddlewareConfig::Off { name: _ } => {
                         // Skip Off middleware - they are disabled
-                    },
+                    }
                 }
             }
         }
-        
+
         let mut result: Vec<String> = middleware_names.into_iter().collect();
         result.sort(); // Сортируем для консистентности
         result
@@ -415,10 +431,17 @@ impl SiteManager {
     }
 
     /// Get active strategy middleware config by name for the given path
-    pub fn get_active_strategy_config_by_route(&self, path: &str, middleware_name: &str) -> Result<Option<crate::config::strategy::MiddlewareConfig>, SiteManagerError> {
+    pub fn get_active_strategy_config_by_route(
+        &self,
+        path: &str,
+        middleware_name: &str,
+    ) -> Result<Option<crate::config::strategy::MiddlewareConfig>, SiteManagerError> {
         let matched_route = self.get_route(path)?;
-        let route_with_strategy = RouteWithStrategy::new(matched_route.route, matched_route.active_strategy);
-        Ok(route_with_strategy.middleware_config(middleware_name).cloned())
+        let route_with_strategy =
+            RouteWithStrategy::new(matched_route.route, matched_route.active_strategy);
+        Ok(route_with_strategy
+            .middleware_config(middleware_name)
+            .cloned())
     }
 }
 
@@ -461,7 +484,7 @@ mod tests {
     mod strategy_resolver_tests {
         use super::*;
         use crate::config::strategy::{MiddlewareConfig, StrategyRef};
-        use crate::config::{StrategyCollection, Match, GlobalConfig};
+        use crate::config::{GlobalConfig, Match, StrategyCollection};
         use serde_json::json;
 
         fn create_test_global_config() -> GlobalConfig {
@@ -471,13 +494,13 @@ mod tests {
                 vec![
                     MiddlewareConfig::new_named_json(
                         "rate_limit".to_string(),
-                        json!({"requests": 1000, "window": "1m"})
+                        json!({"requests": 1000, "window": "1m"}),
                     ),
                     MiddlewareConfig::new_named_json(
                         "logging".to_string(),
-                        json!({"level": "info"})
+                        json!({"level": "info"}),
                     ),
-                ]
+                ],
             );
 
             GlobalConfig {
@@ -500,27 +523,25 @@ mod tests {
                 vec![
                     MiddlewareConfig::new_named_json(
                         "rate_limit".to_string(),
-                        json!({"requests": 500}) // Missing "window" - should inherit
+                        json!({"requests": 500}), // Missing "window" - should inherit
                     ),
-                    MiddlewareConfig::new_named_json(
-                        "auth".to_string(),
-                        json!({"type": "jwt"})
-                    ),
-                ]
+                    MiddlewareConfig::new_named_json("auth".to_string(), json!({"type": "jwt"})),
+                ],
             );
 
             SiteConfig {
                 domain: "test.example.com".to_string(),
                 domains: vec![],
                 listeners: vec![],
-                routes: vec![
-                    Route::Proxy {
-                        r#match: Match { path: Some("/api".to_string()), ..Default::default() },
-                        backend: "http://backend".to_string(),
-                        strategy: Some(StrategyRef::Named("site_default".to_string())),
-                        strategies: None,
-                    }
-                ],
+                routes: vec![Route::Proxy {
+                    r#match: Match {
+                        path: Some("/api".to_string()),
+                        ..Default::default()
+                    },
+                    backend: "http://backend".to_string(),
+                    strategy: Some(StrategyRef::Named("site_default".to_string())),
+                    strategies: None,
+                }],
                 strategy: Some(StrategyRef::Named("site_default".to_string())),
                 strategies,
             }
@@ -551,7 +572,9 @@ mod tests {
             let matched = site_manager.get_route("/api").unwrap();
 
             // Check rate_limit middleware inherited "window" from global
-            let rate_limit = matched.active_strategy.middleware
+            let rate_limit = matched
+                .active_strategy
+                .middleware
                 .iter()
                 .find(|m| m.name() == "rate_limit")
                 .unwrap();
@@ -567,7 +590,7 @@ mod tests {
             let site_manager = SiteManager::new(site_config, Some(&global_config)).unwrap();
 
             let middleware_names = site_manager.get_active_middleware_names();
-            
+
             // Should contain middleware names from the strategy: rate_limit, auth, logging
             assert_eq!(middleware_names.len(), 3);
             assert!(middleware_names.contains(&"rate_limit".to_string()));
@@ -577,11 +600,11 @@ mod tests {
 
         #[test]
         fn test_get_active_middleware_names_excludes_off() {
-            use crate::config::strategy::{MiddlewareConfig, StrategyRef};
             use crate::config::StrategyCollection;
-            
+            use crate::config::strategy::{MiddlewareConfig, StrategyRef};
+
             let global_config = create_test_global_config();
-            
+
             // Create site config with Off middleware
             let mut strategies = StrategyCollection::new();
             strategies.insert(
@@ -589,35 +612,36 @@ mod tests {
                 vec![
                     MiddlewareConfig::new_named_json(
                         "rate_limit".to_string(),
-                        json!({"requests": 100})
+                        json!({"requests": 100}),
                     ),
-                    MiddlewareConfig::Off { name: "logging".to_string() }, // Disabled middleware
-                    MiddlewareConfig::new_named_json(
-                        "cors".to_string(),
-                        json!({"origins": "*"})
-                    ),
-                ]
+                    MiddlewareConfig::Off {
+                        name: "logging".to_string(),
+                    }, // Disabled middleware
+                    MiddlewareConfig::new_named_json("cors".to_string(), json!({"origins": "*"})),
+                ],
             );
 
             let site_config = SiteConfig {
                 domain: "test.example.com".to_string(),
                 domains: vec![],
                 listeners: vec![],
-                routes: vec![
-                    Route::Proxy {
-                        r#match: Match { path: Some("/api".to_string()), ..Default::default() },
-                        backend: "http://backend".to_string(),
-                        strategy: Some(StrategyRef::Named("mixed_strategy".to_string())),
-                        strategies: None,
-                    }
-                ],
+                routes: vec![Route::Proxy {
+                    r#match: Match {
+                        path: Some("/api".to_string()),
+                        ..Default::default()
+                    },
+                    backend: "http://backend".to_string(),
+                    strategy: Some(StrategyRef::Named("mixed_strategy".to_string())),
+                    strategies: None,
+                }],
                 strategy: Some(StrategyRef::Named("mixed_strategy".to_string())),
                 strategies,
             };
 
-            let site_manager = SiteManager::new(Arc::new(site_config), Some(&global_config)).unwrap();
+            let site_manager =
+                SiteManager::new(Arc::new(site_config), Some(&global_config)).unwrap();
             let middleware_names = site_manager.get_active_middleware_names();
-            
+
             // Should only contain active middleware, exclude "logging" which is Off
             assert_eq!(middleware_names.len(), 2);
             assert!(middleware_names.contains(&"rate_limit".to_string()));
@@ -627,8 +651,8 @@ mod tests {
 
         #[test]
         fn test_get_active_middleware_names_includes_on() {
-            use crate::config::strategy::{MiddlewareConfig, StrategyRef};
             use crate::config::StrategyCollection;
+            use crate::config::strategy::{MiddlewareConfig, StrategyRef};
 
             let global_config = create_test_global_config();
 
@@ -639,29 +663,31 @@ mod tests {
                     MiddlewareConfig::new_on("httpward_log_module".to_string()),
                     MiddlewareConfig::new_named_json(
                         "rate_limit".to_string(),
-                        json!({"requests": 100})
+                        json!({"requests": 100}),
                     ),
                     MiddlewareConfig::new_off("logging".to_string()),
-                ]
+                ],
             );
 
             let site_config = SiteConfig {
                 domain: "test.example.com".to_string(),
                 domains: vec![],
                 listeners: vec![],
-                routes: vec![
-                    Route::Proxy {
-                        r#match: Match { path: Some("/api".to_string()), ..Default::default() },
-                        backend: "http://backend".to_string(),
-                        strategy: Some(StrategyRef::Named("mixed_strategy".to_string())),
-                        strategies: None,
-                    }
-                ],
+                routes: vec![Route::Proxy {
+                    r#match: Match {
+                        path: Some("/api".to_string()),
+                        ..Default::default()
+                    },
+                    backend: "http://backend".to_string(),
+                    strategy: Some(StrategyRef::Named("mixed_strategy".to_string())),
+                    strategies: None,
+                }],
                 strategy: Some(StrategyRef::Named("mixed_strategy".to_string())),
                 strategies,
             };
 
-            let site_manager = SiteManager::new(Arc::new(site_config), Some(&global_config)).unwrap();
+            let site_manager =
+                SiteManager::new(Arc::new(site_config), Some(&global_config)).unwrap();
             let middleware_names = site_manager.get_active_middleware_names();
 
             assert_eq!(middleware_names.len(), 2);
@@ -677,24 +703,33 @@ mod tests {
             let site_manager = SiteManager::new(site_config, Some(&global_config)).unwrap();
 
             // Test finding specific middleware by name
-            let rate_limit_config = site_manager.get_active_strategy_config_by_route("/api", "rate_limit").unwrap();
+            let rate_limit_config = site_manager
+                .get_active_strategy_config_by_route("/api", "rate_limit")
+                .unwrap();
             assert!(rate_limit_config.is_some());
             assert_eq!(rate_limit_config.unwrap().name(), "rate_limit");
 
-            let auth_config = site_manager.get_active_strategy_config_by_route("/api", "auth").unwrap();
+            let auth_config = site_manager
+                .get_active_strategy_config_by_route("/api", "auth")
+                .unwrap();
             assert!(auth_config.is_some());
             assert_eq!(auth_config.unwrap().name(), "auth");
 
-            let logging_config = site_manager.get_active_strategy_config_by_route("/api", "logging").unwrap();
+            let logging_config = site_manager
+                .get_active_strategy_config_by_route("/api", "logging")
+                .unwrap();
             assert!(logging_config.is_some());
             assert_eq!(logging_config.unwrap().name(), "logging");
 
             // Test non-existent middleware
-            let non_existent = site_manager.get_active_strategy_config_by_route("/api", "non_existent").unwrap();
+            let non_existent = site_manager
+                .get_active_strategy_config_by_route("/api", "non_existent")
+                .unwrap();
             assert!(non_existent.is_none());
 
             // Should return error for non-existent route
-            let result = site_manager.get_active_strategy_config_by_route("/nonexistent", "rate_limit");
+            let result =
+                site_manager.get_active_strategy_config_by_route("/nonexistent", "rate_limit");
             assert!(matches!(result, Err(SiteManagerError::NoMatch)));
         }
     }

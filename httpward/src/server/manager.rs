@@ -1,12 +1,14 @@
-use tracing::{error, info};
-use rama::graceful::Shutdown;
 use crate::server::http_server::HttpWardServer;
+use rama::graceful::Shutdown;
+use tracing::{error, info};
 
 pub struct HttpWardServerManager;
 
 impl HttpWardServerManager {
     /// Spawns all servers into the Tokio runtime and waits for them
-    pub async fn start_all(servers: Vec<HttpWardServer>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn start_all(
+        servers: Vec<HttpWardServer>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut handles = vec![];
         let mut shutdown_txs = vec![];
 
@@ -15,13 +17,13 @@ impl HttpWardServerManager {
             let host = server.instance.bind.host.clone();
             let port = server.instance.bind.port;
             let addr_str = format!("{}:{}", host, port);
-            
+
             info!("📡 Starting HttpWardServer on {}", addr_str);
 
             // Create a shutdown channel for this server
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
             let shutdown = Shutdown::new(shutdown_rx);
-            
+
             // Store sender to keep it alive for the duration of the server
             shutdown_txs.push(shutdown_tx);
 
