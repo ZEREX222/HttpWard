@@ -992,8 +992,8 @@ dependencies = [
  "futures-util",
  "http",
  "httpward-core",
- "httpward_identity_session_module",
  "httpward_log_module",
+ "httpward_rate_limit_module",
  "libloading 0.9.0",
  "notify",
  "rama",
@@ -1038,21 +1038,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "httpward_identity_session_module"
+name = "httpward_log_module"
 version = "0.0.1-alpha.1"
 dependencies = [
  "async-trait",
- "chrono",
  "httpward-core",
  "rama",
  "serde",
 ]
 
 [[package]]
-name = "httpward_log_module"
+name = "httpward_rate_limit_module"
 version = "0.0.1-alpha.1"
 dependencies = [
  "async-trait",
+ "chrono",
  "httpward-core",
  "rama",
  "serde",

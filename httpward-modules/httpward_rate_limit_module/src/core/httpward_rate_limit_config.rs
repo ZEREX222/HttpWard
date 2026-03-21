@@ -1,23 +1,23 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// Configuration for HttpWard Identity Session Module
+/// Configuration for HttpWard Rate Limit Module
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HttpWardIdentitySessionConfig {
+pub struct HttpWardRateLimitConfig {
     /// Session timeout duration
     pub session_timeout: Option<Duration>,
-    
+
     /// Cookie configuration
     pub cookie_config: Option<CookieConfig>,
-    
+
     /// Authentication configuration
     pub auth_config: Option<AuthConfig>,
-    
+
     /// Session storage configuration
     pub storage_config: Option<StorageConfig>,
 }
 
-impl Default for HttpWardIdentitySessionConfig {
+impl Default for HttpWardRateLimitConfig {
     fn default() -> Self {
         Self {
             session_timeout: Some(Duration::from_secs(3600)), // 1 hour default
@@ -28,7 +28,7 @@ impl Default for HttpWardIdentitySessionConfig {
     }
 }
 
-impl HttpWardIdentitySessionConfig {
+impl HttpWardRateLimitConfig {
     /// Create new configuration
     pub fn new() -> Self {
         Self::default()
@@ -64,19 +64,19 @@ impl HttpWardIdentitySessionConfig {
 pub struct CookieConfig {
     /// Cookie name
     pub name: String,
-    
+
     /// Cookie domain
     pub domain: Option<String>,
-    
+
     /// Cookie path
     pub path: Option<String>,
-    
+
     /// Secure flag
     pub secure: bool,
-    
+
     /// HttpOnly flag
     pub http_only: bool,
-    
+
     /// SameSite policy
     pub same_site: Option<String>,
 }
@@ -99,10 +99,10 @@ impl Default for CookieConfig {
 pub struct AuthConfig {
     /// Authentication type
     pub auth_type: AuthType,
-    
+
     /// JWT configuration (if using JWT)
     pub jwt_config: Option<JwtConfig>,
-    
+
     /// Basic auth configuration (if using Basic auth)
     pub basic_config: Option<BasicAuthConfig>,
 }
@@ -132,10 +132,10 @@ pub enum AuthType {
 pub struct JwtConfig {
     /// Secret key
     pub secret: String,
-    
+
     /// Algorithm
     pub algorithm: Option<String>,
-    
+
     /// Expiration
     pub expiration: Option<Duration>,
 }
@@ -152,10 +152,10 @@ pub struct BasicAuthConfig {
 pub struct StorageConfig {
     /// Storage type
     pub storage_type: StorageType,
-    
+
     /// Redis configuration (if using Redis)
     pub redis_config: Option<RedisConfig>,
-    
+
     /// Memory storage configuration
     pub memory_config: Option<MemoryConfig>,
 }
@@ -185,7 +185,7 @@ pub enum StorageType {
 pub struct RedisConfig {
     /// Redis URL
     pub url: String,
-    
+
     /// Key prefix
     pub key_prefix: Option<String>,
 }
@@ -195,7 +195,7 @@ pub struct RedisConfig {
 pub struct MemoryConfig {
     /// Maximum number of sessions
     pub max_sessions: Option<usize>,
-    
+
     /// Cleanup interval
     pub cleanup_interval: Option<Duration>,
 }
@@ -208,3 +208,4 @@ impl Default for MemoryConfig {
         }
     }
 }
+

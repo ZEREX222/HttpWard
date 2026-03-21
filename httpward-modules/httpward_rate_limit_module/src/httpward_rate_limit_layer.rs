@@ -1,18 +1,18 @@
-// httpward-modules/httpward_identity_session_module/src/httpward_identity_session_layer.rs
-// HttpWard Identity and Session Layer
-// 
-// This file will contain the implementation of HttpWardIdentitySessionLayer
-// which will provide identity and session management capabilities for HttpWard.
-// 
+// httpward-modules/httpward_rate_limit_module/src/httpward_rate_limit_layer.rs
+// HttpWard Rate Limit Layer
+//
+// This file contains the implementation of HttpWardRateLimitLayer
+// which provides rate limiting capabilities for HttpWard.
+//
 // Future implementation will include:
-// - User authentication
-// - Session management
-// - Token handling
-// - Identity verification
-// - Session persistence
+// - Rate limiting policy evaluation
+// - Client quota tracking
+// - Token bucket / leaky bucket handling
+// - Fingerprint-aware limits
+// - Storage-backed limiter state
 
-// TODO: Implement HttpWardIdentitySessionLayer
-// This will be a middleware that handles user identity and session management
+// TODO: Implement HttpWardRateLimitLayer
+// This will be a middleware that handles request rate limiting
 
 use httpward_core::httpward_middleware::{HttpWardMiddleware, BoxError};
 use httpward_core::httpward_middleware::next::Next;
@@ -25,26 +25,26 @@ use rama::net::tls::{ProtocolVersion, SecureTransport};
 use async_trait::async_trait;
 use std::collections::HashMap;
 
-use crate::core::HttpWardIdentitySessionConfig;
-use crate::core::HttpWardIdentitySessionContext;
+use crate::core::HttpWardRateLimitConfig;
+use crate::core::HttpWardRateLimitContext;
 
 /// Extract header fingerprint from specific headers
 fn extract_header_fingerprint(headers: &HeaderMap) -> Option<String> {
     use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
-    
+
     let header_names = [
         "user-agent",
         "accept",
-        "accept-language", 
+        "accept-language",
         "accept-encoding",
         "sec-ch-ua",
         "sec-ch-ua-platform",
         "sec-ch-ua-mobile"
     ];
-    
+
     let mut header_values = HashMap::new();
-    
+
     for header_name in &header_names {
         if let Some(header_value) = headers.get(*header_name) {
             if let Ok(value_str) = header_value.to_str() {
@@ -52,46 +52,46 @@ fn extract_header_fingerprint(headers: &HeaderMap) -> Option<String> {
             }
         }
     }
-    
+
     if header_values.is_empty() {
         return None;
     }
-    
+
     // Create a deterministic string from header values
     let mut sorted_headers: Vec<_> = header_values.iter().collect();
     sorted_headers.sort_by_key(|(k, _)| *k);
-    
+
     let combined_string = sorted_headers
         .iter()
         .map(|(k, v)| format!("{}:{}", k, v))
         .collect::<Vec<_>>()
         .join("|");
-    
+
     // Create hash
     let mut hasher = DefaultHasher::new();
     combined_string.hash(&mut hasher);
-    
+
     Some(format!("{:x}", hasher.finish()))
 }
 
-pub struct HttpWardIdentitySessionLayer {
+pub struct HttpWardRateLimitLayer {
 }
 
-impl HttpWardIdentitySessionLayer {
+impl HttpWardRateLimitLayer {
     pub fn new() -> Self {
         Self {
         }
     }
 }
 
-impl Default for HttpWardIdentitySessionLayer {
+impl Default for HttpWardRateLimitLayer {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl HttpWardMiddleware for HttpWardIdentitySessionLayer {
+impl HttpWardMiddleware for HttpWardRateLimitLayer {
     async fn handle(
         &self,
         mut ctx: Context<()>,
@@ -99,22 +99,22 @@ impl HttpWardMiddleware for HttpWardIdentitySessionLayer {
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError> {
         let _config = if let Some(httpward_ctx) = ctx.get::<HttpWardContext>() {
-            match httpward_ctx.middleware_config_typed_from_matched_route::<HttpWardIdentitySessionConfig>("HttpWardIdentitySessionLayer") {
+            match httpward_ctx.middleware_config_typed_from_matched_route::<HttpWardRateLimitConfig>("HttpWardRateLimitLayer") {
                 Ok(Some(config)) => {
-                    module_log_debug!("HttpWardIdentitySessionLayer config loaded from HttpWardContext.matched_route: {:?}", config);
+                    module_log_debug!("HttpWardRateLimitLayer config loaded from HttpWardContext.matched_route: {:?}", config);
                     config
                 }
                 Ok(None) => {
-                    module_log_debug!("HttpWardIdentitySessionLayer config not found in HttpWardContext.matched_route, using defaults");
-                    std::sync::Arc::new(HttpWardIdentitySessionConfig::default())
+                    module_log_debug!("HttpWardRateLimitLayer config not found in HttpWardContext.matched_route, using defaults");
+                    std::sync::Arc::new(HttpWardRateLimitConfig::default())
                 }
                 Err(e) => {
-                    module_log_error!("Failed to parse HttpWardIdentitySessionLayer config from HttpWardContext.matched_route: {}, using defaults", e);
-                    std::sync::Arc::new(HttpWardIdentitySessionConfig::default())
+                    module_log_error!("Failed to parse HttpWardRateLimitLayer config from HttpWardContext.matched_route: {}, using defaults", e);
+                    std::sync::Arc::new(HttpWardRateLimitConfig::default())
                 }
             }
         } else {
-            std::sync::Arc::new(HttpWardIdentitySessionConfig::default())
+            std::sync::Arc::new(HttpWardRateLimitConfig::default())
         };
 
         // Extract fingerprints
@@ -147,28 +147,28 @@ impl HttpWardMiddleware for HttpWardIdentitySessionLayer {
         // Extract header fingerprint from request headers
         header_fp = extract_header_fingerprint(req.headers());
 
-        // Create identity session context with fingerprints
-        let mut identity_context = HttpWardIdentitySessionContext::new();
-        
+        // Create rate limit context with fingerprints
+        let mut rate_limit_context = HttpWardRateLimitContext::new();
+
         if let Some(header_fp) = header_fp {
-            identity_context = identity_context.with_header_fp(header_fp);
+            rate_limit_context = rate_limit_context.with_header_fp(header_fp);
         }
-        
+
         if let Some(ja4_fp) = ja4_fp {
-            identity_context = identity_context.with_ja4_fp(ja4_fp);
+            rate_limit_context = rate_limit_context.with_ja4_fp(ja4_fp);
         }
 
-        // Store the identity context directly in the context
-        ctx.insert(identity_context);
+        // Store the rate limit context directly in the context
+        ctx.insert(rate_limit_context);
 
-        module_log_info!("HttpWardIdentitySessionLayer: Starting identity/session processing");
+        module_log_info!("HttpWardRateLimitLayer: Starting rate-limit processing");
 
-        // TODO: Implement identity and session logic using config
+        // TODO: Implement rate limit logic using config
         // For now, just pass through to next middleware
         let result = next.run(ctx, req).await;
-        
-        module_log_info!("HttpWardIdentitySessionLayer: Finished identity/session processing");
-        
+
+        module_log_info!("HttpWardRateLimitLayer: Finished rate-limit processing");
+
         result
     }
 
@@ -176,5 +176,7 @@ impl HttpWardMiddleware for HttpWardIdentitySessionLayer {
         Some(env!("CARGO_PKG_NAME"))
     }
 }
+
+
 
 

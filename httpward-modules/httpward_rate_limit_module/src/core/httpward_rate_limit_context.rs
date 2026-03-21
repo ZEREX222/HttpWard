@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
-/// Context for identity and session management
+/// Context for rate limit management
 /// This will be stored in HttpWardContext.extensions
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HttpWardIdentitySessionContext {
+pub struct HttpWardRateLimitContext {
     /// User identity information
     pub user_id: Option<String>,
     /// Session data
@@ -19,7 +19,7 @@ pub struct HttpWardIdentitySessionContext {
     pub ja4_fp: Option<String>,
 }
 
-impl Default for HttpWardIdentitySessionContext {
+impl Default for HttpWardRateLimitContext {
     fn default() -> Self {
         Self {
             user_id: None,
@@ -32,8 +32,8 @@ impl Default for HttpWardIdentitySessionContext {
     }
 }
 
-impl HttpWardIdentitySessionContext {
-    /// Create new identity session context
+impl HttpWardRateLimitContext {
+    /// Create new rate limit context
     pub fn new() -> Self {
         Self::default()
     }
@@ -93,3 +93,4 @@ impl HttpWardIdentitySessionContext {
         self.ja4_fp = None;
     }
 }
+

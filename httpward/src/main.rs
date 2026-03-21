@@ -21,7 +21,7 @@ use httpward_core::core::server_models::server_instance::ServerInstance;
 #[cfg(feature = "static_modules")]
 use httpward_log_module::HttpWardLogLayer;
 #[cfg(feature = "static_modules")]
-use httpward_identity_session_module::HttpWardIdentitySessionLayer;
+use httpward_rate_limit_module::HttpWardRateLimitLayer;
 
 fn load_middleware_manager(server_plans: &[ServerInstance]) -> Result<MiddlewareModuleLoadManager, Box<dyn std::error::Error + Send + Sync>> {
     // !!! STATIC MODULES ONLY FOR DEBUG IF YOU WANT TO DEBUG YOUR MIDDLEWARE MODULE!!!
@@ -33,7 +33,7 @@ fn load_middleware_manager(server_plans: &[ServerInstance]) -> Result<Middleware
             #[cfg(feature = "static_modules")]
             ("httpward_log_module", Arc::new(HttpWardLogLayer::new()) as Arc<dyn HttpWardMiddleware + Send + Sync>),
             #[cfg(feature = "static_modules")]
-            ("httpward_identity_session_module", Arc::new(HttpWardIdentitySessionLayer::new()) as Arc<dyn HttpWardMiddleware + Send + Sync>)
+            ("httpward_rate_limit_module", Arc::new(HttpWardRateLimitLayer::new()) as Arc<dyn HttpWardMiddleware + Send + Sync>)
         ];
 
         MiddlewareModuleLoadManager::from_server_instances_statically(server_plans, static_modules)

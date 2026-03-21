@@ -32,13 +32,13 @@ http = "1.4"
 tokio-tungstenite = { version = "0.24", features = ["connect", "rustls-tls-webpki-roots"] }
 libloading = "0.9"
 httpward_log_module = { workspace = true, optional = true }
-httpward_identity_session_module = { workspace = true, optional = true }
+httpward_rate_limit_module = { workspace = true, optional = true }
 
 [dev-dependencies]
 
 [features]
 default = []
-static_modules = ["httpward_log_module", "httpward_identity_session_module"]
+static_modules = ["httpward_log_module", "httpward_rate_limit_module"]
 dynamic_modules = []
 
 [profile.dev]

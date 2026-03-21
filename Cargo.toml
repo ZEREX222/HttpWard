@@ -15,7 +15,7 @@ members = [
     "httpward-docs",
     "httpward-core",
     "httpward-modules/httpward_log_module",
-    "httpward-modules/httpward_identity_session_module"
+    "httpward-modules/httpward_rate_limit_module"
 ]
 
 [workspace.dependencies]
@@ -32,4 +32,4 @@ parking_lot = "0.12"
 resolver = "0.1.3"
 httpward-core = { version = "0.0.1-alpha.1", path = "./httpward-core" }
 httpward_log_module = { version = "0.0.1-alpha.1", path = "./httpward-modules/httpward_log_module" }
-httpward_identity_session_module = { version = "0.0.1-alpha.1", path = "./httpward-modules/httpward_identity_session_module" }
+httpward_rate_limit_module = { version = "0.0.1-alpha.1", path = "./httpward-modules/httpward_rate_limit_module" }
