@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use httpward_rate_limit_module::httpward_rate_limit_config::{
+use httpward_rate_limit_module::{
     HttpWardRateLimitConfig, RateLimitStrategy, RateLimitRuleConfig,
+    RateLimiter, RateLimitKeyKind, RateLimitScope, InternalRateLimitRule,
 };
-use httpward_rate_limit_module::rate_limiter::{RateLimiter, RateLimitKeyKind, RateLimitScope};
 
 #[cfg(test)]
 mod integration_tests {
@@ -50,7 +50,7 @@ mod integration_tests {
             RateLimitScope::Global,
             httpward_rate_limit_module::rate_limiter::RateLimitRule {
                 capacity: 50,
-                refill_every: Duration::from_secs(10),
+                refill_every: Duration::from_secs(2),
                 refill_amount: 1,
             },
         );
@@ -64,7 +64,7 @@ mod integration_tests {
         assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1"));
 
         // Wait for refill - need to wait longer than 10s for burst strategy
-        std::thread::sleep(Duration::from_millis(10500));
+        std::thread::sleep(Duration::from_millis(2500));
 
         // Should allow 1 more request
         assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1"));
@@ -123,6 +123,22 @@ mod integration_tests {
             assert_eq!(runtime_rule.refill_every, expected_refill_every);
             assert_eq!(runtime_rule.refill_amount, expected_refill_amount);
         }
+    }
+
+    #[test]
+    fn test_strategy_edge_cases() {
+        // Test zero capacity edge case
+        let rule = InternalRateLimitRule {
+            key: RateLimitKeyKind::Ip,
+            capacity: 0,
+            refill_every: Duration::from_secs(10),
+            refill_amount: 1,
+            strategy: RateLimitStrategy::Sliding,
+        };
+
+        let runtime_rule = rule.to_runtime_rule();
+        assert_eq!(runtime_rule.capacity, 1); // Should be sanitized to minimum 1
+        assert!(!runtime_rule.refill_every.is_zero()); // Should not be zero
     }
 
     #[test]

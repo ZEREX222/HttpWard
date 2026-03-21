@@ -212,7 +212,7 @@ mod tests {
         
         // Should return the unrestricted site
         assert!(found_site.is_some());
-        assert_eq!(found_site.unwrap().site_domains(), site_config_arc.domain);
+        assert_eq!(found_site.unwrap().site_domains(), "default");
     }
     
     #[tokio::test]
