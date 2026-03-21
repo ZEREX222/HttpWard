@@ -144,7 +144,7 @@ where
 
         // Find site by domain from either Host header (HTTP) or SNI (HTTPS)
         let site = self.find_site_by_domain(&ctx, &request);
-        let site_domain = site.as_ref().map(|sm| sm.site_name());
+        let site_domain = site.as_ref().map(|sm| sm.site_domains());
 
         // Cache the matched route to avoid re-resolution in RouteLayer
         let matched_route = if let Some(ref site_manager) = site {
@@ -212,7 +212,7 @@ mod tests {
         
         // Should return the unrestricted site
         assert!(found_site.is_some());
-        assert_eq!(found_site.unwrap().site_name(), site_config_arc.domain);
+        assert_eq!(found_site.unwrap().site_domains(), site_config_arc.domain);
     }
     
     #[tokio::test]
@@ -245,7 +245,7 @@ mod tests {
         
         // Should return the unrestricted site since no SNI match found
         assert!(found_site.is_some());
-        assert_eq!(found_site.unwrap().site_name(), "");
+        assert_eq!(found_site.unwrap().site_domains(), "default");
     }
     
     #[tokio::test]
@@ -276,7 +276,7 @@ mod tests {
         
         // Should return the domain-specific site
         assert!(found_site.is_some());
-        assert_eq!(found_site.unwrap().site_name(), "example.com");
+        assert_eq!(found_site.unwrap().site_domains(), "example.com");
     }
     
     #[tokio::test]
@@ -307,7 +307,7 @@ mod tests {
         
         // Should return the domain-specific site (port should be stripped)
         assert!(found_site.is_some());
-        assert_eq!(found_site.unwrap().site_name(), "example.com");
+        assert_eq!(found_site.unwrap().site_domains(), "example.com");
     }
     
     #[tokio::test]
@@ -342,6 +342,6 @@ mod tests {
         
         // Should return example.com site
         assert!(found_site.is_some());
-        assert_eq!(found_site.unwrap().site_name(), "example.com");
+        assert_eq!(found_site.unwrap().site_domains(), "example.com");
     }
 }

@@ -1,211 +1,420 @@
+/// User-facing YAML configuration format for rate limiting.
+///
+/// This is the primary configuration format for HttpWardRateLimitLayer.
+///
+/// Example:
+/// ```yaml
+/// httpward_rate_limit_module:
+///   global_config:
+///     max_entries: 100_000
+///     idle_ttl_sec: 60
+///     cleanup_interval_sec: 10
+///   global_rules:
+///     - ip:
+///         max_requests: 100
+///         window: 10s
+///     - ja4:
+///         max_requests: 150
+///         window: 10s
+///   current_site_rules:
+///     - ip:
+///         max_requests: 50
+///         window: 10s
+/// ```
+
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Duration;
+use super::RateLimitKeyKind;
 
-/// Configuration for HttpWard Rate Limit Module
+/// Main rate limit configuration (YAML format).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HttpWardRateLimitConfig {
-    /// Session timeout duration
-    pub session_timeout: Option<Duration>,
-
-    /// Cookie configuration
-    pub cookie_config: Option<CookieConfig>,
-
-    /// Authentication configuration
-    pub auth_config: Option<AuthConfig>,
-
-    /// Session storage configuration
-    pub storage_config: Option<StorageConfig>,
+    /// Global store configuration.
+    pub global_config: Option<RateLimitStoreConfig>,
+    /// Global rate limit rules (apply to all routes).
+    pub global_rules: Vec<HashMap<String, RateLimitRuleConfig>>,
+    /// Current route/site rate limit rules.
+    #[serde(alias = "route_rules")]
+    pub current_site_rules: Vec<HashMap<String, RateLimitRuleConfig>>,
+    /// Response settings.
+    pub response: Option<RateLimitResponseConfig>,
 }
 
 impl Default for HttpWardRateLimitConfig {
     fn default() -> Self {
         Self {
-            session_timeout: Some(Duration::from_secs(3600)), // 1 hour default
-            cookie_config: Some(CookieConfig::default()),
-            auth_config: Some(AuthConfig::default()),
-            storage_config: Some(StorageConfig::default()),
+            global_config: None,
+            global_rules: Vec::new(),
+            current_site_rules: Vec::new(),
+            response: None,
         }
     }
 }
 
 impl HttpWardRateLimitConfig {
-    /// Create new configuration
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set session timeout
-    pub fn with_session_timeout(mut self, timeout: Duration) -> Self {
-        self.session_timeout = Some(timeout);
-        self
+    pub fn has_rules(&self) -> bool {
+        !(self.global_rules.is_empty() && self.current_site_rules.is_empty())
     }
 
-    /// Set cookie configuration
-    pub fn with_cookie_config(mut self, config: CookieConfig) -> Self {
-        self.cookie_config = Some(config);
-        self
-    }
+    /// Convert to internal rate limit structure.
+    pub fn to_internal(&self) -> InternalRateLimitConfig {
+        let store = self
+            .global_config
+            .as_ref()
+            .map(|cfg| cfg.to_internal())
+            .unwrap_or_default();
 
-    /// Set authentication configuration
-    pub fn with_auth_config(mut self, config: AuthConfig) -> Self {
-        self.auth_config = Some(config);
-        self
-    }
+        let global = self
+            .global_rules
+            .iter()
+            .flat_map(|rule_map| {
+                rule_map
+                    .iter()
+                    .filter_map(|(key_str, rule_cfg)| {
+                        let key = parse_rate_limit_key(key_str)?;
+                        Some(InternalRateLimitRule {
+                            key,
+                            capacity: rule_cfg.max_requests,
+                            refill_every: rule_cfg.window_duration(),
+                            refill_amount: rule_cfg.refill_amount.unwrap_or(1),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
 
-    /// Set storage configuration
-    pub fn with_storage_config(mut self, config: StorageConfig) -> Self {
-        self.storage_config = Some(config);
-        self
-    }
-}
+        let matched_route = self
+            .current_site_rules
+            .iter()
+            .flat_map(|rule_map| {
+                rule_map
+                    .iter()
+                    .filter_map(|(key_str, rule_cfg)| {
+                        let key = parse_rate_limit_key(key_str)?;
+                        Some(InternalRateLimitRule {
+                            key,
+                            capacity: rule_cfg.max_requests,
+                            refill_every: rule_cfg.window_duration(),
+                            refill_amount: rule_cfg.refill_amount.unwrap_or(1),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
 
-/// Cookie configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CookieConfig {
-    /// Cookie name
-    pub name: String,
+        let response = self
+            .response
+            .as_ref()
+            .map(|r| r.to_internal())
+            .unwrap_or_default();
 
-    /// Cookie domain
-    pub domain: Option<String>,
-
-    /// Cookie path
-    pub path: Option<String>,
-
-    /// Secure flag
-    pub secure: bool,
-
-    /// HttpOnly flag
-    pub http_only: bool,
-
-    /// SameSite policy
-    pub same_site: Option<String>,
-}
-
-impl Default for CookieConfig {
-    fn default() -> Self {
-        Self {
-            name: "httpward_session".to_string(),
-            domain: None,
-            path: Some("/".to_string()),
-            secure: true,
-            http_only: true,
-            same_site: Some("Lax".to_string()),
+        InternalRateLimitConfig {
+            store,
+            global,
+            matched_route,
+            response,
         }
     }
 }
 
-/// Authentication configuration
+/// Store configuration in YAML format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthConfig {
-    /// Authentication type
-    pub auth_type: AuthType,
-
-    /// JWT configuration (if using JWT)
-    pub jwt_config: Option<JwtConfig>,
-
-    /// Basic auth configuration (if using Basic auth)
-    pub basic_config: Option<BasicAuthConfig>,
+#[serde(default)]
+pub struct RateLimitStoreConfig {
+    /// Maximum entries in memory.
+    pub max_entries: Option<usize>,
+    /// Idle TTL in seconds.
+    pub idle_ttl_sec: Option<u64>,
+    /// Cleanup interval in seconds.
+    pub cleanup_interval_sec: Option<u64>,
 }
 
-impl Default for AuthConfig {
+impl Default for RateLimitStoreConfig {
     fn default() -> Self {
         Self {
-            auth_type: AuthType::Session,
-            jwt_config: None,
-            basic_config: None,
+            max_entries: None,
+            idle_ttl_sec: None,
+            cleanup_interval_sec: None,
         }
     }
 }
 
-/// Authentication types
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AuthType {
-    Session,
-    Jwt,
-    Basic,
-    Custom,
-}
-
-/// JWT configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JwtConfig {
-    /// Secret key
-    pub secret: String,
-
-    /// Algorithm
-    pub algorithm: Option<String>,
-
-    /// Expiration
-    pub expiration: Option<Duration>,
-}
-
-/// Basic authentication configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BasicAuthConfig {
-    /// Realm
-    pub realm: Option<String>,
-}
-
-/// Storage configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StorageConfig {
-    /// Storage type
-    pub storage_type: StorageType,
-
-    /// Redis configuration (if using Redis)
-    pub redis_config: Option<RedisConfig>,
-
-    /// Memory storage configuration
-    pub memory_config: Option<MemoryConfig>,
-}
-
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self {
-            storage_type: StorageType::Memory,
-            redis_config: None,
-            memory_config: Some(MemoryConfig::default()),
+impl RateLimitStoreConfig {
+    fn to_internal(&self) -> InternalRateLimitStoreConfig {
+        InternalRateLimitStoreConfig {
+            max_entries: self.max_entries.unwrap_or(100_000),
+            idle_ttl_secs: self.idle_ttl_sec.unwrap_or(60),
+            cleanup_interval_secs: self.cleanup_interval_sec.unwrap_or(10),
         }
     }
 }
 
-/// Storage types
+/// Rate limit rule in YAML format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum StorageType {
-    Memory,
-    Redis,
-    Database,
-    Custom,
+#[serde(default)]
+pub struct RateLimitRuleConfig {
+    /// Maximum requests in the window.
+    pub max_requests: u32,
+    /// Time window as a duration string (e.g., "10s", "1m").
+    #[serde(default = "default_window")]
+    pub window: String,
+    /// Tokens to add per window (optional, defaults to 1).
+    pub refill_amount: Option<u32>,
 }
 
-/// Redis configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RedisConfig {
-    /// Redis URL
-    pub url: String,
-
-    /// Key prefix
-    pub key_prefix: Option<String>,
+fn default_window() -> String {
+    "10s".to_string()
 }
 
-/// Memory storage configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryConfig {
-    /// Maximum number of sessions
-    pub max_sessions: Option<usize>,
-
-    /// Cleanup interval
-    pub cleanup_interval: Option<Duration>,
-}
-
-impl Default for MemoryConfig {
+impl Default for RateLimitRuleConfig {
     fn default() -> Self {
         Self {
-            max_sessions: Some(10000),
-            cleanup_interval: Some(Duration::from_secs(300)), // 5 minutes
+            max_requests: 100,
+            window: "10s".to_string(),
+            refill_amount: None,
         }
+    }
+}
+
+impl RateLimitRuleConfig {
+    /// Parse the `window` string into a [`Duration`].
+    pub fn window_duration(&self) -> Duration {
+        parse_duration(&self.window).unwrap_or(Duration::from_secs(10))
+    }
+
+    /// Millisecond representation of the window (kept for compatibility).
+    pub fn window_ms(&self) -> u64 {
+        self.window_duration().as_millis() as u64
+    }
+}
+
+/// Response configuration in YAML format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RateLimitResponseConfig {
+    /// HTTP status code.
+    pub status_code: Option<u16>,
+    /// Response body.
+    pub body: Option<String>,
+}
+
+impl Default for RateLimitResponseConfig {
+    fn default() -> Self {
+        Self {
+            status_code: Some(429),
+            body: Some("Rate limit exceeded".to_string()),
+        }
+    }
+}
+
+impl RateLimitResponseConfig {
+    fn to_internal(&self) -> InternalRateLimitResponseConfig {
+        InternalRateLimitResponseConfig {
+            status_code: self.status_code.unwrap_or(429),
+            body: self
+                .body
+                .as_ref()
+                .map(|s| s.clone())
+                .unwrap_or_else(|| "Rate limit exceeded".to_string()),
+        }
+    }
+}
+
+// ============= Internal Config Structures =============
+
+/// Internal store configuration (after conversion from YAML).
+#[derive(Debug, Clone)]
+pub struct InternalRateLimitStoreConfig {
+    pub max_entries: usize,
+    pub idle_ttl_secs: u64,
+    pub cleanup_interval_secs: u64,
+}
+
+impl Default for InternalRateLimitStoreConfig {
+    fn default() -> Self {
+        Self {
+            max_entries: 100_000,
+            idle_ttl_secs: 60,
+            cleanup_interval_secs: 10,
+        }
+    }
+}
+
+/// Internal rate limit rule (after conversion from YAML).
+#[derive(Debug, Clone)]
+pub struct InternalRateLimitRule {
+    pub key: RateLimitKeyKind,
+    pub capacity: u32,
+    /// Pre-parsed refill window.
+    pub refill_every: Duration,
+    pub refill_amount: u32,
+}
+
+impl InternalRateLimitRule {
+    pub fn to_runtime_rule(&self) -> super::RateLimitRule {
+        super::RateLimitRule {
+            capacity: self.capacity.max(1),
+            refill_every: if self.refill_every.is_zero() {
+                Duration::from_millis(1)
+            } else {
+                self.refill_every
+            },
+            refill_amount: self.refill_amount.max(1),
+        }
+    }
+}
+
+/// Internal response configuration (after conversion from YAML).
+#[derive(Debug, Clone)]
+pub struct InternalRateLimitResponseConfig {
+    pub status_code: u16,
+    pub body: String,
+}
+
+impl Default for InternalRateLimitResponseConfig {
+    fn default() -> Self {
+        Self {
+            status_code: 429,
+            body: "Rate limit exceeded".to_string(),
+        }
+    }
+}
+
+/// Internal rate limit configuration (after full conversion from YAML).
+#[derive(Debug, Clone)]
+pub struct InternalRateLimitConfig {
+    pub store: InternalRateLimitStoreConfig,
+    pub global: Vec<InternalRateLimitRule>,
+    pub matched_route: Vec<InternalRateLimitRule>,
+    pub response: InternalRateLimitResponseConfig,
+}
+
+// ============= Helper Functions =============
+
+fn parse_rate_limit_key(s: &str) -> Option<RateLimitKeyKind> {
+    match s.to_lowercase().as_str() {
+        "ip" => Some(RateLimitKeyKind::Ip),
+        "ja4" => Some(RateLimitKeyKind::Ja4),
+        "header" | "header_fingerprint" => Some(RateLimitKeyKind::HeaderFingerprint),
+        "cookie" => Some(RateLimitKeyKind::Cookie),
+        _ => None,
+    }
+}
+
+/// Parse a human-friendly duration string into a [`Duration`].
+///
+/// Supported formats:
+/// - bare integer → treated as seconds (`"10"` → 10 s)
+/// - `"100ms"` / `"milliseconds"` → milliseconds
+/// - `"10s"` / `"seconds"` → seconds
+/// - `"5m"` / `"minutes"` → minutes
+/// - `"2h"` / `"hours"` → hours
+///
+/// Returns `None` if the string cannot be parsed.
+pub fn parse_duration(s: &str) -> Option<Duration> {
+    let s = s.trim();
+
+    // Bare integer → seconds
+    if let Ok(secs) = s.parse::<u64>() {
+        return Some(Duration::from_secs(secs));
+    }
+
+    let mut num_str = String::new();
+    let mut unit_str = String::new();
+    let mut in_unit = false;
+
+    for ch in s.chars() {
+        if ch.is_numeric() || ch == '.' {
+            if in_unit {
+                return None; // digit after unit
+            }
+            num_str.push(ch);
+        } else if ch.is_alphabetic() {
+            in_unit = true;
+            unit_str.push(ch);
+        } else if ch.is_whitespace() {
+            continue;
+        } else {
+            return None;
+        }
+    }
+
+    let num = num_str.parse::<f64>().ok()?;
+
+    let duration = match unit_str.to_lowercase().as_str() {
+        "ms" | "millisecond" | "milliseconds" => Duration::from_millis(num as u64),
+        "s" | "sec" | "second" | "seconds" => Duration::from_millis((num * 1_000.0) as u64),
+        "m" | "min" | "minute" | "minutes" => Duration::from_millis((num * 60_000.0) as u64),
+        "h" | "hour" | "hours" => Duration::from_millis((num * 3_600_000.0) as u64),
+        _ => return None,
+    };
+
+    Some(duration)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_duration() {
+        assert_eq!(parse_duration("10s"),   Some(Duration::from_secs(10)));
+        assert_eq!(parse_duration("1m"),    Some(Duration::from_secs(60)));
+        assert_eq!(parse_duration("100ms"), Some(Duration::from_millis(100)));
+        assert_eq!(parse_duration("2h"),    Some(Duration::from_secs(7_200)));
+        assert_eq!(parse_duration("30"),    Some(Duration::from_secs(30)));
+        assert_eq!(parse_duration("unknown"), None);
+        // ms-value sanity checks
+        assert_eq!(parse_duration("10s").map(|d| d.as_millis()),   Some(10_000));
+        assert_eq!(parse_duration("1m").map(|d| d.as_millis()),    Some(60_000));
+        assert_eq!(parse_duration("100ms").map(|d| d.as_millis()), Some(100));
+        assert_eq!(parse_duration("2h").map(|d| d.as_millis()),    Some(7_200_000));
+    }
+
+    #[test]
+    fn test_parse_rate_limit_key() {
+        assert_eq!(parse_rate_limit_key("ip"), Some(RateLimitKeyKind::Ip));
+        assert_eq!(parse_rate_limit_key("ja4"), Some(RateLimitKeyKind::Ja4));
+        assert_eq!(
+            parse_rate_limit_key("header"),
+            Some(RateLimitKeyKind::HeaderFingerprint)
+        );
+        assert_eq!(parse_rate_limit_key("cookie"), Some(RateLimitKeyKind::Cookie));
+    }
+
+    #[test]
+    fn test_config_to_internal() {
+        let mut global_rules = HashMap::new();
+        global_rules.insert(
+            "ip".to_string(),
+            RateLimitRuleConfig {
+                max_requests: 100,
+                window: "10s".to_string(),
+                refill_amount: Some(10),
+            },
+        );
+
+        let config = HttpWardRateLimitConfig {
+            global_config: Some(RateLimitStoreConfig {
+                max_entries: Some(50_000),
+                idle_ttl_sec: Some(30),
+                cleanup_interval_sec: Some(5),
+            }),
+            global_rules: vec![global_rules],
+            current_site_rules: Vec::new(),
+            response: None,
+        };
+
+        let internal = config.to_internal();
+        assert_eq!(internal.store.max_entries, 50_000);
+        assert_eq!(internal.store.idle_ttl_secs, 30);
+        assert_eq!(internal.global.len(), 1);
     }
 }
 

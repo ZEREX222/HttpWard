@@ -278,7 +278,6 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
- "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -1052,10 +1051,10 @@ name = "httpward_rate_limit_module"
 version = "0.0.1-alpha.1"
 dependencies = [
  "async-trait",
- "chrono",
  "httpward-core",
  "rama",
  "serde",
+ "tokio",
 ]
 
 [[package]]

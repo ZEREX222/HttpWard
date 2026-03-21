@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::{HashSet, HashMap};
 use httpward_core::httpward_middleware::{
     HttpWardMiddlewarePipe
@@ -16,6 +16,9 @@ use httpward_core::core::HttpWardContext;
 /// Re-export the plugin loader
 use super::middleware_global_module_storage::get_middleware_instance;
 
+/// Tracks middleware instances that already passed startup initialization.
+static INITIALIZED_MIDDLEWARE_INSTANCES: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
+
 /// Layer that dynamically loads and applies HttpWard middleware modules
 /// This layer integrates the abstract middleware pipe with Rama's layer system
 #[derive(Debug)]
@@ -29,6 +32,41 @@ pub struct DynamicModuleLoaderLayer {
 }
 
 impl DynamicModuleLoaderLayer {
+    fn init_middleware_once(
+        server_instance: &Arc<ServerInstance>,
+        middleware_name: &str,
+        middleware_instance: &Arc<dyn httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware + Send + Sync>,
+    ) {
+        let middleware_ptr = Arc::as_ptr(middleware_instance) as *const () as usize;
+        let should_initialize = {
+            let initialized_registry = INITIALIZED_MIDDLEWARE_INSTANCES
+                .get_or_init(|| Mutex::new(HashSet::new()));
+            let mut guard = initialized_registry
+                .lock()
+                .expect("Failed to acquire middleware initialization registry lock");
+            guard.insert(middleware_ptr)
+        };
+
+        if !should_initialize {
+            tracing::debug!(
+                target: "dynamic_module_loader",
+                "Skipping init for middleware '{}' (already initialized)",
+                middleware_name
+            );
+            return;
+        }
+
+        middleware_instance
+            .init(server_instance)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "Failed to initialize middleware '{}': {}",
+                    middleware_name,
+                    error
+                )
+            });
+    }
+
     /// Create a new loader that automatically loads middleware from strategies
     pub fn new(server_instance: &Arc<ServerInstance>) -> Self {
         let pipe = HttpWardMiddlewarePipe::new();
@@ -48,6 +86,8 @@ impl DynamicModuleLoaderLayer {
         for middleware_name in &unique_middleware_names {
             match get_middleware_instance(middleware_name) {
                 Some(middleware_instance) => {
+                    Self::init_middleware_once(server_instance, middleware_name, &middleware_instance);
+
                     loader.middleware_pipe = loader.middleware_pipe.add_boxed_layer(middleware_instance)
                         .expect(&format!("Failed to add middleware '{}': dependency validation failed", middleware_name));
                     tracing::info!(target: "dynamic_module_loader", "Successfully loaded middleware: {}", middleware_name);

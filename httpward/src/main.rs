@@ -180,7 +180,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Sites details
         debug!("    Sites attached:");
         for (i, site_manager) in server.site_managers.iter().enumerate() {
-            debug!("      Site {}: '{}'", i, site_manager.site_name());
+            debug!("      Site {}: '{}'", i, site_manager.site_domains());
             debug!("        Domains: {:?}", site_manager.site_config().get_all_domains());
             debug!("        Listeners: {} listeners", site_manager.site_config().listeners.len());
             debug!("        Routes: {} routes", site_manager.site_config().routes.len());

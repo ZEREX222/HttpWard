@@ -163,7 +163,7 @@ impl HttpWardMiddleware for HttpWardLogLayer {
                 if let Some(current_site) = &httpward_ctx.current_site {
                     module_log_info!(
                         "Current site - Name: {}, Has domains: {}",
-                        current_site.site_name(),
+                        current_site.site_domains(),
                         current_site.site_config().has_domains()
                     );
                 } else {

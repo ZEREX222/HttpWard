@@ -60,9 +60,9 @@ impl HttpWardContext {
         self.current_site.is_some()
     }
     
-    /// Get site name if available
-    pub fn site_name(&self) -> Option<&str> {
-        self.current_site.as_ref().map(|sm| sm.site_name())
+    /// Get site domain label if available.
+    pub fn site_domains(&self) -> Option<String> {
+        self.current_site.as_ref().map(|sm| sm.site_domains())
     }
 
     /// Get typed middleware config from cached matched route in this request context.

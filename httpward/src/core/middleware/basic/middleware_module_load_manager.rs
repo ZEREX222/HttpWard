@@ -99,8 +99,8 @@ impl MiddlewareModuleLoadManager {
                 let active_names = site_manager.get_active_middleware_names();
                 info!(target: "module_load_manager", 
                       "Site '{}' has {} active middleware: {:?}", 
-                      site_manager.site_name(), active_names.len(), active_names);
-                
+                      site_manager.site_domains(), active_names.len(), active_names);
+
                 for name in active_names {
                     middleware_names.insert(name);
                 }

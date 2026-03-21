@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
+use crate::core::server_models::server_instance::ServerInstance;
 use crate::httpward_middleware::types::BoxError;
 use rama::http::{Body, Request, Response};
 use rama::Context;
@@ -10,6 +11,13 @@ use crate::httpward_middleware::next::Next;
 /// HttpWard middleware trait — object-safe, async.
 #[async_trait]
 pub trait HttpWardMiddleware: Send + Sync + 'static {
+    /// Optional one-time initialization hook, called before middleware is added to runtime pipe.
+    ///
+    /// Default implementation is a no-op.
+    fn init(&self, _server_instance: &Arc<ServerInstance>) -> Result<(), BoxError> {
+        Ok(())
+    }
+
     /// Handle a request or call the next middleware.
     ///
     /// # Notes

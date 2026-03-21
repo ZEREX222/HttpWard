@@ -384,9 +384,19 @@ impl SiteManager {
         result
     }
 
-    /// Get site primary domain
-    pub fn site_name(&self) -> &str {
-        &self.site_config.domain
+    /// Get site domain label used in logs and middleware scopes.
+    /// Priority: `domain` -> `domains` list -> `default`.
+    pub fn site_domains(&self) -> String {
+        let primary = self.site_config.domain.trim();
+        if !primary.is_empty() {
+            return primary.to_string();
+        }
+
+        if !self.site_config.domains.is_empty() {
+            return self.site_config.domains.join(",");
+        }
+
+        "default".to_string()
     }
 
     /// Add TLS mapping for this site
