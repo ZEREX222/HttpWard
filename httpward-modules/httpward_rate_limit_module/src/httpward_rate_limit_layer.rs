@@ -17,6 +17,7 @@
 use async_trait::async_trait;
 use httpward_core::core::HttpWardContext;
 use httpward_core::core::server_models::server_instance::ServerInstance;
+use httpward_core::error::ErrorHandler;
 use httpward_core::httpward_middleware::next::Next;
 use httpward_core::httpward_middleware::{BoxError, HttpWardMiddleware};
 use httpward_core::module_logging::ModuleLogger;
@@ -311,10 +312,12 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
                         client_ip
                     );
 
-                    return Ok(Response::builder()
-                        .status(status_code_or_default(internal_config.response.status_code))
-                        .body(Body::from(internal_config.response.body.clone()))
-                        .unwrap());
+                    let error_handler = ErrorHandler::default();
+                    let status = status_code_or_default(internal_config.response.status_code);
+                    match error_handler.create_error_response_with_code(status) {
+                        Ok(response) => return Ok(response),
+                        Err(e) => return Err(format!("Failed to create error response: {}", e).into()),
+                    }
                 }
             }
             Err(error) => {
