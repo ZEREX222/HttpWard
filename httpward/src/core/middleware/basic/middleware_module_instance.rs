@@ -49,13 +49,28 @@ impl MiddlewareModuleInstance {
     /// Host and module must agree on symbol names and ABI.
     unsafe fn load_exports_unchecked(
         lib: &Library,
+        module_name: &str,
     ) -> Result<ModuleExports, Box<dyn std::error::Error + Send + Sync>> {
+        // Construct unique symbol names with module name prefix
+        let set_logger_symbol = format!("{}_module_set_logger", module_name);
+        let create_symbol = format!("{}_create_middleware", module_name);
+        let destroy_symbol = format!("{}_destroy_middleware", module_name);
+
         // SAFETY: Symbol lookup relies on module ABI contract and exact symbol names.
-        let set_logger: libloading::Symbol<SetLoggerFn> = unsafe { lib.get(b"module_set_logger")? };
+        let set_logger: libloading::Symbol<SetLoggerFn> = unsafe {
+            lib.get(set_logger_symbol.as_bytes())
+                .map_err(|e| format!("Failed to load symbol '{}': {}", set_logger_symbol, e))?
+        };
         // SAFETY: Symbol lookup relies on module ABI contract and exact symbol names.
-        let create: libloading::Symbol<CreateFn> = unsafe { lib.get(b"create_middleware")? };
+        let create: libloading::Symbol<CreateFn> = unsafe {
+            lib.get(create_symbol.as_bytes())
+                .map_err(|e| format!("Failed to load symbol '{}': {}", create_symbol, e))?
+        };
         // SAFETY: Symbol lookup relies on module ABI contract and exact symbol names.
-        let destroy: libloading::Symbol<DestroyFn> = unsafe { lib.get(b"destroy_middleware")? };
+        let destroy: libloading::Symbol<DestroyFn> = unsafe {
+            lib.get(destroy_symbol.as_bytes())
+                .map_err(|e| format!("Failed to load symbol '{}': {}", destroy_symbol, e))?
+        };
 
         Ok(ModuleExports {
             create: *create,
@@ -87,17 +102,18 @@ impl MiddlewareModuleInstance {
     /// Safety: host and module must agree on ABI.
     pub unsafe fn create_from_arc(
         lib: Arc<Library>,
+        module_name: &str,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         // Ensure thread-safe symbol loading and module initialization sequence.
         let _guard = LIBRARY_LOADING_MUTEX
             .lock()
             .map_err(|e| format!("Failed to acquire module loading lock: {e}"))?;
 
-        tracing::info!(target: "module_loader", "Creating middleware instance from shared library");
+        tracing::info!(target: "module_loader", "Creating middleware instance '{}' from shared library", module_name);
         tracing::info!(target: "module_loader", "Getting function symbols from library");
 
         // SAFETY: Export lookup depends on ABI compatibility between host and module.
-        let exports = unsafe { Self::load_exports_unchecked(&lib) }?;
+        let exports = unsafe { Self::load_exports_unchecked(&lib, module_name) }?;
         // SAFETY: Host logging callbacks follow module_set_logger contract.
         unsafe {
             (exports.set_logger)(

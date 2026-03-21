@@ -158,7 +158,7 @@ impl MiddlewareModuleLoadManager {
               "Loading middleware module '{}' from: {}", name, module_path.display());
 
         let lib = Arc::new(unsafe { Library::new(&module_path)? });
-        let instance = unsafe { MiddlewareModuleInstance::create_from_arc(lib.clone()) }?;
+        let instance = unsafe { MiddlewareModuleInstance::create_from_arc(lib.clone(), name) }?;
         let boxed_middleware = instance.into_boxed_middleware();
 
         Ok(ModuleRecord::dynamic(

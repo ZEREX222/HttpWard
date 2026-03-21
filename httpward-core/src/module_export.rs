@@ -192,35 +192,37 @@ macro_rules! export_middleware_module {
 
     // Case 3: Explicit name + middleware type
     ($module_name:expr, $middleware_type:ty) => {
-        #[unsafe(no_mangle)]
-        pub extern "C" fn module_set_logger(
-            error_fn: $crate::module_logging::HostLogErrorFn,
-            warn_fn: $crate::module_logging::HostLogWarnFn,
-            info_fn: $crate::module_logging::HostLogInfoFn,
-            debug_fn: $crate::module_logging::HostLogDebugFn,
-            trace_fn: $crate::module_logging::HostLogTraceFn,
-        ) {
-            $crate::module_logging::module_setup::setup_module_logger_with_name(
-                $module_name,
-                error_fn,
-                warn_fn,
-                info_fn,
-                debug_fn,
-                trace_fn,
-            );
-        }
-
-        #[unsafe(no_mangle)]
-        pub extern "C" fn create_middleware() -> $crate::httpward_middleware::pipe::MiddlewareFatPtr {
-            unsafe {
-                $crate::module_export::generic_create_middleware::<$middleware_type>()
+        $crate::paste::paste! {
+            #[unsafe(no_mangle)]
+            pub extern "C" fn [<$module_name _module_set_logger>](
+                error_fn: $crate::module_logging::HostLogErrorFn,
+                warn_fn: $crate::module_logging::HostLogWarnFn,
+                info_fn: $crate::module_logging::HostLogInfoFn,
+                debug_fn: $crate::module_logging::HostLogDebugFn,
+                trace_fn: $crate::module_logging::HostLogTraceFn,
+            ) {
+                $crate::module_logging::module_setup::setup_module_logger_with_name(
+                    $module_name,
+                    error_fn,
+                    warn_fn,
+                    info_fn,
+                    debug_fn,
+                    trace_fn,
+                );
             }
-        }
 
-        #[unsafe(no_mangle)]
-        pub extern "C" fn destroy_middleware(ptr: $crate::httpward_middleware::pipe::MiddlewareFatPtr) {
-            unsafe {
-                $crate::module_export::generic_destroy_middleware(ptr)
+            #[unsafe(no_mangle)]
+            pub extern "C" fn [<$module_name _create_middleware>]() -> $crate::httpward_middleware::pipe::MiddlewareFatPtr {
+                unsafe {
+                    $crate::module_export::generic_create_middleware::<$middleware_type>()
+                }
+            }
+
+            #[unsafe(no_mangle)]
+            pub extern "C" fn [<$module_name _destroy_middleware>](ptr: $crate::httpward_middleware::pipe::MiddlewareFatPtr) {
+                unsafe {
+                    $crate::module_export::generic_destroy_middleware(ptr)
+                }
             }
         }
     };
@@ -267,25 +269,27 @@ macro_rules! export_module_with_custom_middleware {
 
     // Case 3: Explicit name
     ($module_name:expr) => {
-        #[unsafe(no_mangle)]
-        pub extern "C" fn module_set_logger(
-            error_fn: $crate::module_logging::HostLogErrorFn,
-            warn_fn: $crate::module_logging::HostLogWarnFn,
-            info_fn: $crate::module_logging::HostLogInfoFn,
-            debug_fn: $crate::module_logging::HostLogDebugFn,
-            trace_fn: $crate::module_logging::HostLogTraceFn,
-        ) {
-            $crate::module_logging::module_setup::setup_module_logger_with_name(
-                $module_name,
-                error_fn,
-                warn_fn,
-                info_fn,
-                debug_fn,
-                trace_fn,
-            );
-        }
+        $crate::paste::paste! {
+            #[unsafe(no_mangle)]
+            pub extern "C" fn [<$module_name _module_set_logger>](
+                error_fn: $crate::module_logging::HostLogErrorFn,
+                warn_fn: $crate::module_logging::HostLogWarnFn,
+                info_fn: $crate::module_logging::HostLogInfoFn,
+                debug_fn: $crate::module_logging::HostLogDebugFn,
+                trace_fn: $crate::module_logging::HostLogTraceFn,
+            ) {
+                $crate::module_logging::module_setup::setup_module_logger_with_name(
+                    $module_name,
+                    error_fn,
+                    warn_fn,
+                    info_fn,
+                    debug_fn,
+                    trace_fn,
+                );
+            }
 
-        // Note: You must provide your own create_middleware and destroy_middleware functions
+            // Note: You must provide your own [<$module_name _create_middleware>] and [<$module_name _destroy_middleware>] functions
+        }
     };
 }
 

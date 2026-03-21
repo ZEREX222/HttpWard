@@ -12,6 +12,5 @@ pub use core::*;
 // Export InternalRateLimitRule for tests
 pub use core::httpward_rate_limit_config::InternalRateLimitRule;
 
-// Use the generic export macro with automatic module name detection
-// Will use "httpward_rate_limit_module" from Cargo.toml
-httpward_core::export_middleware_module!(HttpWardRateLimitLayer);
+// Use the generic export macro with explicit module name
+httpward_core::export_middleware_module!("httpward_rate_limit_module", HttpWardRateLimitLayer);

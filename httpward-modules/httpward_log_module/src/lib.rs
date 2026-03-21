@@ -5,6 +5,5 @@
 mod httpward_log_layer;
 pub use httpward_log_layer::HttpWardLogLayer;
 
-// Use the generic export macro with automatic module name detection
-// Will use "httpward_log_module" from Cargo.toml
-httpward_core::export_middleware_module!(HttpWardLogLayer);
+// Use the generic export macro with explicit module name
+httpward_core::export_middleware_module!("httpward_log_module", HttpWardLogLayer);

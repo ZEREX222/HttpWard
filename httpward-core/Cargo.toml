@@ -30,6 +30,7 @@ async-trait = "0.1"
 matchit = "0.9"
 regex = "1.12"
 thiserror = "2.0"
+paste = "1.0"
 
 [dev-dependencies]
 cargo-husky = "1.5"
