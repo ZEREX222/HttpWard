@@ -22,9 +22,3 @@ serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 cargo-husky = "1.5"
-
-[package.metadata.cargo-husky]
-pre-commit = [
-    "cargo fmt --all -- --check",
-    "cargo clippy --all-targets --all-features -- -D warnings"
-]

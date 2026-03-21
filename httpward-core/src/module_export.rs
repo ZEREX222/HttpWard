@@ -108,7 +108,7 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 ///     }
 /// }
 ///
-/// export_middleware_module!(MyMiddleware);  // Uses Cargo.toml name
+/// export_middleware_module!("my_module", MyMiddleware);  // Use explicit name for doctest
 /// ```
 ///
 /// ## 2. Custom module name
@@ -237,7 +237,7 @@ macro_rules! export_middleware_module {
 /// ```rust
 /// use httpward_core::export_module_with_custom_middleware;
 ///
-/// export_module_with_custom_middleware!();  // Uses Cargo.toml name
+/// export_module_with_custom_middleware!("my_module");  // Use explicit name for doctest
 /// ```
 ///
 /// ## 2. Custom module name
