@@ -31,6 +31,11 @@ pub trait HttpWardMiddleware: Send + Sync + 'static {
     fn dependencies(&self) -> Vec<&'static str> {
         Vec::new()
     }
+
+    /// Optional dependencies: may be absent, but if present must be earlier in pipe.
+    fn optional_dependencies(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
 }
 
 pub type DynMiddleware = Arc<dyn HttpWardMiddleware>;

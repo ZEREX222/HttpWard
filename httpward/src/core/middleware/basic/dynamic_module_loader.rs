@@ -103,8 +103,7 @@ impl DynamicModuleLoaderLayer {
                     .create_filtered_ordered(&ordered_names);
 
                 // Validate that all middleware in the filtered pipe have their dependencies satisfied
-                let active_names: std::collections::HashSet<&str> = ordered_names.iter().copied().collect();
-                self.validate_filtered_pipe_dependencies(&route_with_strategy.route, &active_names);
+                self.validate_filtered_pipe_dependencies(&route_with_strategy.route, &ordered_names);
 
                 let route_match = route_with_strategy.route.get_match();
                 tracing::debug!(
@@ -113,7 +112,7 @@ impl DynamicModuleLoaderLayer {
                     route_match,
                     filtered_pipe.len(),
                     self.middleware_pipe.len(),
-                    active_names,
+                    ordered_names,
                 );
 
                 // Stable pointer to Arc<Route> as the lookup key
@@ -130,25 +129,49 @@ impl DynamicModuleLoaderLayer {
     fn validate_filtered_pipe_dependencies(
         &self,
         route: &std::sync::Arc<httpward_core::config::Route>,
-        active_names: &std::collections::HashSet<&str>,
+        ordered_names: &[&str],
     ) {
         let mut validation_errors: Vec<String> = Vec::new();
+        let mut positions: HashMap<&str, usize> = HashMap::new();
+        for (idx, &name) in ordered_names.iter().enumerate() {
+            positions.insert(name, idx);
+        }
 
         for mw_ptr in self.middleware_pipe.iter() {
-            // Check if this middleware is in the filtered pipe
             if let Some(mw_name) = mw_ptr.name() {
-                if !active_names.contains(mw_name) {
-                    continue; // Middleware not in this route's active strategy, skip
+                let Some(&mw_pos) = positions.get(mw_name) else {
+                    continue;
+                };
+
+                for &dependency_name in &mw_ptr.dependencies() {
+                    match positions.get(dependency_name) {
+                        None => {
+                            validation_errors.push(format!(
+                                "Middleware '{}' requires dependency '{}' which is NOT enabled in route's active strategy",
+                                mw_name,
+                                dependency_name
+                            ));
+                        }
+                        Some(&dep_pos) if dep_pos >= mw_pos => {
+                            validation_errors.push(format!(
+                                "Middleware '{}' requires dependency '{}' to be BEFORE it in route's active strategy",
+                                mw_name,
+                                dependency_name
+                            ));
+                        }
+                        Some(_) => {}
+                    }
                 }
 
-                // This middleware IS in the filtered pipe, check if its dependencies are also there
-                for &dependency_name in &mw_ptr.dependencies() {
-                    if !active_names.contains(dependency_name) {
-                        validation_errors.push(format!(
-                            "Middleware '{}' requires dependency '{}' which is NOT enabled in route's active strategy",
-                            mw_name,
-                            dependency_name
-                        ));
+                for &optional_dependency_name in &mw_ptr.optional_dependencies() {
+                    if let Some(&dep_pos) = positions.get(optional_dependency_name) {
+                        if dep_pos >= mw_pos {
+                            validation_errors.push(format!(
+                                "Middleware '{}' has optional dependency '{}' enabled, but it must be BEFORE it in route's active strategy",
+                                mw_name,
+                                optional_dependency_name
+                            ));
+                        }
                     }
                 }
             }

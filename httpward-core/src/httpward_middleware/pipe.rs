@@ -60,18 +60,8 @@ impl HttpWardMiddlewarePipe {
         M: HttpWardMiddleware + Send + Sync + 'static,
     {
         let mw_name = mw.name().unwrap_or("unnamed");
-        let deps = mw.dependencies();
-        
-        // Check that all dependencies are already present in pipe
-        for &dep in &deps {
-            if self.get_layer_by_name(dep).is_none() {
-                return Err(DependencyError::MissingDependency {
-                    middleware: mw_name.to_string(),
-                    dependency: dep.to_string(),
-                });
-            }
-        }
-        
+        Self::validate_required_dependencies_exist(self.inner.as_ref(), mw_name, &mw.dependencies())?;
+
         // If all dependencies are present, add middleware
         let mut new_vec = (*self.inner).clone();
         new_vec.push(Arc::new(mw));
@@ -116,18 +106,8 @@ impl HttpWardMiddlewarePipe {
     /// This is useful when the middleware is created dynamically (plugins).
     pub fn add_boxed_layer(&self, mw: BoxedMiddleware) -> Result<Self, DependencyError> {
         let mw_name = mw.name().unwrap_or("unnamed");
-        let deps = mw.dependencies();
-        
-        // Check that all dependencies are already present in pipe
-        for &dep in &deps {
-            if self.get_layer_by_name(dep).is_none() {
-                return Err(DependencyError::MissingDependency {
-                    middleware: mw_name.to_string(),
-                    dependency: dep.to_string(),
-                });
-            }
-        }
-        
+        Self::validate_required_dependencies_exist(self.inner.as_ref(), mw_name, &mw.dependencies())?;
+
         // Clone the inner Vec and append the boxed middleware.
         let mut new_vec = (*self.inner).clone();
         new_vec.push(mw);
@@ -142,19 +122,14 @@ impl HttpWardMiddlewarePipe {
         
         for (pos, mw) in self.inner.iter().enumerate() {
             let mw_name = mw.name().unwrap_or("unnamed");
-            
-            for &dep in &mw.dependencies() {
-                // Search for dependency in middleware that come before current position
-                let dep_found = self.inner.iter().take(pos)
-                    .any(|m| m.name().map_or(false, |name| name == dep));
-                    
-                if !dep_found {
-                    errors.push(DependencyError::WrongOrder {
-                        middleware: mw_name.to_string(),
-                        dependency: dep.to_string(),
-                    });
-                }
-            }
+            Self::validate_middleware_position(
+                self.inner.as_ref(),
+                pos,
+                mw_name,
+                &mw.dependencies(),
+                &mw.optional_dependencies(),
+                &mut errors,
+            );
         }
         
         if errors.is_empty() {
@@ -163,7 +138,65 @@ impl HttpWardMiddlewarePipe {
             Err(errors)
         }
     }
-    
+
+    fn validate_required_dependencies_exist(
+        current_pipe: &[BoxedMiddleware],
+        mw_name: &str,
+        required_dependencies: &[&str],
+    ) -> Result<(), DependencyError> {
+        for &dep in required_dependencies {
+            if !current_pipe.iter().any(|m| m.name() == Some(dep)) {
+                return Err(DependencyError::MissingDependency {
+                    middleware: mw_name.to_string(),
+                    dependency: dep.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_middleware_position(
+        all_middleware: &[BoxedMiddleware],
+        pos: usize,
+        mw_name: &str,
+        required_dependencies: &[&str],
+        optional_dependencies: &[&str],
+        errors: &mut Vec<DependencyError>,
+    ) {
+        for &dep in required_dependencies {
+            let dep_found_before = all_middleware
+                .iter()
+                .take(pos)
+                .any(|m| m.name() == Some(dep));
+
+            if !dep_found_before {
+                errors.push(DependencyError::WrongOrder {
+                    middleware: mw_name.to_string(),
+                    dependency: dep.to_string(),
+                });
+            }
+        }
+
+        for &dep in optional_dependencies {
+            let dep_present = all_middleware.iter().any(|m| m.name() == Some(dep));
+            if !dep_present {
+                continue;
+            }
+
+            let dep_found_before = all_middleware
+                .iter()
+                .take(pos)
+                .any(|m| m.name() == Some(dep));
+
+            if !dep_found_before {
+                errors.push(DependencyError::WrongOrder {
+                    middleware: mw_name.to_string(),
+                    dependency: dep.to_string(),
+                });
+            }
+        }
+    }
+
     /// Execute middleware with dependency validation
     pub async fn execute_with_validation<S>(
         &self,
@@ -260,7 +293,17 @@ mod tests {
         fn name(&self) -> Option<&'static str> { Some("NamedMw") }
     }
 
-    
+    struct OptionalDependentMw;
+    #[async_trait]
+    impl HttpWardMiddleware for OptionalDependentMw {
+        async fn handle(&self, ctx: Context<()>, req: Request<Body>, next: Next<'_>) -> Result<Response<Body>, BoxError> {
+            next.run(ctx, req).await
+        }
+        fn name(&self) -> Option<&'static str> { Some("OptionalDependentMw") }
+        fn optional_dependencies(&self) -> Vec<&'static str> { vec!["DummyMw"] }
+    }
+
+
     #[test]
     fn test_add_layer_success() {
         let pipe = HttpWardMiddlewarePipe::new()
@@ -347,5 +390,38 @@ mod tests {
         assert!(pipe.get_layer_by_name("NamedMw").is_some());
         assert!(pipe.get_layer_by_name("DummyMw").is_some()); // DummyMw now has a name
         assert!(pipe.get_layer_by_name("NonExistent").is_none());
+    }
+
+    #[test]
+    fn test_optional_dependency_absent_is_allowed() {
+        let pipe = HttpWardMiddlewarePipe::new()
+            .add_layer(OptionalDependentMw)
+            .unwrap();
+
+        assert_eq!(pipe.len(), 1);
+        assert!(pipe.validate_order().is_ok());
+    }
+
+    #[test]
+    fn test_optional_dependency_present_must_be_before() {
+        let wrong_order_pipe = HttpWardMiddlewarePipe {
+            inner: Arc::new(vec![
+                Arc::new(OptionalDependentMw) as BoxedMiddleware,
+                Arc::new(DummyMw) as BoxedMiddleware,
+            ]),
+        };
+
+        let result = wrong_order_pipe.validate_order();
+        assert!(result.is_err());
+
+        let errors = result.unwrap_err();
+        assert_eq!(errors.len(), 1);
+        match &errors[0] {
+            DependencyError::WrongOrder { middleware, dependency } => {
+                assert_eq!(middleware, "OptionalDependentMw");
+                assert_eq!(dependency, "DummyMw");
+            }
+            _ => panic!("Expected WrongOrder error"),
+        }
     }
 }
