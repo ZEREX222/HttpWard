@@ -55,8 +55,8 @@ fn extract_header_fingerprint(headers: &HeaderMap) -> Option<String> {
 
     // Iterate in fixed order to keep deterministic fingerprint without HashMap/sort.
     for header_name in &header_names {
-        if let Some(header_value) = headers.get(*header_name) {
-            if let Ok(value_str) = header_value.to_str() {
+        if let Some(header_value) = headers.get(*header_name)
+            && let Ok(value_str) = header_value.to_str() {
                 has_any_header = true;
                 hasher.write(header_name.as_bytes());
                 hasher.write_u8(b':');
@@ -65,7 +65,6 @@ fn extract_header_fingerprint(headers: &HeaderMap) -> Option<String> {
                 }
                 hasher.write_u8(b'|');
             }
-        }
     }
 
     if !has_any_header {
@@ -209,8 +208,8 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
             .map(|context| context.client_ip.to_string())
             .unwrap_or_else(|| "unknown".to_string());
 
-        if let Some(st) = ctx.get::<SecureTransport>() {
-            if let Some(client_hello) = st.client_hello() {
+        if let Some(st) = ctx.get::<SecureTransport>()
+            && let Some(client_hello) = st.client_hello() {
                 let pv = client_hello.protocol_version();
                 let effective_version = match pv {
                     ProtocolVersion::Unknown(_) => ProtocolVersion::TLSv1_2,
@@ -227,7 +226,6 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
                     }
                 }
             }
-        }
 
         let header_fp = extract_header_fingerprint(req.headers());
 

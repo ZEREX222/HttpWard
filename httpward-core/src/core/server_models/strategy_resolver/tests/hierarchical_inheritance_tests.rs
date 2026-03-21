@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod hierarchical_inheritance_tests {
     use crate::config::SiteConfig;
     use crate::config::global::{GlobalConfig, Match, Route};

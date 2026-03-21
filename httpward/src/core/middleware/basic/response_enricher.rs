@@ -17,14 +17,12 @@ where
     T: std::any::Any,
 {
     // Try to downcast to Response<Body>
-    if let Some(http_response) = (response as &dyn std::any::Any).downcast_ref::<Response<Body>>() {
-        if let Some(headers) = http_response.headers().get("content-type") {
-            if let Ok(content_type_str) = headers.to_str() {
+    if let Some(http_response) = (response as &dyn std::any::Any).downcast_ref::<Response<Body>>()
+        && let Some(headers) = http_response.headers().get("content-type")
+            && let Ok(content_type_str) = headers.to_str() {
                 return ContentType::from_str(content_type_str)
                     .unwrap_or_else(|_| ContentType::text());
             }
-        }
-    }
     ContentType::text()
 }
 

@@ -29,6 +29,7 @@ use std::time::Duration;
 /// Main rate limit configuration (YAML format).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct HttpWardRateLimitConfig {
     /// Global store configuration.
     pub global_config: Option<RateLimitStoreConfig>,
@@ -41,16 +42,6 @@ pub struct HttpWardRateLimitConfig {
     pub response: Option<RateLimitResponseConfig>,
 }
 
-impl Default for HttpWardRateLimitConfig {
-    fn default() -> Self {
-        Self {
-            global_config: None,
-            global_rules: Vec::new(),
-            current_site_rules: Vec::new(),
-            response: None,
-        }
-    }
-}
 
 impl HttpWardRateLimitConfig {
     pub fn new() -> Self {
@@ -127,6 +118,7 @@ impl HttpWardRateLimitConfig {
 /// Store configuration in YAML format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct RateLimitStoreConfig {
     /// Maximum entries in memory.
     pub max_entries: Option<usize>,
@@ -136,15 +128,6 @@ pub struct RateLimitStoreConfig {
     pub cleanup_interval_sec: Option<u64>,
 }
 
-impl Default for RateLimitStoreConfig {
-    fn default() -> Self {
-        Self {
-            max_entries: None,
-            idle_ttl_sec: None,
-            cleanup_interval_sec: None,
-        }
-    }
-}
 
 impl RateLimitStoreConfig {
     fn to_internal(&self) -> InternalRateLimitStoreConfig {
@@ -159,8 +142,10 @@ impl RateLimitStoreConfig {
 /// Rate limit strategy types.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum RateLimitStrategy {
     /// Sliding window - gradual token refill
+    #[default]
     Sliding,
     /// Burst protection - large capacity, slow refill
     Burst,
@@ -168,11 +153,6 @@ pub enum RateLimitStrategy {
     Fixed,
 }
 
-impl Default for RateLimitStrategy {
-    fn default() -> Self {
-        RateLimitStrategy::Sliding
-    }
-}
 
 /// Rate limit rule in YAML format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,9 +218,7 @@ impl RateLimitResponseConfig {
         InternalRateLimitResponseConfig {
             status_code: self.status_code.unwrap_or(429),
             body: self
-                .body
-                .as_ref()
-                .map(|s| s.clone())
+                .body.clone()
                 .unwrap_or_else(|| "Rate limit exceeded".to_string()),
         }
     }

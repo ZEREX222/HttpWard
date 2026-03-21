@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod off_inheritance_tests {
     use crate::config::SiteConfig;
     use crate::config::global::{GlobalConfig, Match, Route};
@@ -8,7 +9,7 @@ mod off_inheritance_tests {
     use std::path::PathBuf;
 
     fn create_global_config() -> GlobalConfig {
-        use crate::config::global::{Listener, LogConfig};
+        use crate::config::global::LogConfig;
 
         GlobalConfig {
             domain: "global.local".to_string(),

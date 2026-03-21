@@ -1,5 +1,5 @@
 use httpward_core::error::ErrorHandler;
-use httpward_core::httpward_middleware::{HttpWardMiddlewareError, IsHttpWardError};
+use httpward_core::httpward_middleware::IsHttpWardError;
 use rama::{
     Context,
     http::{Body as RamaBody, Response as RamaResponse, StatusCode},

@@ -67,15 +67,15 @@ fn merge_yaml_missing_only(target: &mut Value, source: Value) {
 
     if let (Value::Mapping(target_map), Value::Mapping(source_map)) = (&mut *target, &source) {
         for (k, v) in source_map {
-            if !target_map.contains_key(&k) {
+            if !target_map.contains_key(k) {
                 // Key doesn't exist at all - add it
                 target_map.insert(k.clone(), v.clone());
             } else {
                 // Key exists - check if we can recursively merge objects
-                match (target_map.get_mut(&k), &v) {
+                match (target_map.get_mut(k), &v) {
                     (Some(Value::Mapping(_)), Value::Mapping(_)) => {
                         // Both are mappings - recursively merge missing fields only
-                        let target_value = target_map.get_mut(&k).unwrap();
+                        let target_value = target_map.get_mut(k).unwrap();
                         merge_yaml_missing_only(target_value, v.clone());
                     }
                     _ => {
@@ -147,7 +147,7 @@ fn merge_universal_missing_only(target: &mut UniversalValue, source: UniversalVa
 /// Supplement middleware configurations - only merge existing middleware configs, don't add new ones
 /// Used for strategy inheritance where we only want to merge configs of existing middleware
 pub fn supplement_middleware_configs(
-    current: &mut Vec<MiddlewareConfig>,
+    current: &mut [MiddlewareConfig],
     incoming: &[MiddlewareConfig],
 ) -> Result<()> {
     // Build index: middleware name -> position
@@ -605,16 +605,16 @@ impl<'de> Deserialize<'de> for MiddlewareConfig {
         // Check if the value is an explicit on/off toggle.
         match &yaml_value {
             serde_yaml::Value::String(s) if s.eq_ignore_ascii_case("off") => {
-                return Ok(MiddlewareConfig::Off { name });
+                Ok(MiddlewareConfig::Off { name })
             }
             serde_yaml::Value::Bool(b) if !b => {
-                return Ok(MiddlewareConfig::Off { name });
+                Ok(MiddlewareConfig::Off { name })
             }
             serde_yaml::Value::String(s) if s.eq_ignore_ascii_case("on") => {
-                return Ok(MiddlewareConfig::On { name });
+                Ok(MiddlewareConfig::On { name })
             }
             serde_yaml::Value::Bool(b) if *b => {
-                return Ok(MiddlewareConfig::On { name });
+                Ok(MiddlewareConfig::On { name })
             }
             _ => {
                 // Normal middleware configuration

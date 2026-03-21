@@ -5,8 +5,10 @@
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use httpward_core::httpward_middleware::pipe::MiddlewareFatPtr;
 use httpward_core::module_logging::host_functions::*;
+use httpward_core::module_logging::{
+    HostLogDebugFn, HostLogErrorFn, HostLogInfoFn, HostLogTraceFn, HostLogWarnFn,
+};
 use libloading::Library;
-use std::os::raw::c_char;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -17,11 +19,11 @@ static LIBRARY_LOADING_MUTEX: Mutex<()> = Mutex::new(());
 type CreateFn = unsafe extern "C" fn() -> MiddlewareFatPtr;
 type DestroyFn = unsafe extern "C" fn(MiddlewareFatPtr);
 type SetLoggerFn = unsafe extern "C" fn(
-    extern "C" fn(*const c_char), // error
-    extern "C" fn(*const c_char), // warn
-    extern "C" fn(*const c_char), // info
-    extern "C" fn(*const c_char), // debug
-    extern "C" fn(*const c_char), // trace
+    HostLogErrorFn, // error
+    HostLogWarnFn,  // warn
+    HostLogInfoFn,  // info
+    HostLogDebugFn, // debug
+    HostLogTraceFn, // trace
 );
 
 /// Collected module exports required by the host.

@@ -21,7 +21,7 @@ pub fn load(config_path: impl AsRef<Path>) -> Result<AppConfig> {
 
     // 1. Load global config
     let global_content =
-        fs::read_to_string(&config_path).context("Cannot read httpward.yaml config file")?;
+        fs::read_to_string(config_path).context("Cannot read httpward.yaml config file")?;
 
     let mut global: GlobalConfig = serde_yaml::from_str(&global_content)
         .context("Cannot parse httpward.yaml config (YAML error)")?;
@@ -32,9 +32,7 @@ pub fn load(config_path: impl AsRef<Path>) -> Result<AppConfig> {
     {
         // Merge strategies from file with existing ones (global strategies take precedence)
         for (name, middleware) in strategies_from_file {
-            if !global.strategies.contains_key(&name) {
-                global.strategies.insert(name, middleware);
-            }
+            global.strategies.entry(name).or_insert(middleware);
         }
     }
 

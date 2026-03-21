@@ -1,3 +1,5 @@
+#![allow(clippy::module_inception)]
+
 pub mod proxy;
 pub mod route;
 pub mod static_files;

@@ -79,7 +79,7 @@ impl HttpWardMiddlewarePipe {
     pub fn get_layer_by_name(&self, name: &str) -> Option<&BoxedMiddleware> {
         self.inner
             .iter()
-            .find(|m| m.name().map_or(false, |n| n == name))
+            .find(|m| m.name() == Some(name))
     }
 
     /// Get an iterator over all middleware in the pipe.
@@ -242,7 +242,7 @@ impl HttpWardMiddlewarePipe {
         S: Service<(), Request<Body>, Response = Response<Body>> + Clone + Send + Sync + 'static,
         S::Error: std::error::Error + Send + Sync + 'static,
     {
-        let slice: &[BoxedMiddleware] = &*self.inner;
+        let slice: &[BoxedMiddleware] = &self.inner;
 
         // Convert the concrete service to BoxService
         let boxed_service = crate::httpward_middleware::adapter::box_service_from(inner);
@@ -399,9 +399,10 @@ mod tests {
         // For testing wrong order, we need to create a scenario where dependencies exist but are in wrong position
         // Since add_layer enforces dependencies, we can't create a truly wrong order at build time
         // But we can test the validation logic by creating a pipe manually with wrong order
-        let mut wrong_order_vec: Vec<BoxedMiddleware> = Vec::new();
-        wrong_order_vec.push(Arc::new(DependentMw) as BoxedMiddleware); // Add dependent first
-        wrong_order_vec.push(Arc::new(DummyMw) as BoxedMiddleware); // Add dependency second
+        let wrong_order_vec: Vec<BoxedMiddleware> = vec![
+            Arc::new(DependentMw) as BoxedMiddleware, // Add dependent first
+            Arc::new(DummyMw) as BoxedMiddleware,     // Add dependency second
+        ];
 
         let wrong_order_pipe = HttpWardMiddlewarePipe {
             inner: Arc::new(wrong_order_vec),

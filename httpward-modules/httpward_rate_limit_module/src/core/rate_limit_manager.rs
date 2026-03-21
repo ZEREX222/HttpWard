@@ -135,8 +135,8 @@ impl RateLimitManager {
             site.global_rules_initialized = true;
         }
 
-        if let Some(scope) = matched_route_scope {
-            if !internal.matched_route.is_empty() && site.initialized_route_scopes.insert(scope) {
+        if let Some(scope) = matched_route_scope
+            && !internal.matched_route.is_empty() && site.initialized_route_scopes.insert(scope) {
                 for rule in &internal.matched_route {
                     site.limiter.add_rule(
                         rule.key.clone(),
@@ -145,7 +145,6 @@ impl RateLimitManager {
                     );
                 }
             }
-        }
 
         Ok(())
     }
@@ -177,8 +176,8 @@ impl RateLimitManager {
             site.global_rules_initialized = true;
         }
 
-        if let Some(scope) = matched_route_scope {
-            if !internal.matched_route.is_empty() && site.initialized_route_scopes.insert(scope) {
+        if let Some(scope) = matched_route_scope
+            && !internal.matched_route.is_empty() && site.initialized_route_scopes.insert(scope) {
                 for rule in &internal.matched_route {
                     site.limiter.add_rule(
                         rule.key.clone(),
@@ -187,7 +186,6 @@ impl RateLimitManager {
                     );
                 }
             }
-        }
 
         Ok(())
     }
@@ -229,13 +227,13 @@ impl RateLimitManager {
     }
 
     pub async fn cleanup_all(&self) -> Result<(), String> {
-        let sites = self
-            .sites
-            .read()
-            .map_err(|e| format!("Failed to acquire read lock on rate-limit sites: {e}"))?;
-
-        let site_states: Vec<_> = sites.values().cloned().collect();
-        drop(sites);
+        let site_states: Vec<_> = {
+            let sites = self
+                .sites
+                .read()
+                .map_err(|e| format!("Failed to acquire read lock on rate-limit sites: {e}"))?;
+            sites.values().cloned().collect()
+        };
 
         for site in site_states {
             let mut site = site.lock().await;

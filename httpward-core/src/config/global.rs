@@ -5,7 +5,6 @@ use crate::config::strategy::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 /// Global application configuration (loaded from httpward.yaml)
 /// Inherits all fields from SiteConfig plus global-specific settings
@@ -245,6 +244,7 @@ mod tests {
     use super::*;
     use crate::config::MiddlewareConfig;
     use crate::config::strategy::StrategyRef;
+    use std::sync::Arc;
 
     #[test]
     fn test_global_default_strategy() {
@@ -291,7 +291,7 @@ mod tests {
         let mut config = GlobalConfig::default();
 
         // Set an inline strategy using Strategy
-        let inline_strategy = Strategy {
+        let _inline_strategy = Strategy {
             name: "inline_test".to_string(),
             middleware: Arc::new(vec![
                 crate::config::strategy::MiddlewareConfig::new_named_json(

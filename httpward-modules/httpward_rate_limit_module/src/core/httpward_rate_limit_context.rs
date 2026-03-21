@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Request-scoped data produced by the rate limit middleware.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct HttpWardRateLimitContext {
     /// Site name resolved by HttpWard.
     pub site_name: Option<String>,
@@ -15,17 +16,6 @@ pub struct HttpWardRateLimitContext {
     pub ja4_fp: Option<String>,
 }
 
-impl Default for HttpWardRateLimitContext {
-    fn default() -> Self {
-        Self {
-            site_name: None,
-            client_ip: None,
-            matched_route_scope: None,
-            header_fp: None,
-            ja4_fp: None,
-        }
-    }
-}
 
 impl HttpWardRateLimitContext {
     /// Create new rate limit context.

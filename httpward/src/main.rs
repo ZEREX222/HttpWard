@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod core;
 mod runtime;
 mod server;
@@ -13,7 +15,7 @@ use httpward_core::core::server_models::server_instance::ServerInstance;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use runtime::server_plan::build_server_plan;
 use server::http_server::HttpWardServer;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
 // !!! STATIC MODULES ONLY FOR DEBUG!!!
@@ -56,13 +58,11 @@ fn find_config_file(base_path: &str) -> String {
     let path = Path::new(base_path);
 
     // If the path already has an extension, try it directly
-    if let Some(extension) = path.extension() {
-        if extension == "yaml" || extension == "yml" {
-            if path.exists() {
+    if let Some(extension) = path.extension()
+        && (extension == "yaml" || extension == "yml")
+            && path.exists() {
                 return base_path.to_string();
             }
-        }
-    }
 
     // Try .yaml first, then .yml
     let yaml_path = format!("{}.yaml", base_path);
@@ -155,7 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Initialize logging with default level first
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(config.global.log.level.to_string()));
+        .unwrap_or_else(|_| EnvFilter::new(&config.global.log.level));
 
     tracing_subscriber::fmt().with_env_filter(filter).init();
 

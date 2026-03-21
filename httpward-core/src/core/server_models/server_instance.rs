@@ -1,5 +1,5 @@
 // server/server_instance.rs
-use crate::config::{GlobalConfig, SiteConfig};
+use crate::config::GlobalConfig;
 use crate::core::server_models::listener::ListenerKey;
 use crate::core::server_models::site_manager::SiteManager;
 use std::sync::Arc;

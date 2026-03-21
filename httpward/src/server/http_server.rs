@@ -65,7 +65,7 @@ impl HttpWardServer {
 
         // Create HTTP service with dynamic middleware layers using LayerStackBuilder
         let error_handler = ErrorHandler::default();
-        let base_service = service_fn(move |ctx: Context<()>, _req: Request<Body>| {
+        let base_service = service_fn(move |_ctx: Context<()>, _req: Request<Body>| {
             let error_handler = error_handler.clone();
             async move {
                 let response = error_handler

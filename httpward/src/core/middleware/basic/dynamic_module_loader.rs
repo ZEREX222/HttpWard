@@ -9,7 +9,7 @@ use rama::{
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Re-export the plugin loader
 use super::middleware_global_module_storage::get_middleware_instance;
@@ -76,10 +76,8 @@ impl DynamicModuleLoaderLayer {
                     loader.middleware_pipe = loader
                         .middleware_pipe
                         .add_boxed_layer(middleware_instance)
-                        .expect(&format!(
-                            "Failed to add middleware '{}': dependency validation failed",
-                            middleware_name
-                        ));
+                        .unwrap_or_else(|_| panic!("Failed to add middleware '{}': dependency validation failed",
+                            middleware_name));
                     tracing::info!(target: "dynamic_module_loader", "Successfully loaded middleware: {}", middleware_name);
                 }
                 None => {
@@ -203,15 +201,14 @@ impl DynamicModuleLoaderLayer {
                 }
 
                 for &optional_dependency_name in &mw_ptr.optional_dependencies() {
-                    if let Some(&dep_pos) = positions.get(optional_dependency_name) {
-                        if dep_pos >= mw_pos {
+                    if let Some(&dep_pos) = positions.get(optional_dependency_name)
+                        && dep_pos >= mw_pos {
                             validation_errors.push(format!(
                                 "Middleware '{}' has optional dependency '{}' enabled, but it must be BEFORE it in route's active strategy",
                                 mw_name,
                                 optional_dependency_name
                             ));
                         }
-                    }
                 }
             }
         }
@@ -381,14 +378,14 @@ where
     /// Returns:
     /// - `Some(pipe)` — precomputed per-route filtered pipe when a route is matched.
     /// - `None`       — no route matched; the caller should bypass the middleware pipe
-    ///                  and forward the request directly to the inner service.
+    ///   and forward the request directly to the inner service.
     fn resolve_pipe<'a>(
         &'a self,
         ctx: &Context<()>,
         req: &Request<Body>,
     ) -> Option<&'a HttpWardMiddlewarePipe> {
-        if let Some(hctx) = ctx.get::<HttpWardContext>() {
-            if let Some(site) = &hctx.current_site {
+        if let Some(hctx) = ctx.get::<HttpWardContext>()
+            && let Some(site) = &hctx.current_site {
                 let path = req.uri().path();
                 if let Ok(matched) = site.get_route(path) {
                     let key = Arc::as_ptr(&matched.route) as usize;
@@ -403,7 +400,6 @@ where
                     }
                 }
             }
-        }
         tracing::debug!(
             target: "dynamic_module_loader",
             "No route matched — skipping middleware pipe, forwarding directly to inner service",
@@ -441,7 +437,7 @@ where
 
     async fn serve(
         &self,
-        mut ctx: Context<()>,
+        ctx: Context<()>,
         request: Request<Body>,
     ) -> Result<Self::Response, Self::Error> {
         tracing::debug!(target: "dynamic_module_loader", "DynamicModuleLoaderService.serve called");
@@ -571,7 +567,7 @@ mod tests {
         println!("Middleware count: {}", middleware_count);
 
         // The layer should be created successfully
-        assert!(middleware_count >= 0);
+        let _ = middleware_count;
     }
 
     #[test]

@@ -62,7 +62,7 @@ impl DomainStore {
         } else {
             self.exact
                 .entry(domain.to_string())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(cert);
         }
     }
@@ -100,11 +100,10 @@ impl DomainStore {
     /// Returns the first certificate found, prioritizing exact domains over wildcards.
     /// Useful for getting a fallback certificate when no specific domain matches.
     pub fn first_cert(&self) -> Option<&Cert> {
-        if let Some((_, certs)) = self.exact.iter().next() {
-            if let Some(cert) = certs.first() {
+        if let Some((_, certs)) = self.exact.iter().next()
+            && let Some(cert) = certs.first() {
                 return Some(cert);
             }
-        }
 
         for (_, certs) in &self.wildcards {
             if let Some(cert) = certs.first() {
@@ -127,11 +126,10 @@ impl DomainStore {
     /// `None` - No certificates available
     pub fn first_cert_with_domain(&self) -> Option<(String, &Cert)> {
         // Check exact domains first
-        if let Some((domain, certs)) = self.exact.iter().next() {
-            if let Some(cert) = certs.first() {
+        if let Some((domain, certs)) = self.exact.iter().next()
+            && let Some(cert) = certs.first() {
                 return Some((domain.clone(), cert));
             }
-        }
 
         // Check wildcard patterns
         for (pattern, certs) in &self.wildcards {
@@ -149,13 +147,12 @@ impl DomainStore {
         let domain_lower = domain.to_lowercase();
 
         // Check exact domains first
-        if let Some(certs) = self.exact.get_mut(&domain_lower) {
-            if !certs.is_empty() {
+        if let Some(certs) = self.exact.get_mut(&domain_lower)
+            && !certs.is_empty() {
                 certs[0] = new_cert; // Replace first certificate
                 info!("Updated certificate for exact domain: {}", domain_lower);
                 return true;
             }
-        }
 
         // Check wildcard patterns
         for (pattern, certs) in &mut self.wildcards {

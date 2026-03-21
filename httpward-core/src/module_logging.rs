@@ -6,11 +6,11 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
 /// Host logging function types with different log levels
-pub type HostLogErrorFn = extern "C" fn(*const c_char);
-pub type HostLogWarnFn = extern "C" fn(*const c_char);
-pub type HostLogInfoFn = extern "C" fn(*const c_char);
-pub type HostLogDebugFn = extern "C" fn(*const c_char);
-pub type HostLogTraceFn = extern "C" fn(*const c_char);
+pub type HostLogErrorFn = unsafe extern "C" fn(*const c_char);
+pub type HostLogWarnFn = unsafe extern "C" fn(*const c_char);
+pub type HostLogInfoFn = unsafe extern "C" fn(*const c_char);
+pub type HostLogDebugFn = unsafe extern "C" fn(*const c_char);
+pub type HostLogTraceFn = unsafe extern "C" fn(*const c_char);
 
 /// Module logging interface that can be used by dynamic modules
 pub trait ModuleLogger {
@@ -101,7 +101,7 @@ impl DefaultModuleLogger {
     /// Get static reference to global logger instance
     pub fn global() -> *mut DefaultModuleLogger {
         static mut GLOBAL_LOGGER: DefaultModuleLogger = DefaultModuleLogger::new();
-        unsafe { &raw mut GLOBAL_LOGGER }
+        &raw mut GLOBAL_LOGGER
     }
 }
 
@@ -195,7 +195,10 @@ pub mod host_functions {
 
     /// Host logging function for error level
     #[unsafe(no_mangle)]
-    pub extern "C" fn host_log_error(ptr: *const c_char) {
+    ///
+    /// # Safety
+    /// `ptr` must be non-null and point to a valid NUL-terminated C string.
+    pub unsafe extern "C" fn host_log_error(ptr: *const c_char) {
         let msg = unsafe { CStr::from_ptr(ptr) }
             .to_string_lossy()
             .into_owned();
@@ -205,7 +208,10 @@ pub mod host_functions {
 
     /// Host logging function for warn level
     #[unsafe(no_mangle)]
-    pub extern "C" fn host_log_warn(ptr: *const c_char) {
+    ///
+    /// # Safety
+    /// `ptr` must be non-null and point to a valid NUL-terminated C string.
+    pub unsafe extern "C" fn host_log_warn(ptr: *const c_char) {
         let msg = unsafe { CStr::from_ptr(ptr) }
             .to_string_lossy()
             .into_owned();
@@ -215,7 +221,10 @@ pub mod host_functions {
 
     /// Host logging function for info level
     #[unsafe(no_mangle)]
-    pub extern "C" fn host_log_info(ptr: *const c_char) {
+    ///
+    /// # Safety
+    /// `ptr` must be non-null and point to a valid NUL-terminated C string.
+    pub unsafe extern "C" fn host_log_info(ptr: *const c_char) {
         let msg = unsafe { CStr::from_ptr(ptr) }
             .to_string_lossy()
             .into_owned();
@@ -225,7 +234,10 @@ pub mod host_functions {
 
     /// Host logging function for debug level
     #[unsafe(no_mangle)]
-    pub extern "C" fn host_log_debug(ptr: *const c_char) {
+    ///
+    /// # Safety
+    /// `ptr` must be non-null and point to a valid NUL-terminated C string.
+    pub unsafe extern "C" fn host_log_debug(ptr: *const c_char) {
         let msg = unsafe { CStr::from_ptr(ptr) }
             .to_string_lossy()
             .into_owned();
@@ -235,7 +247,10 @@ pub mod host_functions {
 
     /// Host logging function for trace level
     #[unsafe(no_mangle)]
-    pub extern "C" fn host_log_trace(ptr: *const c_char) {
+    ///
+    /// # Safety
+    /// `ptr` must be non-null and point to a valid NUL-terminated C string.
+    pub unsafe extern "C" fn host_log_trace(ptr: *const c_char) {
         let msg = unsafe { CStr::from_ptr(ptr) }
             .to_string_lossy()
             .into_owned();
@@ -249,7 +264,7 @@ pub mod module_setup {
     use super::*;
 
     /// Type for module logger setter function
-    pub type SetLoggerFn = unsafe extern "C" fn(
+    pub type SetLoggerFn = extern "C" fn(
         HostLogErrorFn,
         HostLogWarnFn,
         HostLogInfoFn,
@@ -259,7 +274,7 @@ pub mod module_setup {
 
     /// Setup module logger with host callbacks
     /// This should be called from module_set_logger function
-    pub unsafe fn setup_module_logger(
+    pub fn setup_module_logger(
         error_fn: HostLogErrorFn,
         warn_fn: HostLogWarnFn,
         info_fn: HostLogInfoFn,
@@ -282,7 +297,7 @@ pub mod module_setup {
 
     /// Setup module logger with host callbacks and module name
     /// This should be called from module_set_logger function
-    pub unsafe fn setup_module_logger_with_name(
+    pub fn setup_module_logger_with_name(
         module_name: &str,
         error_fn: HostLogErrorFn,
         warn_fn: HostLogWarnFn,

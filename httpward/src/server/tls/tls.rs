@@ -252,7 +252,7 @@ pub async fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, Tls
         .next()
         .and_then(|r| r.ok())
     {
-        return Ok(PrivateKeyDer::try_from(key)?);
+        return Ok(PrivateKeyDer::from(key));
     }
 
     // Reset reader and try RSA format
@@ -261,7 +261,7 @@ pub async fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, Tls
         .next()
         .and_then(|r| r.ok())
     {
-        return Ok(PrivateKeyDer::try_from(key)?);
+        return Ok(PrivateKeyDer::from(key));
     }
 
     // Try one more time with EC format (SEC1 keys)
@@ -270,7 +270,7 @@ pub async fn load_private_key(path: &Path) -> Result<PrivateKeyDer<'static>, Tls
         .next()
         .and_then(|r: Result<rustls::pki_types::PrivateSec1KeyDer<'static>, std::io::Error>| r.ok())
     {
-        return Ok(PrivateKeyDer::try_from(key)?);
+        return Ok(PrivateKeyDer::from(key));
     }
 
     Err(format!("No valid private key found in {:?}", path).into())

@@ -16,7 +16,7 @@ pub fn provision_self_signed(
     // 1. Create primary domain by concatenating all domains with * and . replaced by _
     let primary_domain = domains
         .iter()
-        .map(|d| d.replace('*', "_").replace('.', "_"))
+        .map(|d| d.replace(['*', '.'], "_"))
         .collect::<Vec<_>>()
         .join("_");
     let mut temp_dir = env::temp_dir();

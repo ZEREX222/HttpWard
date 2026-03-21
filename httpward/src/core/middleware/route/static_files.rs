@@ -1,11 +1,12 @@
+#![allow(clippy::result_large_err)]
+
 use crate::core::middleware::route::RouteError;
 use httpward_core::config::Route;
-use httpward_core::core::server_models::{MatchedRoute, MatcherType};
+use httpward_core::core::server_models::MatchedRoute;
 use rama::http::dep::mime_guess;
 use rama::http::{Body as RamaBody, Request as RamaRequest, Response as RamaResponse, StatusCode};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 use tokio::fs;
 use tracing::debug;
 
@@ -146,11 +147,9 @@ pub async fn handle_static(
         }
     } else {
         // If no parameters, remove the prefix and serve from static_dir
-        let relative_path = if request_path.starts_with(matched_path) {
-            &request_path[matched_path.len()..]
-        } else {
-            request_path
-        };
+        let relative_path = request_path
+            .strip_prefix(matched_path)
+            .unwrap_or(request_path);
 
         let clean_path = relative_path.trim_start_matches('/');
         debug!("Relative path after removing prefix: '{}'", clean_path);
@@ -233,6 +232,7 @@ mod tests {
     use httpward_core::config::Match;
     use rama::http::Method;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[test]
     fn test_process_static_dir_with_params() {

@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use futures_util::{SinkExt, StreamExt};
 use http::{Method, Request as HttpRequest, Response};
 use rama::{
@@ -114,8 +116,8 @@ impl WebSocketHandler {
         use base64::{Engine, engine::general_purpose::STANDARD};
         use sha1::Digest;
 
-        if let Some(key) = headers.get("Sec-WebSocket-Key") {
-            if let Ok(key_str) = key.to_str() {
+        if let Some(key) = headers.get("Sec-WebSocket-Key")
+            && let Ok(key_str) = key.to_str() {
                 let key_bytes = key_str.as_bytes();
                 let mut hasher = sha1::Sha1::new();
                 hasher.update(key_bytes);
@@ -123,7 +125,6 @@ impl WebSocketHandler {
                 let result = hasher.finalize();
                 return Ok(STANDARD.encode(result));
             }
-        }
 
         Err(WebSocketError::InvalidRequest(
             "missing or invalid Sec-WebSocket-Key".to_string(),
@@ -243,17 +244,13 @@ impl WebSocketHandler {
     }
 
     fn is_websocket_headers(headers: &HeaderMap) -> bool {
-        if let Some(upgrade) = headers.get(header::UPGRADE) {
-            if let Ok(upgrade_str) = upgrade.to_str() {
-                if upgrade_str.eq_ignore_ascii_case("websocket") {
-                    if let Some(connection) = headers.get(header::CONNECTION) {
-                        if let Ok(conn_str) = connection.to_str() {
+        if let Some(upgrade) = headers.get(header::UPGRADE)
+            && let Ok(upgrade_str) = upgrade.to_str()
+                && upgrade_str.eq_ignore_ascii_case("websocket")
+                    && let Some(connection) = headers.get(header::CONNECTION)
+                        && let Ok(conn_str) = connection.to_str() {
                             return conn_str.to_ascii_lowercase().contains("upgrade");
                         }
-                    }
-                }
-            }
-        }
         false
     }
 
@@ -438,7 +435,7 @@ mod tests {
         assert_eq!(upstream_message.into_text().unwrap(), "hello-upstream");
 
         upstream_peer_ws
-            .send(Message::Binary(vec![1_u8, 2, 3].into()))
+            .send(Message::Binary(vec![1_u8, 2, 3]))
             .await
             .unwrap();
         let client_message = client_peer_ws.next().await.unwrap().unwrap();

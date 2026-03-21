@@ -1,13 +1,13 @@
+#![allow(clippy::result_large_err)]
+
 use super::{
     proxy::{ProxyError, ProxyHandler},
     static_files,
     websocket::{WebSocketError, WebSocketHandler},
 };
-use httpward_core::config::{GlobalConfig, Redirect, Route};
+use httpward_core::config::{Redirect, Route};
 use httpward_core::core::HttpWardContext;
-use httpward_core::core::server_models::listener::ListenerKey;
-use httpward_core::core::server_models::server_instance::ServerInstance;
-use httpward_core::core::server_models::{SiteManager, SiteManagerError};
+use httpward_core::core::server_models::SiteManagerError;
 use httpward_core::error::ErrorHandler;
 use rama::{
     Context,
@@ -16,7 +16,6 @@ use rama::{
     service::Service,
 };
 use std::fmt::Debug;
-use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, error};
 
@@ -30,10 +29,6 @@ pub enum RouteError {
     WebSocket(#[from] WebSocketError),
     #[error("static file error: {0}")]
     Static(String),
-    #[error("redirect error: {0}")]
-    Redirect(String),
-    #[error("other: {0}")]
-    Other(String),
 }
 
 /// Layer for routing
@@ -146,7 +141,7 @@ where
 
                         if is_websocket {
                             match ProxyHandler::build_proxy_uri(
-                                &backend,
+                                backend,
                                 &matched_route.params,
                                 request.uri(),
                             ) {
@@ -164,7 +159,7 @@ where
                                                 )
                                                 .await
                                             {
-                                                Ok(response) => return Ok(response),
+                                                Ok(response) => Ok(response),
                                                 Err(e) => {
                                                     tracing::error!(error = %e, upstream = %ws_url, "WebSocket proxy error");
                                                     let status = match &e {
@@ -181,28 +176,28 @@ where
                                                         }
                                                     };
 
-                                                    return Ok(self.create_error_response(
+                                                    Ok(self.create_error_response(
                                                         status,
                                                         "WebSocket proxy error",
-                                                    ));
+                                                    ))
                                                 }
                                             }
                                         }
                                         Err(e) => {
                                             tracing::error!(error = %e, backend = %upstream_uri_string, "Failed to convert backend URL to WebSocket URL");
-                                            return Ok(self.create_error_response(
+                                            Ok(self.create_error_response(
                                                 StatusCode::INTERNAL_SERVER_ERROR,
                                                 "Invalid WebSocket URL",
-                                            ));
+                                            ))
                                         }
                                     }
                                 }
                                 Err(e) => {
                                     tracing::error!(error = %e, backend = %backend, "Failed to build WebSocket upstream URL");
-                                    return Ok(self.create_error_response(
+                                    Ok(self.create_error_response(
                                         StatusCode::INTERNAL_SERVER_ERROR,
                                         "Invalid WebSocket URL",
-                                    ));
+                                    ))
                                 }
                             }
                         } else if is_grpc {
@@ -210,19 +205,19 @@ where
                                 .proxy_handler
                                 .proxy_grpc_request(
                                     request,
-                                    &backend,
+                                    backend,
                                     &matched_route.params,
                                     Some(httpward_ctx.request_headers.clone()),
                                 )
                                 .await
                             {
-                                Ok(response) => return Ok(response),
+                                Ok(response) => Ok(response),
                                 Err(e) => {
                                     tracing::error!("gRPC proxy error: {}", e);
-                                    return Ok(self.create_error_response(
+                                    Ok(self.create_error_response(
                                         StatusCode::BAD_GATEWAY,
                                         "gRPC proxy error",
-                                    ));
+                                    ))
                                 }
                             }
                         } else {
@@ -235,7 +230,7 @@ where
                                 .proxy_handler
                                 .proxy_request_with_client_ip_and_proxy_id(
                                     request,
-                                    &backend,
+                                    backend,
                                     &matched_route.params,
                                     Some(httpward_ctx.request_headers.clone()),
                                     client_ip.as_deref(),
@@ -243,13 +238,13 @@ where
                                 )
                                 .await
                             {
-                                Ok(response) => return Ok(response),
+                                Ok(response) => Ok(response),
                                 Err(e) => {
                                     tracing::error!("Proxy error: {}", e);
-                                    return Ok(self.create_error_response(
+                                    Ok(self.create_error_response(
                                         StatusCode::BAD_GATEWAY,
                                         "Proxy error",
-                                    ));
+                                    ))
                                 }
                             }
                         }
@@ -258,28 +253,28 @@ where
                         match static_files::handle_static(&request, static_dir, &matched_route)
                             .await
                         {
-                            Ok(response) => return Ok(response),
+                            Ok(response) => Ok(response),
                             Err(e) => {
                                 error!("Static file error: {}", e);
-                                return Ok(self.create_error_response(
+                                Ok(self.create_error_response(
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                     "Static file error",
-                                ));
+                                ))
                             }
                         }
                     }
                     Route::Redirect { redirect, .. } => {
                         match self
-                            .handle_redirect(request, &redirect, &matched_route.params)
+                            .handle_redirect(request, redirect, &matched_route.params)
                             .await
                         {
-                            Ok(response) => return Ok(response),
+                            Ok(response) => Ok(response),
                             Err(e) => {
                                 error!("Redirect error: {}", e);
-                                return Ok(self.create_error_response(
+                                Ok(self.create_error_response(
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                     "Redirect error",
-                                ));
+                                ))
                             }
                         }
                     }
@@ -292,9 +287,9 @@ where
             }
             Err(e) => {
                 error!("Route matching error: {}", e);
-                return Ok(
+                Ok(
                     self.create_error_response(StatusCode::INTERNAL_SERVER_ERROR, "Routing error")
-                );
+                )
             }
         }
     }
@@ -345,6 +340,7 @@ impl<S> RouteService<S> {
 mod tests {
     use super::*;
     use httpward_core::config::{Match, SiteConfig};
+    use httpward_core::core::server_models::SiteManager;
     use std::path::PathBuf;
 
     #[tokio::test]

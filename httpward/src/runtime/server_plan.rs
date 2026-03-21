@@ -11,11 +11,7 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
     let mut servers_map: HashMap<ListenerKey, Vec<SiteConfig>> = HashMap::new();
 
     // 1. Process Sites (excluding global for now)
-    let mut all_sites = config.sites.clone();
-
-    // Track which listeners have sites (to avoid duplicating global site)
-    let mut listeners_with_sites: std::collections::HashSet<ListenerKey> =
-        std::collections::HashSet::new();
+    let all_sites = config.sites.clone();
 
     for site in &all_sites {
         let effective_listeners = if site.listeners.is_empty() {
@@ -30,7 +26,6 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
                 port: listener.port,
             };
 
-            listeners_with_sites.insert(key.clone());
 
             let sites_vec = servers_map.entry(key).or_default();
             sites_vec.push(site.clone());
@@ -113,8 +108,8 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
                         // Find the listener that matches this server instance
                         for listener in get_effective_listeners(&site_config, &config.global) {
                             if listener.host == key.host && listener.port == key.port {
-                                if listener.tls.is_some() {
-                                    if let Some(paths) = resolve_site_tls(&site_config, &listener) {
+                                if listener.tls.is_some()
+                                    && let Some(paths) = resolve_site_tls(&site_config, &listener) {
                                         let domains = site_config.get_all_domains();
 
                                         // Use domains from site config, or fallback to localhost for global sites
@@ -129,7 +124,6 @@ pub fn build_server_plan(config: &AppConfig) -> Vec<ServerInstance> {
                                             paths,
                                         });
                                     }
-                                }
                                 break; // Found the matching listener, no need to check others
                             }
                         }

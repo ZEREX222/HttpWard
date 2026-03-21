@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod off_tests {
     use crate::config::strategy::{
         MiddlewareConfig, filter_disabled_middleware, supplement_middleware,

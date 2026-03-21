@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use crate::httpward_middleware::HttpWardMiddlewarePipe;
     use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;

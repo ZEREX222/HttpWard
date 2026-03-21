@@ -11,6 +11,10 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use thiserror::Error;
 
+type TypedCacheKey = (usize, TypeId);
+type TypedConfig = Arc<dyn Any + Send + Sync>;
+type TypedCacheMap = HashMap<TypedCacheKey, TypedConfig>;
+
 #[derive(Debug, Clone)]
 pub struct TlsPaths {
     pub cert: PathBuf,
@@ -27,7 +31,7 @@ pub struct RouteWithStrategy {
     /// Fast O(1) lookup: middleware name -> index in active_strategy.middleware.
     middleware_index: Arc<HashMap<String, usize>>,
     /// Typed config cache: (middleware_index, TypeId) -> Arc<T> erased as Any.
-    typed_cache: Arc<RwLock<HashMap<(usize, TypeId), Arc<dyn Any + Send + Sync>>>>,
+    typed_cache: Arc<RwLock<TypedCacheMap>>,
 }
 
 impl std::fmt::Debug for RouteWithStrategy {
@@ -91,11 +95,9 @@ impl RouteWithStrategy {
             .map_err(|_| anyhow::anyhow!("typed config cache lock poisoned"))?
             .get(&key)
             .cloned()
-        {
-            if let Some(typed) = cached.downcast_ref::<Arc<T>>() {
+            && let Some(typed) = cached.downcast_ref::<Arc<T>>() {
                 return Ok(Some(typed.clone()));
             }
-        }
 
         let parsed = Arc::new(parse_middleware_config_typed::<T>(
             &self.active_strategy.middleware[idx],
@@ -450,6 +452,7 @@ mod tests {
     use super::*;
     use crate::config::{Match, SiteConfig};
 
+    #[allow(dead_code)]
     fn create_test_site() -> SiteConfig {
         SiteConfig {
             domain: "test-site".to_string(),

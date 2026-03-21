@@ -37,8 +37,8 @@ fn normalize_request_headers(
     proxy_id: &str,
 ) -> Result<HeaderMap, Box<dyn std::error::Error>> {
     // Preserve original Host header before replacing it
-    if let Some(original_host) = headers.get(header::HOST) {
-        if let Ok(host_str) = original_host.to_str() {
+    if let Some(original_host) = headers.get(header::HOST)
+        && let Ok(host_str) = original_host.to_str() {
             // Only add X-Forwarded-Host if it's different from upstream host
             if host_str != upstream_host {
                 headers.insert(
@@ -47,7 +47,6 @@ fn normalize_request_headers(
                 );
             }
         }
-    }
 
     // Hop-by-hop headers per RFC: always remove these.
     let mut hop_by_hop = vec![
@@ -67,17 +66,15 @@ fn normalize_request_headers(
     }
 
     // If Connection header exists, its comma-separated tokens name additional hop-by-hop headers.
-    if let Some(conn_val) = headers.get(header::CONNECTION) {
-        if let Ok(s) = conn_val.to_str() {
+    if let Some(conn_val) = headers.get(header::CONNECTION)
+        && let Ok(s) = conn_val.to_str() {
             for token in s.split(',').map(|t| t.trim()) {
-                if !token.is_empty() {
-                    if let Ok(hname) = HeaderName::from_lowercase(token.to_lowercase().as_bytes()) {
+                if !token.is_empty()
+                    && let Ok(hname) = HeaderName::from_lowercase(token.to_lowercase().as_bytes()) {
                         hop_by_hop.insert(hname);
                     }
-                }
             }
         }
-    }
 
     // Remove hop-by-hop headers
     for name in hop_by_hop {
@@ -155,17 +152,15 @@ fn normalize_response_headers(mut headers: HeaderMap) -> HeaderMap {
     .into_iter()
     .collect::<HashSet<_>>();
 
-    if let Some(conn_val) = headers.get(header::CONNECTION) {
-        if let Ok(s) = conn_val.to_str() {
+    if let Some(conn_val) = headers.get(header::CONNECTION)
+        && let Ok(s) = conn_val.to_str() {
             for token in s.split(',').map(|t| t.trim()) {
-                if !token.is_empty() {
-                    if let Ok(hname) = HeaderName::from_lowercase(token.to_lowercase().as_bytes()) {
+                if !token.is_empty()
+                    && let Ok(hname) = HeaderName::from_lowercase(token.to_lowercase().as_bytes()) {
                         hop_by_hop.insert(hname);
                     }
-                }
             }
         }
-    }
 
     for name in hop_by_hop {
         headers.remove(name);
@@ -280,6 +275,7 @@ impl ProxyHandler {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn proxy_request_with_kind_and_client_ip(
         &self,
         mut req: RamaRequest<RamaBody>,
@@ -308,7 +304,7 @@ impl ProxyHandler {
         let normalized_headers = normalize_request_headers(
             headers,
             client_ip,
-            &upstream_host,
+            upstream_host,
             proto,
             request_kind,
             proxy_id,
@@ -344,11 +340,10 @@ impl ProxyHandler {
         }
 
         // Preserve original query string if present and backend doesn't have one
-        if let Some(query) = orig.query() {
-            if backend_url.query().is_none() {
+        if let Some(query) = orig.query()
+            && backend_url.query().is_none() {
                 backend_url.set_query(Some(query));
             }
-        }
 
         // Convert back to http::Uri
         backend_url
@@ -360,31 +355,26 @@ impl ProxyHandler {
     /// Check if request is for WebSocket upgrade
     pub fn is_websocket_upgrade(req: &RamaRequest<RamaBody>) -> bool {
         // Check Upgrade header
-        if let Some(upgrade) = req.headers().get(header::UPGRADE) {
-            if let Ok(upgrade_str) = upgrade.to_str() {
-                if upgrade_str.to_ascii_lowercase().contains("websocket") {
+        if let Some(upgrade) = req.headers().get(header::UPGRADE)
+            && let Ok(upgrade_str) = upgrade.to_str()
+                && upgrade_str.to_ascii_lowercase().contains("websocket") {
                     // Check Connection header
-                    if let Some(connection) = req.headers().get(header::CONNECTION) {
-                        if let Ok(conn_str) = connection.to_str() {
+                    if let Some(connection) = req.headers().get(header::CONNECTION)
+                        && let Ok(conn_str) = connection.to_str() {
                             return conn_str.to_ascii_lowercase().contains("upgrade");
                         }
-                    }
                 }
-            }
-        }
         false
     }
 
     /// Check if request is gRPC
     pub fn is_grpc(req: &RamaRequest<RamaBody>) -> bool {
         // gRPC requests always use application/grpc* content types.
-        if let Some(content_type) = req.headers().get(header::CONTENT_TYPE) {
-            if let Ok(ct_str) = content_type.to_str() {
-                if ct_str.starts_with("application/grpc") {
+        if let Some(content_type) = req.headers().get(header::CONTENT_TYPE)
+            && let Ok(ct_str) = content_type.to_str()
+                && ct_str.starts_with("application/grpc") {
                     return true;
                 }
-            }
-        }
         false
     }
 }
@@ -456,7 +446,7 @@ mod tests {
 
     #[test]
     fn test_websocket_detection() {
-        let mut req = RamaRequest::builder()
+        let req = RamaRequest::builder()
             .method(Method::GET)
             .uri("/ws")
             .header("Upgrade", "websocket")
@@ -467,7 +457,7 @@ mod tests {
         assert!(ProxyHandler::is_websocket_upgrade(&req));
 
         // Test case-insensitive
-        let mut req2 = RamaRequest::builder()
+        let req2 = RamaRequest::builder()
             .method(Method::GET)
             .uri("/ws")
             .header("Upgrade", "WebSocket")

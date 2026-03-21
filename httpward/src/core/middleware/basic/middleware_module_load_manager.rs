@@ -216,13 +216,8 @@ impl MiddlewareModuleLoadManager {
     /// Check if module is loaded in global storage
     pub fn is_module_loaded(&self, name: &str) -> bool {
         // Check global storage only
-        if let Ok(guard) = super::middleware_global_module_storage::with_global_storage(|storage| {
-            storage.has_module(name)
-        }) {
-            guard
-        } else {
-            false
-        }
+        super::middleware_global_module_storage::with_global_storage(|storage| storage.has_module(name))
+            .unwrap_or_default()
     }
 
     /// Get the current modules directory path
@@ -277,24 +272,14 @@ impl MiddlewareModuleLoadManager {
 
     /// Get count of loaded modules from global storage
     pub fn module_count(&self) -> usize {
-        if let Ok(count) = super::middleware_global_module_storage::with_global_storage(|storage| {
-            storage.module_count()
-        }) {
-            count
-        } else {
-            0
-        }
+        super::middleware_global_module_storage::with_global_storage(|storage| storage.module_count())
+            .unwrap_or_default()
     }
 
     /// Get all loaded module names from global storage
     pub fn module_names(&self) -> Vec<String> {
-        if let Ok(names) = super::middleware_global_module_storage::with_global_storage(|storage| {
-            storage.module_names()
-        }) {
-            names
-        } else {
-            Vec::new()
-        }
+        super::middleware_global_module_storage::with_global_storage(|storage| storage.module_names())
+            .unwrap_or_default()
     }
 
     /// Reload a specific module in global storage

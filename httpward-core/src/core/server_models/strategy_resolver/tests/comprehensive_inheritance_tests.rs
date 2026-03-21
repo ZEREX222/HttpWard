@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod comprehensive_inheritance_tests {
     use crate::config::SiteConfig;
     use crate::config::global::{GlobalConfig, Match, Route};
@@ -456,10 +457,10 @@ mod comprehensive_inheritance_tests {
     #[test]
     fn test_multiple_inheritance_levels() {
         // Test: Global -> Site1 -> Site2 -> Route
-        let mut global = create_test_global();
+        let global = create_test_global();
 
         // Create nested site structure
-        let mut site1 = SiteConfig {
+        let site1 = SiteConfig {
             domain: "site1.local".to_string(),
             domains: vec!["site1.local".to_string()],
             listeners: vec![],

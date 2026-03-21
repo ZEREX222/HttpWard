@@ -189,16 +189,14 @@ impl HttpWardMiddleware for HttpWardLogLayer {
                 let header_count = httpward_ctx.request_headers.len();
                 module_log_info!("Request headers count: {}", header_count);
 
-                if let Some(user_agent) = httpward_ctx.request_headers.get("user-agent") {
-                    if let Ok(ua) = user_agent.to_str() {
+                if let Some(user_agent) = httpward_ctx.request_headers.get("user-agent")
+                    && let Ok(ua) = user_agent.to_str() {
                         module_log_info!("User-Agent: {}", ua);
                     }
-                }
-                if let Some(host) = httpward_ctx.request_headers.get("host") {
-                    if let Ok(h) = host.to_str() {
+                if let Some(host) = httpward_ctx.request_headers.get("host")
+                    && let Ok(h) = host.to_str() {
                         module_log_info!("Host: {}", h);
                     }
-                }
             }
         }
 

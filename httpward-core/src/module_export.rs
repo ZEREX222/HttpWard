@@ -12,9 +12,12 @@ use std::os::raw::c_void;
 /// Generic module logger setup function
 /// This can be used directly by modules or through the export_middleware_module macro
 /// Note: This function is not FFI-safe due to &str parameter, use the macro instead
-
 /// Generic middleware creation function
 /// Creates a middleware instance of type T and returns it as a fat pointer
+///
+/// # Safety
+/// The returned fat pointer must be passed back to `generic_destroy_middleware` exactly once.
+/// Calling code must not mutate or free the returned pointer data manually.
 pub unsafe extern "C" fn generic_create_middleware<T>() -> MiddlewareFatPtr
 where
     T: HttpWardMiddleware + Send + Sync + 'static,
@@ -42,6 +45,10 @@ where
 
 /// Generic middleware destruction function
 /// Safely destroys a middleware instance created by generic_create_middleware
+///
+/// # Safety
+/// `ptr` must be a valid pointer pair returned by `generic_create_middleware` from the
+/// same module binary, and it must not be used after this call.
 pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
     let logger = module_setup::get_logger();
     logger.info("generic_destroy_middleware called");
@@ -193,16 +200,14 @@ macro_rules! export_middleware_module {
             debug_fn: $crate::module_logging::HostLogDebugFn,
             trace_fn: $crate::module_logging::HostLogTraceFn,
         ) {
-            unsafe {
-                $crate::module_logging::module_setup::setup_module_logger_with_name(
-                    $module_name,
-                    error_fn,
-                    warn_fn,
-                    info_fn,
-                    debug_fn,
-                    trace_fn,
-                );
-            }
+            $crate::module_logging::module_setup::setup_module_logger_with_name(
+                $module_name,
+                error_fn,
+                warn_fn,
+                info_fn,
+                debug_fn,
+                trace_fn,
+            );
         }
 
         #[unsafe(no_mangle)]
@@ -270,16 +275,14 @@ macro_rules! export_module_with_custom_middleware {
             debug_fn: $crate::module_logging::HostLogDebugFn,
             trace_fn: $crate::module_logging::HostLogTraceFn,
         ) {
-            unsafe {
-                $crate::module_logging::module_setup::setup_module_logger_with_name(
-                    $module_name,
-                    error_fn,
-                    warn_fn,
-                    info_fn,
-                    debug_fn,
-                    trace_fn,
-                );
-            }
+            $crate::module_logging::module_setup::setup_module_logger_with_name(
+                $module_name,
+                error_fn,
+                warn_fn,
+                info_fn,
+                debug_fn,
+                trace_fn,
+            );
         }
 
         // Note: You must provide your own create_middleware and destroy_middleware functions
@@ -314,7 +317,6 @@ mod tests {
     use crate::httpward_middleware::next::Next;
     use rama::Context;
     use rama::http::{Body, Request, Response};
-    use std::pin::Pin;
 
     // Test middleware for testing purposes
     #[derive(Debug, Default)]

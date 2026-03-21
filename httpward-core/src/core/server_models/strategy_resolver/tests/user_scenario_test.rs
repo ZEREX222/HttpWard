@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod user_scenario_test {
     use crate::config::SiteConfig;
     use crate::config::global::{GlobalConfig, Match, Route};

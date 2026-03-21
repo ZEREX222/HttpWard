@@ -119,11 +119,11 @@ impl TlsFileWatcher {
             for domain in &mapping.domains {
                 file_to_domains
                     .entry(mapping.paths.cert.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(domain.clone() as String);
                 file_to_domains
                     .entry(mapping.paths.key.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(domain.clone());
             }
         }
@@ -216,7 +216,7 @@ impl TlsFileWatcher {
                                 match Self::reload_single_mapping_static(mapping).await {
                                     Ok(certified_key) => {
                                         resolver.update_domain_certificate(
-                                            Some(&domain),
+                                            Some(domain),
                                             certified_key,
                                         );
                                         info!(
