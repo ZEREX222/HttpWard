@@ -24,7 +24,6 @@ use httpward_core::{module_log_debug, module_log_error, module_log_info, module_
 use rama::net::fingerprint::Ja4;
 use rama::net::tls::{ProtocolVersion, SecureTransport};
 use rama::{http::{Body, HeaderMap, Request, Response, StatusCode}, Context};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::core::{
@@ -34,8 +33,8 @@ use crate::core::{
 
 /// Extract header fingerprint from specific headers
 fn extract_header_fingerprint(headers: &HeaderMap) -> Option<String> {
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher;
 
     let header_names = [
         "user-agent",
@@ -44,36 +43,30 @@ fn extract_header_fingerprint(headers: &HeaderMap) -> Option<String> {
         "accept-encoding",
         "sec-ch-ua",
         "sec-ch-ua-platform",
-        "sec-ch-ua-mobile"
+        "sec-ch-ua-mobile",
     ];
 
-    let mut header_values = HashMap::new();
+    let mut hasher = DefaultHasher::new();
+    let mut has_any_header = false;
 
+    // Iterate in fixed order to keep deterministic fingerprint without HashMap/sort.
     for header_name in &header_names {
         if let Some(header_value) = headers.get(*header_name) {
             if let Ok(value_str) = header_value.to_str() {
-                header_values.insert(*header_name, value_str.to_lowercase());
+                has_any_header = true;
+                hasher.write(header_name.as_bytes());
+                hasher.write_u8(b':');
+                for byte in value_str.as_bytes() {
+                    hasher.write_u8(byte.to_ascii_lowercase());
+                }
+                hasher.write_u8(b'|');
             }
         }
     }
 
-    if header_values.is_empty() {
+    if !has_any_header {
         return None;
     }
-
-    // Create a deterministic string from header values
-    let mut sorted_headers: Vec<_> = header_values.iter().collect();
-    sorted_headers.sort_by_key(|(k, _)| *k);
-
-    let combined_string = sorted_headers
-        .iter()
-        .map(|(k, v)| format!("{}:{}", k, v))
-        .collect::<Vec<_>>()
-        .join("|");
-
-    // Create hash
-    let mut hasher = DefaultHasher::new();
-    combined_string.hash(&mut hasher);
 
     Some(format!("{:x}", hasher.finish()))
 }
@@ -346,6 +339,8 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
         Some(env!("CARGO_PKG_NAME"))
     }
 }
+
+
 
 
 
