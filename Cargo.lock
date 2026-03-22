@@ -1066,6 +1066,7 @@ dependencies = [
  "httpward-core",
  "rama",
  "serde",
+ "serde_json",
  "tokio",
 ]
 

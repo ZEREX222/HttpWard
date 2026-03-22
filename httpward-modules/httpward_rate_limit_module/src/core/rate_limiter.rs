@@ -27,6 +27,40 @@ pub enum RateLimitKeyKind {
     Cookie,
 }
 
+/// Status of a rate limit check result
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum RateLimitCheckStatus {
+    /// Request was allowed - within acceptable limits
+    Allow,
+    /// Request was declined - limit exceeded
+    Declined,
+    /// New entry - first request, added to limits
+    New,
+}
+
+/// Detailed result of a single rate limit check
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitCheckResult {
+    /// Type of rate limit key used (IP, JA4, HeaderFingerprint, Cookie)
+    pub kind: RateLimitKeyKind,
+    /// Scope of the rule (Global or Route-specific)
+    pub scope_type: String, // "Global" or "Route"
+    /// The value that was checked
+    pub value: String,
+    /// Result status of this check
+    pub status: RateLimitCheckStatus,
+}
+
+/// Collection of all rate limit check results for a request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitCheckResults {
+    /// All individual check results
+    pub checks: Vec<RateLimitCheckResult>,
+    /// Overall result - true if all checks passed (Allow or New)
+    pub allowed: bool,
+}
+
 /// Scope of the rate limit rule
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum RateLimitScope {
@@ -219,11 +253,11 @@ impl RateLimiter {
         }
     }
 
-    /// Check rate limit for a single key
-    fn check_key(&mut self, key: &RateKey) -> bool {
+    /// Check rate limit for a single key and return status (Allow, Declined, or New)
+    fn check_key_with_status(&mut self, key: &RateKey) -> RateLimitCheckStatus {
         let Some(rule) = self.rules.get(&key.rule).copied() else {
             // No rule defined, allow by default
-            return true;
+            return RateLimitCheckStatus::Allow;
         };
 
         // Check if bucket exists
@@ -234,10 +268,19 @@ impl RateLimiter {
                 let allowed =
                     new_bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount);
                 self.buckets.insert(key.clone(), new_bucket);
-                return allowed;
+                return if allowed {
+                    RateLimitCheckStatus::Allow
+                } else {
+                    RateLimitCheckStatus::Declined
+                };
             }
 
-            return bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount);
+            let allowed = bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount);
+            return if allowed {
+                RateLimitCheckStatus::Allow
+            } else {
+                RateLimitCheckStatus::Declined
+            };
         }
 
         // Create new bucket
@@ -250,7 +293,19 @@ impl RateLimiter {
         let allowed = bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount);
         self.buckets.insert(key.clone(), bucket);
 
-        allowed
+        if allowed {
+            RateLimitCheckStatus::New
+        } else {
+            RateLimitCheckStatus::Declined
+        }
+    }
+
+    /// Check rate limit for a single key (simplified, returns bool)
+    fn check_key(&mut self, key: &RateKey) -> bool {
+        match self.check_key_with_status(key) {
+            RateLimitCheckStatus::Allow | RateLimitCheckStatus::New => true,
+            RateLimitCheckStatus::Declined => false,
+        }
     }
 
     /// Check rate limit by components
@@ -258,6 +313,44 @@ impl RateLimiter {
         self.maybe_cleanup();
         let key = self.make_key(kind, scope, value);
         self.check_key(&key)
+    }
+
+    /// Check rate limit and return detailed results for each check
+    pub fn check_with_results(
+        &mut self,
+        checks: &[(RateLimitKeyKind, RateLimitScope, String)],
+    ) -> RateLimitCheckResults {
+        self.maybe_cleanup();
+
+        let mut results = Vec::new();
+        let mut all_allowed = true;
+
+        for (kind, scope, value) in checks {
+            let key = self.make_key(kind.clone(), scope.clone(), value);
+            let status = self.check_key_with_status(&key);
+
+            let scope_type = match scope {
+                RateLimitScope::Global => "Global".to_string(),
+                RateLimitScope::Route(_) => "Route".to_string(),
+            };
+
+            results.push(RateLimitCheckResult {
+                kind: kind.clone(),
+                scope_type,
+                value: value.clone(),
+                status: status.clone(),
+            });
+
+            // Overall result is false only if any check is Declined
+            if status == RateLimitCheckStatus::Declined {
+                all_allowed = false;
+            }
+        }
+
+        RateLimitCheckResults {
+            checks: results,
+            allowed: all_allowed,
+        }
     }
 
     /// Cleanup expired buckets

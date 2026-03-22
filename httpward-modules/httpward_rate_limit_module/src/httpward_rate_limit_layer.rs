@@ -11,9 +11,6 @@
 // - Fingerprint-aware limits
 // - Storage-backed limiter state
 
-// TODO: Implement HttpWardRateLimitLayer
-// This will be a middleware that handles request rate limiting
-
 use async_trait::async_trait;
 use httpward_core::core::HttpWardContext;
 use httpward_core::core::server_models::server_instance::ServerInstance;
@@ -159,7 +156,7 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
 
                 let route_key = RouteScopeKey::from_arc_ptr(&route_with_strategy.route);
                 if let Err(e) = manager
-                    .init_from_config_sync(&site_name, Some(route_key), &config)
+                    .init_from_config_sync(Some(route_key), &config)
                     .map_err(|e| format!("Failed to init config: {}", e))
                 {
                     module_log_error!(
@@ -182,10 +179,6 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
     ) -> Result<Response<Body>, BoxError> {
         let httpward_ctx = ctx.get_httpward_context();
 
-        let site_name = httpward_ctx
-            .and_then(|c| c.site_domains())
-            .unwrap_or_else(|| "default".to_string());
-
         let route_key = httpward_ctx.and_then(matched_route_key);
         let route_scope = httpward_ctx.and_then(matched_route_label);
         let manager = init_global_manager();
@@ -193,9 +186,7 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
         let config = if let Some(httpward_ctx) = httpward_ctx {
             load_config_from_context(httpward_ctx)
         } else {
-            module_log_warn!(
-                "HttpWardContext not found, rate limiter will use default site scope only"
-            );
+            module_log_warn!("HttpWardContext not found, rate limiter will use default scope");
             std::sync::Arc::new(HttpWardRateLimitConfig::default())
         };
 
@@ -229,9 +220,8 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
 
         let header_fp = extract_header_fingerprint(req.headers());
 
-        let mut rate_limit_context = HttpWardRateLimitContext::new()
-            .with_site_name(site_name.clone())
-            .with_client_ip(client_ip.clone());
+        let mut rate_limit_context =
+            HttpWardRateLimitContext::new().with_client_ip(client_ip.clone());
 
         if let Some(route_scope) = route_scope.clone() {
             rate_limit_context = rate_limit_context.with_matched_route_scope(route_scope);
@@ -256,8 +246,7 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
         }
 
         module_log_info!(
-            "HttpWardRateLimitLayer: Starting rate-limit check for site '{}' and scope {:?}",
-            site_name,
+            "HttpWardRateLimitLayer: Starting rate-limit check for scope {:?}",
             route_scope
         );
 
@@ -305,18 +294,16 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
 
         if checks.is_empty() {
             module_log_debug!(
-                "HttpWardRateLimitLayer: No active rules for site '{}', skipping rate-limit checks",
-                site_name
+                "HttpWardRateLimitLayer: No active rules, skipping rate-limit checks"
             );
             return next.run(ctx, req).await;
         }
 
-        match manager.check_all(&site_name, &checks).await {
+        match manager.check_all(&checks).await {
             Ok(allowed) => {
                 if !allowed {
                     module_log_warn!(
-                        "HttpWardRateLimitLayer: Request rate limited for site '{}', scope {:?}, IP: {}",
-                        site_name,
+                        "HttpWardRateLimitLayer: Request rate limited, scope {:?}, IP: {}",
                         route_scope,
                         client_ip
                     );
@@ -333,8 +320,7 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
             }
             Err(error) => {
                 module_log_error!(
-                    "HttpWardRateLimitLayer: Error checking rate limits for site '{}': {}",
-                    site_name,
+                    "HttpWardRateLimitLayer: Error checking rate limits: {}",
                     error
                 );
             }

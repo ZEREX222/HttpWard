@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 /// Request-scoped data produced by the rate limit middleware.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HttpWardRateLimitContext {
-    /// Site name resolved by HttpWard.
-    pub site_name: Option<String>,
     /// Client IP used for IP based limiting.
     pub client_ip: Option<String>,
     /// Route scope derived from `HttpWardContext.matched_route`.
@@ -19,11 +17,6 @@ impl HttpWardRateLimitContext {
     /// Create new rate limit context.
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn with_site_name(mut self, site_name: String) -> Self {
-        self.site_name = Some(site_name);
-        self
     }
 
     pub fn with_client_ip(mut self, client_ip: String) -> Self {
@@ -47,7 +40,6 @@ impl HttpWardRateLimitContext {
     }
 
     pub fn clear(&mut self) {
-        self.site_name = None;
         self.client_ip = None;
         self.matched_route_scope = None;
         self.header_fp = None;

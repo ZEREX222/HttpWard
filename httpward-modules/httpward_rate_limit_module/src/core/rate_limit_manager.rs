@@ -1,20 +1,21 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use tokio::sync::Mutex;
-
-use super::rate_limiter::{RateLimitKeyKind, RateLimitScope, RateLimiter, RouteScopeKey};
+use super::rate_limiter::{
+    RateLimitCheckResults, RateLimitKeyKind, RateLimitScope, RateLimiter, RouteScopeKey,
+};
 
 #[derive(Debug, Clone, Copy)]
-pub struct SiteRateLimitSettings {
+pub struct RateLimitSettings {
     pub max_entries: usize,
     pub idle_ttl: Duration,
     pub cleanup_interval: Duration,
 }
 
-impl Default for SiteRateLimitSettings {
+impl Default for RateLimitSettings {
     fn default() -> Self {
         Self {
             max_entries: 100_000,
@@ -24,9 +25,7 @@ impl Default for SiteRateLimitSettings {
     }
 }
 
-impl From<&super::httpward_rate_limit_config::InternalRateLimitStoreConfig>
-    for SiteRateLimitSettings
-{
+impl From<&super::httpward_rate_limit_config::InternalRateLimitStoreConfig> for RateLimitSettings {
     fn from(value: &super::httpward_rate_limit_config::InternalRateLimitStoreConfig) -> Self {
         Self {
             max_entries: value.max_entries.max(1),
@@ -37,20 +36,22 @@ impl From<&super::httpward_rate_limit_config::InternalRateLimitStoreConfig>
 }
 
 #[derive(Debug)]
-struct SiteState {
+struct ManagerState {
     limiter: RateLimiter,
+    settings_initialized: bool,
     global_rules_initialized: bool,
     initialized_route_scopes: HashSet<RouteScopeKey>,
 }
 
-impl SiteState {
-    fn new(settings: SiteRateLimitSettings) -> Self {
+impl ManagerState {
+    fn new(settings: RateLimitSettings) -> Self {
         Self {
             limiter: RateLimiter::new(
                 settings.max_entries,
                 settings.idle_ttl,
                 settings.cleanup_interval,
             ),
+            settings_initialized: false,
             global_rules_initialized: false,
             initialized_route_scopes: HashSet::new(),
         }
@@ -59,88 +60,65 @@ impl SiteState {
 
 /// Global thread-safe rate limit manager.
 pub struct RateLimitManager {
-    sites: Arc<RwLock<HashMap<String, Arc<Mutex<SiteState>>>>>,
+    state: Arc<Mutex<ManagerState>>,
 }
 
 impl RateLimitManager {
     pub fn new() -> Self {
         Self {
-            sites: Arc::new(RwLock::new(HashMap::new())),
+            state: Arc::new(Mutex::new(ManagerState::new(RateLimitSettings::default()))),
         }
     }
 
-    pub fn init_site(
+    async fn init_settings_from_store_once(
         &self,
-        site_name: &str,
-        settings: SiteRateLimitSettings,
-    ) -> Result<(), String> {
-        let mut sites = self
-            .sites
-            .write()
-            .map_err(|e| format!("Failed to acquire write lock on rate-limit sites: {e}"))?;
-
-        sites
-            .entry(site_name.to_string())
-            .or_insert_with(|| Arc::new(Mutex::new(SiteState::new(settings))));
-
-        Ok(())
+        store: &super::httpward_rate_limit_config::InternalRateLimitStoreConfig,
+    ) {
+        let mut state = self.state.lock().unwrap();
+        if !state.settings_initialized {
+            let settings = RateLimitSettings::from(store);
+            state.limiter = RateLimiter::new(
+                settings.max_entries,
+                settings.idle_ttl,
+                settings.cleanup_interval,
+            );
+            state.settings_initialized = true;
+        }
     }
 
-    async fn get_site_state(&self, site_name: &str) -> Result<Arc<Mutex<SiteState>>, String> {
-        let sites = self
-            .sites
-            .read()
-            .map_err(|e| format!("Failed to acquire read lock on rate-limit sites: {e}"))?;
-
-        sites
-            .get(site_name)
-            .cloned()
-            .ok_or_else(|| format!("Rate-limit site '{site_name}' was not initialized"))
+    fn lock_state_sync(&self) -> Result<std::sync::MutexGuard<'_, ManagerState>, String> {
+        self.state.lock().map_err(|e| e.to_string())
     }
 
-    fn get_site_state_sync(&self, site_name: &str) -> Result<Arc<Mutex<SiteState>>, String> {
-        let sites = self
-            .sites
-            .read()
-            .map_err(|e| format!("Failed to acquire read lock on rate-limit sites: {e}"))?;
-
-        sites
-            .get(site_name)
-            .cloned()
-            .ok_or_else(|| format!("Rate-limit site '{site_name}' was not initialized"))
-    }
-
-    /// Initialize a site and register route/global rules from config.
+    /// Initialize manager and register route/global rules from config.
     pub async fn init_from_config(
         &self,
-        site_name: &str,
         matched_route_scope: Option<RouteScopeKey>,
         config: &super::httpward_rate_limit_config::HttpWardRateLimitConfig,
     ) -> Result<(), String> {
         let internal = config.to_internal();
-        self.init_site(site_name, SiteRateLimitSettings::from(&internal.store))?;
+        self.init_settings_from_store_once(&internal.store).await;
 
-        let site = self.get_site_state(site_name).await?;
-        let mut site = site.lock().await;
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
 
-        if !internal.global.is_empty() && !site.global_rules_initialized {
+        if !internal.global.is_empty() && !state.global_rules_initialized {
             for rule in &internal.global {
-                site.limiter.add_rule(
+                state.limiter.add_rule(
                     rule.key.clone(),
                     RateLimitScope::Global,
                     rule.to_runtime_rule(),
                 );
             }
 
-            site.global_rules_initialized = true;
+            state.global_rules_initialized = true;
         }
 
         if let Some(scope) = matched_route_scope
             && !internal.matched_route.is_empty()
-            && site.initialized_route_scopes.insert(scope)
+            && state.initialized_route_scopes.insert(scope)
         {
             for rule in &internal.matched_route {
-                site.limiter.add_rule(
+                state.limiter.add_rule(
                     rule.key.clone(),
                     RateLimitScope::Route(scope),
                     rule.to_runtime_rule(),
@@ -154,36 +132,40 @@ impl RateLimitManager {
     /// Synchronous variant used during middleware startup initialization.
     pub fn init_from_config_sync(
         &self,
-        site_name: &str,
         matched_route_scope: Option<RouteScopeKey>,
         config: &super::httpward_rate_limit_config::HttpWardRateLimitConfig,
     ) -> Result<(), String> {
         let internal = config.to_internal();
-        self.init_site(site_name, SiteRateLimitSettings::from(&internal.store))?;
+        let mut state = self.lock_state_sync()?;
 
-        let site = self.get_site_state_sync(site_name)?;
-        let mut site = site.try_lock().map_err(|_| {
-            format!("Rate-limit site '{site_name}' state is busy during startup init")
-        })?;
+        if !state.settings_initialized {
+            let settings = RateLimitSettings::from(&internal.store);
+            state.limiter = RateLimiter::new(
+                settings.max_entries,
+                settings.idle_ttl,
+                settings.cleanup_interval,
+            );
+            state.settings_initialized = true;
+        }
 
-        if !internal.global.is_empty() && !site.global_rules_initialized {
+        if !internal.global.is_empty() && !state.global_rules_initialized {
             for rule in &internal.global {
-                site.limiter.add_rule(
+                state.limiter.add_rule(
                     rule.key.clone(),
                     RateLimitScope::Global,
                     rule.to_runtime_rule(),
                 );
             }
 
-            site.global_rules_initialized = true;
+            state.global_rules_initialized = true;
         }
 
         if let Some(scope) = matched_route_scope
             && !internal.matched_route.is_empty()
-            && site.initialized_route_scopes.insert(scope)
+            && state.initialized_route_scopes.insert(scope)
         {
             for rule in &internal.matched_route {
-                site.limiter.add_rule(
+                state.limiter.add_rule(
                     rule.key.clone(),
                     RateLimitScope::Route(scope),
                     rule.to_runtime_rule(),
@@ -196,26 +178,22 @@ impl RateLimitManager {
 
     pub async fn check(
         &self,
-        site_name: &str,
         kind: RateLimitKeyKind,
         scope: RateLimitScope,
         value: &str,
     ) -> Result<bool, String> {
-        let site = self.get_site_state(site_name).await?;
-        let mut site = site.lock().await;
-        Ok(site.limiter.check(kind, scope, value))
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        Ok(state.limiter.check(kind, scope, value))
     }
 
     pub async fn check_all(
         &self,
-        site_name: &str,
         checks: &[(RateLimitKeyKind, RateLimitScope, String)],
     ) -> Result<bool, String> {
-        let site = self.get_site_state(site_name).await?;
-        let mut site = site.lock().await;
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
 
         for (kind, scope, value) in checks {
-            if !site.limiter.check(kind.clone(), scope.clone(), value) {
+            if !state.limiter.check(kind.clone(), scope.clone(), value) {
                 return Ok(false);
             }
         }
@@ -223,39 +201,28 @@ impl RateLimitManager {
         Ok(true)
     }
 
-    pub async fn cleanup_site(&self, site_name: &str) -> Result<(), String> {
-        let site = self.get_site_state(site_name).await?;
-        let mut site = site.lock().await;
-        site.limiter.cleanup();
-        Ok(())
+    pub async fn check_all_with_results(
+        &self,
+        checks: &[(RateLimitKeyKind, RateLimitScope, String)],
+    ) -> Result<RateLimitCheckResults, String> {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        Ok(state.limiter.check_with_results(checks))
     }
 
     pub async fn cleanup_all(&self) -> Result<(), String> {
-        let site_states: Vec<_> = {
-            let sites = self
-                .sites
-                .read()
-                .map_err(|e| format!("Failed to acquire read lock on rate-limit sites: {e}"))?;
-            sites.values().cloned().collect()
-        };
-
-        for site in site_states {
-            let mut site = site.lock().await;
-            site.limiter.cleanup();
-        }
-
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.limiter.cleanup();
         Ok(())
     }
 
-    pub async fn stats(&self, site_name: &str) -> Result<RateLimiterStats, String> {
-        let site = self.get_site_state(site_name).await?;
-        let site = site.lock().await;
+    pub async fn stats(&self) -> Result<RateLimiterStats, String> {
+        let state = self.state.lock().map_err(|e| e.to_string())?;
 
         Ok(RateLimiterStats {
-            bucket_count: site.limiter.bucket_count(),
-            rule_count: site.limiter.rule_count(),
-            initialized_route_scope_count: site.initialized_route_scopes.len(),
-            global_rules_initialized: site.global_rules_initialized,
+            bucket_count: state.limiter.bucket_count(),
+            rule_count: state.limiter.rule_count(),
+            initialized_route_scope_count: state.initialized_route_scopes.len(),
+            global_rules_initialized: state.global_rules_initialized,
         })
     }
 }
@@ -288,34 +255,47 @@ pub fn get_global_manager() -> Option<&'static RateLimitManager> {
 mod tests {
     use super::*;
     use crate::RateLimitStrategy;
+    use std::sync::Barrier;
+    use std::thread;
 
-    #[tokio::test]
-    async fn test_manager_initializes_site_once() {
+    #[test]
+    fn test_manager_initializes_once() {
         let manager = RateLimitManager::new();
 
         manager
-            .init_site(
-                "test.local",
-                SiteRateLimitSettings {
-                    max_entries: 1_000,
-                    idle_ttl: Duration::from_secs(60),
-                    cleanup_interval: Duration::from_secs(10),
+            .init_from_config_sync(
+                None,
+                &crate::core::HttpWardRateLimitConfig {
+                    global_config: Some(crate::core::RateLimitStoreConfig {
+                        max_entries: Some(1_000),
+                        idle_ttl_sec: Some(60),
+                        cleanup_interval_sec: Some(10),
+                    }),
+                    global_rules: vec![],
+                    current_site_rules: vec![],
+                    response: None,
                 },
             )
             .unwrap();
 
         manager
-            .init_site(
-                "test.local",
-                SiteRateLimitSettings {
-                    max_entries: 5,
-                    idle_ttl: Duration::from_secs(1),
-                    cleanup_interval: Duration::from_secs(1),
+            .init_from_config_sync(
+                None,
+                &crate::core::HttpWardRateLimitConfig {
+                    global_config: Some(crate::core::RateLimitStoreConfig {
+                        max_entries: Some(5),
+                        idle_ttl_sec: Some(1),
+                        cleanup_interval_sec: Some(1),
+                    }),
+                    global_rules: vec![],
+                    current_site_rules: vec![],
+                    response: None,
                 },
             )
             .unwrap();
 
-        let stats = manager.stats("test.local").await.unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let stats = rt.block_on(manager.stats()).unwrap();
         assert_eq!(stats.rule_count, 0);
     }
 
@@ -356,7 +336,7 @@ mod tests {
         };
 
         manager
-            .init_from_config("test.local", Some(route_key), &config)
+            .init_from_config(Some(route_key), &config)
             .await
             .unwrap();
 
@@ -373,7 +353,64 @@ mod tests {
             ),
         ];
 
-        assert!(manager.check_all("test.local", &checks).await.unwrap());
-        assert!(!manager.check_all("test.local", &checks).await.unwrap());
+        assert!(manager.check_all(&checks).await.unwrap());
+        assert!(!manager.check_all(&checks).await.unwrap());
+    }
+
+    #[test]
+    fn test_manager_sync_init_is_thread_safe() {
+        let manager = Arc::new(RateLimitManager::new());
+        let barrier = Arc::new(Barrier::new(8));
+        let mut handles = Vec::new();
+
+        for _ in 0..8 {
+            let manager = Arc::clone(&manager);
+            let barrier = Arc::clone(&barrier);
+
+            handles.push(thread::spawn(move || {
+                let config = crate::core::HttpWardRateLimitConfig {
+                    global_config: Some(crate::core::RateLimitStoreConfig {
+                        max_entries: Some(1_000),
+                        idle_ttl_sec: Some(60),
+                        cleanup_interval_sec: Some(10),
+                    }),
+                    global_rules: vec![],
+                    current_site_rules: vec![],
+                    response: None,
+                };
+
+                barrier.wait();
+                manager.init_from_config_sync(None, &config)
+            }));
+        }
+
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_manager_sync_init_inside_tokio_runtime() {
+        let manager = Arc::new(RateLimitManager::new());
+
+        let join = tokio::spawn({
+            let manager = Arc::clone(&manager);
+            async move {
+                let config = crate::core::HttpWardRateLimitConfig {
+                    global_config: Some(crate::core::RateLimitStoreConfig {
+                        max_entries: Some(1_000),
+                        idle_ttl_sec: Some(60),
+                        cleanup_interval_sec: Some(10),
+                    }),
+                    global_rules: vec![],
+                    current_site_rules: vec![],
+                    response: None,
+                };
+
+                manager.init_from_config_sync(None, &config)
+            }
+        });
+
+        assert!(join.await.unwrap().is_ok());
     }
 }
