@@ -22,6 +22,7 @@ mod integration_tests {
                 capacity: 50,
                 refill_every: Duration::from_millis(200), // 10s / 50 = 200ms
                 refill_amount: 1,
+                cooldown: Duration::ZERO,
             },
         );
 
@@ -52,6 +53,7 @@ mod integration_tests {
                 capacity: 50,
                 refill_every: Duration::from_secs(2),
                 refill_amount: 1,
+                cooldown: Duration::ZERO,
             },
         );
 
@@ -82,6 +84,7 @@ mod integration_tests {
                 capacity: 10,
                 refill_every: Duration::from_secs(3600),
                 refill_amount: 10, // Complete refill
+                cooldown: Duration::ZERO,
             },
         );
 
@@ -137,6 +140,7 @@ mod integration_tests {
                     refill_every: window,
                     refill_amount: 1,
                     strategy,
+                    cooldown: Duration::ZERO,
                 };
 
             let runtime_rule = rule.to_runtime_rule();
@@ -155,6 +159,7 @@ mod integration_tests {
             refill_every: Duration::from_secs(10),
             refill_amount: 1,
             strategy: RateLimitStrategy::Sliding,
+            cooldown: Duration::ZERO,
         };
 
         let runtime_rule = rule.to_runtime_rule();
@@ -171,6 +176,7 @@ mod integration_tests {
                 max_requests: 50,
                 window: "10s".to_string(),
                 strategy: RateLimitStrategy::Sliding,
+                cooldown: None,
             },
         );
 
@@ -181,6 +187,7 @@ mod integration_tests {
                 max_requests: 1000,
                 window: "300s".to_string(),
                 strategy: RateLimitStrategy::Burst,
+                cooldown: None,
             },
         );
 

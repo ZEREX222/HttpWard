@@ -215,6 +215,50 @@ impl RateLimitManager {
         Ok(())
     }
 
+    /// Reset the cooldown for a specific client value (e.g. an IP address or
+    /// JA4 fingerprint string).
+    ///
+    /// The `value` must match the raw string that was originally passed to
+    /// `check` / `check_all` on every request so the bucket key matches.
+    pub async fn reset_cooldown(
+        &self,
+        kind: RateLimitKeyKind,
+        scope: RateLimitScope,
+        value: &str,
+    ) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.limiter.reset_cooldown(kind, scope, value);
+        Ok(())
+    }
+
+    /// Reset cooldowns for **all** tracked buckets regardless of kind or scope.
+    pub async fn reset_all_cooldowns(&self) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.limiter.reset_all_cooldowns();
+        Ok(())
+    }
+
+    /// Restore tokens to full capacity for a specific client value and clear
+    /// any active cooldown on that bucket.
+    pub async fn restore_tokens(
+        &self,
+        kind: RateLimitKeyKind,
+        scope: RateLimitScope,
+        value: &str,
+    ) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.limiter.restore_tokens(kind, scope, value);
+        Ok(())
+    }
+
+    /// Restore tokens to full capacity for **all** tracked buckets and clear
+    /// every active cooldown.
+    pub async fn restore_all_tokens(&self) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|e| e.to_string())?;
+        state.limiter.restore_all_tokens();
+        Ok(())
+    }
+
     pub async fn stats(&self) -> Result<RateLimiterStats, String> {
         let state = self.state.lock().map_err(|e| e.to_string())?;
 
@@ -330,6 +374,7 @@ mod tests {
                 max_requests: 2,
                 window: "1s".to_string(),
                 strategy: RateLimitStrategy::Sliding, // Explicitly set for test
+                cooldown: None,
             },
         );
 
@@ -340,6 +385,7 @@ mod tests {
                 max_requests: 1,
                 window: "1s".to_string(),
                 strategy: RateLimitStrategy::Sliding, // Explicitly set for test
+                cooldown: None,
             },
         );
 

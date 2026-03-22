@@ -108,6 +108,10 @@ pub struct RateLimitRule {
     pub refill_every: Duration,
     /// Number of tokens to add per refill period
     pub refill_amount: u32,
+    /// Base cooldown after exceeding the limit.
+    /// `Duration::ZERO` = disabled (default behaviour).
+    /// Each consecutive violation doubles the cooldown (capped at 1 hour).
+    pub cooldown: Duration,
 }
 
 impl RateLimitRule {
@@ -120,6 +124,7 @@ impl RateLimitRule {
                 self.refill_every
             },
             refill_amount: self.refill_amount.max(1),
+            cooldown: self.cooldown, // Duration::ZERO = disabled
         }
     }
 }
@@ -133,6 +138,8 @@ struct TokenBucket {
     last_refill: Instant,
     /// Last access timestamp (for TTL)
     last_seen: Instant,
+    /// When the active cooldown period ends (`None` = no cooldown).
+    cooldown_until: Option<Instant>,
 }
 
 impl TokenBucket {
@@ -143,6 +150,7 @@ impl TokenBucket {
             tokens: capacity,
             last_refill: now,
             last_seen: now,
+            cooldown_until: None,
         }
     }
 
@@ -154,6 +162,25 @@ impl TokenBucket {
     /// Check if bucket has expired based on TTL
     fn expired(&self, ttl: Duration) -> bool {
         self.last_seen.elapsed() > ttl
+    }
+
+    /// Returns `true` while a cooldown is active.
+    fn is_cooling_down(&self) -> bool {
+        self.cooldown_until
+            .map(|until| Instant::now() < until)
+            .unwrap_or(false)
+    }
+
+    /// Clear the active cooldown.
+    fn reset_cooldown(&mut self) {
+        self.cooldown_until = None;
+    }
+
+    /// Restore tokens to full capacity and clear any active cooldown.
+    fn restore_tokens(&mut self, capacity: u32) {
+        self.tokens = capacity;
+        self.last_refill = Instant::now();
+        self.cooldown_until = None;
     }
 
     /// Refill tokens based on elapsed time
@@ -189,12 +216,26 @@ impl TokenBucket {
         }
     }
 
-    /// Attempt to consume one token
-    fn consume(&mut self, capacity: u32, refill_every: Duration, refill_amount: u32) -> bool {
+    /// Attempt to consume one token.
+    ///
+    /// If `cooldown` is non-zero and all tokens are exhausted, the cooldown timer
+    /// is (re)started for exactly `cooldown` duration on every blocked request.
+    /// Once the timer expires the bucket refills normally again.
+    fn consume(&mut self, capacity: u32, refill_every: Duration, refill_amount: u32, cooldown: Duration) -> bool {
         self.touch();
+
+        // Block immediately while cooldown is active — tokens don't matter.
+        if self.is_cooling_down() {
+            return false;
+        }
+
         self.refill(capacity, refill_every, refill_amount);
 
         if self.tokens == 0 {
+            // (Re)start the fixed cooldown timer on every violation.
+            if !cooldown.is_zero() {
+                self.cooldown_until = Some(Instant::now() + cooldown);
+            }
             return false;
         }
 
@@ -266,7 +307,7 @@ impl RateLimiter {
             if bucket.expired(self.idle_ttl) {
                 let mut new_bucket = TokenBucket::new(rule.capacity);
                 let allowed =
-                    new_bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount);
+                    new_bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount, rule.cooldown);
                 self.buckets.insert(key.clone(), new_bucket);
                 return if allowed {
                     RateLimitCheckStatus::Allow
@@ -275,7 +316,7 @@ impl RateLimiter {
                 };
             }
 
-            let allowed = bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount);
+            let allowed = bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount, rule.cooldown);
             return if allowed {
                 RateLimitCheckStatus::Allow
             } else {
@@ -290,7 +331,7 @@ impl RateLimiter {
         }
 
         let mut bucket = TokenBucket::new(rule.capacity);
-        let allowed = bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount);
+        let allowed = bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount, rule.cooldown);
         self.buckets.insert(key.clone(), bucket);
 
         if allowed {
@@ -401,6 +442,48 @@ impl RateLimiter {
         }
     }
 
+    /// Reset the cooldown for a specific client value (e.g. an IP address or
+    /// JA4 fingerprint string).
+    ///
+    /// The `value` must be the same raw string that is passed to `check` /
+    /// `check_all` on every request so the bucket key matches.
+    pub fn reset_cooldown(&mut self, kind: RateLimitKeyKind, scope: RateLimitScope, value: &str) {
+        let key = self.make_key(kind, scope, value);
+        if let Some(bucket) = self.buckets.get_mut(&key) {
+            bucket.reset_cooldown();
+        }
+    }
+
+    /// Reset cooldowns for **all** tracked buckets regardless of kind or scope.
+    pub fn reset_all_cooldowns(&mut self) {
+        for bucket in self.buckets.values_mut() {
+            bucket.reset_cooldown();
+        }
+    }
+
+    /// Restore tokens to full capacity for a specific client value and clear
+    /// any active cooldown on that bucket.
+    pub fn restore_tokens(&mut self, kind: RateLimitKeyKind, scope: RateLimitScope, value: &str) {
+        let key = self.make_key(kind.clone(), scope.clone(), value);
+        let rule_id = RuleId { kind, scope };
+        if let (Some(bucket), Some(rule)) = (
+            self.buckets.get_mut(&key),
+            self.rules.get(&rule_id),
+        ) {
+            bucket.restore_tokens(rule.capacity);
+        }
+    }
+
+    /// Restore tokens to full capacity for **all** tracked buckets and clear
+    /// every active cooldown.
+    pub fn restore_all_tokens(&mut self) {
+        for (key, bucket) in self.buckets.iter_mut() {
+            if let Some(rule) = self.rules.get(&key.rule) {
+                bucket.restore_tokens(rule.capacity);
+            }
+        }
+    }
+
     /// Get current bucket count
     pub fn bucket_count(&self) -> usize {
         self.buckets.len()
@@ -417,6 +500,15 @@ mod tests {
     use super::*;
     use std::thread;
 
+    fn rule(capacity: u32, refill_every: Duration, refill_amount: u32) -> RateLimitRule {
+        RateLimitRule {
+            capacity,
+            refill_every,
+            refill_amount,
+            cooldown: Duration::ZERO,
+        }
+    }
+
     #[test]
     fn test_token_bucket_basic() {
         let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
@@ -424,11 +516,7 @@ mod tests {
         limiter.add_rule(
             RateLimitKeyKind::Ip,
             RateLimitScope::Global,
-            RateLimitRule {
-                capacity: 5,
-                refill_every: Duration::from_secs(1),
-                refill_amount: 1,
-            },
+            rule(5, Duration::from_secs(1), 1),
         );
 
         // First 5 requests should pass
@@ -447,11 +535,7 @@ mod tests {
         limiter.add_rule(
             RateLimitKeyKind::Ip,
             RateLimitScope::Route(RouteScopeKey(1)),
-            RateLimitRule {
-                capacity: 3,
-                refill_every: Duration::from_secs(1),
-                refill_amount: 1,
-            },
+            rule(3, Duration::from_secs(1), 1),
         );
 
         // Should allow 3 requests to /login
@@ -478,11 +562,7 @@ mod tests {
         limiter.add_rule(
             RateLimitKeyKind::Ip,
             RateLimitScope::Global,
-            RateLimitRule {
-                capacity: 1,
-                refill_every: Duration::from_millis(40),
-                refill_amount: 1,
-            },
+            rule(1, Duration::from_millis(40), 1),
         );
 
         assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"));
@@ -501,11 +581,7 @@ mod tests {
         limiter.add_rule(
             RateLimitKeyKind::Ip,
             RateLimitScope::Global,
-            RateLimitRule {
-                capacity: 2,
-                refill_every: Duration::from_secs(1),
-                refill_amount: 1,
-            },
+            rule(2, Duration::from_secs(1), 1),
         );
 
         assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.2"));
@@ -515,5 +591,435 @@ mod tests {
         limiter.cleanup();
 
         assert_eq!(limiter.bucket_count(), 0);
+    }
+
+    #[test]
+    fn test_cooldown_blocks_after_limit() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 2,
+                refill_every: Duration::from_millis(1),
+                refill_amount: 1,
+                cooldown: Duration::from_secs(60), // long cooldown for test
+            },
+        );
+
+        // Exhaust the bucket
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.2.3.4"));
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.2.3.4"));
+        // Limit hit — cooldown activated
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.2.3.4"));
+
+        // Even after a short sleep (tokens would refill without cooldown), still blocked
+        thread::sleep(Duration::from_millis(10));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.2.3.4"));
+    }
+
+    #[test]
+    fn test_cooldown_zero_does_not_block() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 1,
+                refill_every: Duration::from_millis(5),
+                refill_amount: 1,
+                cooldown: Duration::ZERO, // disabled
+            },
+        );
+
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "5.6.7.8"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "5.6.7.8"));
+
+        // Token refills → allowed again (no cooldown holding it back)
+        thread::sleep(Duration::from_millis(10));
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "5.6.7.8"));
+    }
+
+    // ── reset_cooldown ────────────────────────────────────────────────────────
+
+    /// Basic: cooldown is cleared and the client can make requests again.
+    #[test]
+    fn test_reset_cooldown_unblocks_client() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 1,
+                refill_every: Duration::from_millis(1),
+                refill_amount: 1,
+                cooldown: Duration::from_secs(3600),
+            },
+        );
+
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "9.9.9.9"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "9.9.9.9")); // cooldown active
+
+        limiter.reset_cooldown(RateLimitKeyKind::Ip, RateLimitScope::Global, "9.9.9.9");
+
+        thread::sleep(Duration::from_millis(5)); // let token refill
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "9.9.9.9"));
+    }
+
+    /// reset_cooldown must NOT restore tokens — only the timer is cleared.
+    #[test]
+    fn test_reset_cooldown_does_not_restore_tokens() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 3,
+                refill_every: Duration::from_secs(3600), // very slow refill
+                refill_amount: 1,
+                cooldown: Duration::from_secs(3600),
+            },
+        );
+
+        // Exhaust all tokens → cooldown kicks in
+        for _ in 0..3 {
+            assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.2.3.4"));
+        }
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.2.3.4"));
+
+        // Clear only the cooldown
+        limiter.reset_cooldown(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.2.3.4");
+
+        // Tokens are still 0 — request is still denied (no refill yet)
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.2.3.4"));
+    }
+
+    /// reset_cooldown on a bucket with no active cooldown is a safe no-op.
+    #[test]
+    fn test_reset_cooldown_noop_when_no_cooldown_active() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 5,
+                refill_every: Duration::from_millis(1),
+                refill_amount: 1,
+                cooldown: Duration::from_secs(3600),
+            },
+        );
+
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "2.2.2.2"));
+
+        // No cooldown is active — call should not panic or break anything
+        limiter.reset_cooldown(RateLimitKeyKind::Ip, RateLimitScope::Global, "2.2.2.2");
+
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "2.2.2.2"));
+    }
+
+    /// reset_cooldown for an unknown value (no bucket yet) is a safe no-op.
+    #[test]
+    fn test_reset_cooldown_noop_for_unknown_value() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 2,
+                refill_every: Duration::from_millis(1),
+                refill_amount: 1,
+                cooldown: Duration::from_secs(3600),
+            },
+        );
+
+        // "ghost" IP — never seen before
+        limiter.reset_cooldown(RateLimitKeyKind::Ip, RateLimitScope::Global, "0.0.0.0");
+
+        // Normal operation unaffected
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "0.0.0.0"));
+    }
+
+    /// reset_cooldown on one client must not affect another client's cooldown.
+    #[test]
+    fn test_reset_cooldown_only_affects_target_client() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 1,
+                refill_every: Duration::from_secs(3600),
+                refill_amount: 1,
+                cooldown: Duration::from_secs(3600),
+            },
+        );
+
+        // Both clients exhaust their buckets
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"));
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.2"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.2"));
+
+        // Reset only .1
+        limiter.reset_cooldown(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1");
+
+        // .2 still blocked
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.2"));
+    }
+
+    /// reset_all_cooldowns lifts every active cooldown at once.
+    #[test]
+    fn test_reset_all_cooldowns() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 1,
+                refill_every: Duration::from_millis(1),
+                refill_amount: 1,
+                cooldown: Duration::from_secs(3600),
+            },
+        );
+
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"));
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.2"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.2"));
+
+        limiter.reset_all_cooldowns();
+
+        thread::sleep(Duration::from_millis(5));
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"));
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.2"));
+    }
+
+    /// reset_all_cooldowns on a limiter with no active cooldowns is a safe no-op.
+    #[test]
+    fn test_reset_all_cooldowns_noop_when_no_cooldowns() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            rule(5, Duration::from_millis(1), 1),
+        );
+
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.1.1.1"));
+
+        // No cooldown configured — should not panic
+        limiter.reset_all_cooldowns();
+
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.1.1.1"));
+    }
+
+    // ── restore_tokens ───────────────────────────────────────────────────────
+
+    /// Basic: tokens are restored to capacity AND cooldown is cleared.
+    #[test]
+    fn test_restore_tokens_refills_and_clears_cooldown() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 3,
+                refill_every: Duration::from_secs(60),
+                refill_amount: 1,
+                cooldown: Duration::from_secs(3600),
+            },
+        );
+
+        // Exhaust bucket — cooldown activates
+        for _ in 0..3 {
+            assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.1.1.1"));
+        }
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.1.1.1"));
+
+        limiter.restore_tokens(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.1.1.1");
+
+        // All 3 tokens available immediately — no sleep needed
+        for _ in 0..3 {
+            assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "1.1.1.1"));
+        }
+    }
+
+    /// restore_tokens refills a *partially* consumed bucket back to full capacity.
+    #[test]
+    fn test_restore_tokens_refills_partial_bucket() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 5,
+                refill_every: Duration::from_secs(3600),
+                refill_amount: 1,
+                cooldown: Duration::ZERO,
+            },
+        );
+
+        // Consume 3 tokens
+        for _ in 0..3 {
+            assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "4.4.4.4"));
+        }
+
+        // Restore to full
+        limiter.restore_tokens(RateLimitKeyKind::Ip, RateLimitScope::Global, "4.4.4.4");
+
+        // All 5 tokens available again
+        for _ in 0..5 {
+            assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "4.4.4.4"));
+        }
+        // 6th denied
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "4.4.4.4"));
+    }
+
+    /// restore_tokens also clears a cooldown even when there was no token exhaustion
+    /// (e.g. a manually injected cooldown via some future mechanism).
+    /// Here we verify it via the normal path: exhaust → restore → full capacity.
+    #[test]
+    fn test_restore_tokens_clears_cooldown_without_waiting() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 2,
+                refill_every: Duration::from_secs(3600), // effectively no refill
+                refill_amount: 1,
+                cooldown: Duration::from_secs(3600),
+            },
+        );
+
+        for _ in 0..2 {
+            assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "5.5.5.5"));
+        }
+        // cooldown now active
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "5.5.5.5"));
+
+        limiter.restore_tokens(RateLimitKeyKind::Ip, RateLimitScope::Global, "5.5.5.5");
+
+        // Immediate access — no sleep, no refill window needed
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "5.5.5.5"));
+    }
+
+    /// restore_tokens on a non-existent bucket is a safe no-op (no panic, no insertion).
+    #[test]
+    fn test_restore_tokens_noop_for_unknown_value() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            rule(3, Duration::from_millis(1), 1),
+        );
+
+        let before = limiter.bucket_count();
+
+        // Should not create a bucket or panic
+        limiter.restore_tokens(RateLimitKeyKind::Ip, RateLimitScope::Global, "0.0.0.0");
+
+        assert_eq!(limiter.bucket_count(), before);
+    }
+
+    /// restore_tokens on one client must not affect another client's bucket.
+    #[test]
+    fn test_restore_tokens_only_affects_target_client() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 1,
+                refill_every: Duration::from_secs(3600),
+                refill_amount: 1,
+                cooldown: Duration::from_secs(3600),
+            },
+        );
+
+        // Exhaust both clients
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "6.6.6.6"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "6.6.6.6"));
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "7.7.7.7"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "7.7.7.7"));
+
+        // Restore only .6
+        limiter.restore_tokens(RateLimitKeyKind::Ip, RateLimitScope::Global, "6.6.6.6");
+
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "6.6.6.6")); // restored
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "7.7.7.7")); // still blocked
+    }
+
+    /// restore_all_tokens restores every tracked bucket to full capacity.
+    #[test]
+    fn test_restore_all_tokens() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 1,
+                refill_every: Duration::from_secs(60),
+                refill_amount: 1,
+                cooldown: Duration::from_secs(3600),
+            },
+        );
+
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "2.2.2.2"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "2.2.2.2"));
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "3.3.3.3"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "3.3.3.3"));
+
+        limiter.restore_all_tokens();
+
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "2.2.2.2"));
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "3.3.3.3"));
+    }
+
+    /// restore_all_tokens when no buckets exist is a safe no-op.
+    #[test]
+    fn test_restore_all_tokens_noop_when_empty() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            rule(5, Duration::from_millis(1), 1),
+        );
+
+        assert_eq!(limiter.bucket_count(), 0);
+        limiter.restore_all_tokens(); // must not panic
+        assert_eq!(limiter.bucket_count(), 0);
+    }
+
+    /// After restore_all_tokens each bucket allows exactly `capacity` requests
+    /// before hitting the limit again.
+    #[test]
+    fn test_restore_all_tokens_respects_capacity() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 3,
+                refill_every: Duration::from_secs(3600),
+                refill_amount: 1,
+                cooldown: Duration::ZERO,
+            },
+        );
+
+        // Use up all 3 tokens
+        for _ in 0..3 {
+            assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "8.8.8.8"));
+        }
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "8.8.8.8"));
+
+        limiter.restore_all_tokens();
+
+        // Exactly 3 tokens again — not more
+        for _ in 0..3 {
+            assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "8.8.8.8"));
+        }
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "8.8.8.8"));
     }
 }

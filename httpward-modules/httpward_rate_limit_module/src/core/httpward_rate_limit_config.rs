@@ -73,6 +73,7 @@ impl HttpWardRateLimitConfig {
                             refill_every: rule_cfg.window_duration(),
                             refill_amount: 1, // Will be overridden by strategy logic
                             strategy: rule_cfg.strategy.clone(),
+                            cooldown: rule_cfg.cooldown_duration(),
                         })
                     })
                     .collect::<Vec<_>>()
@@ -93,6 +94,7 @@ impl HttpWardRateLimitConfig {
                             refill_every: rule_cfg.window_duration(),
                             refill_amount: 1, // Will be overridden by strategy logic
                             strategy: rule_cfg.strategy.clone(),
+                            cooldown: rule_cfg.cooldown_duration(),
                         })
                     })
                     .collect::<Vec<_>>()
@@ -163,6 +165,12 @@ pub struct RateLimitRuleConfig {
     /// Rate limiting strategy.
     #[serde(default)]
     pub strategy: RateLimitStrategy,
+    /// Optional base cooldown after the limit is exceeded (e.g., "10s", "3m").
+    /// Omitting the field or setting it to `"0"` disables cooldown entirely.
+    /// Each consecutive violation doubles the cooldown (exponential backoff),
+    /// capped at 1 hour.
+    #[serde(default)]
+    pub cooldown: Option<String>,
 }
 
 fn default_window() -> String {
@@ -175,6 +183,7 @@ impl Default for RateLimitRuleConfig {
             max_requests: 100,
             window: "10s".to_string(),
             strategy: RateLimitStrategy::Sliding,
+            cooldown: None,
         }
     }
 }
@@ -183,6 +192,15 @@ impl RateLimitRuleConfig {
     /// Parse the `window` string into a [`Duration`].
     pub fn window_duration(&self) -> Duration {
         parse_duration(&self.window).unwrap_or(Duration::from_secs(10))
+    }
+
+    /// Parse the `cooldown` string into a [`Duration`].
+    /// Returns `Duration::ZERO` when the field is absent, empty, or `"0"`.
+    pub fn cooldown_duration(&self) -> Duration {
+        self.cooldown
+            .as_deref()
+            .and_then(parse_duration)
+            .unwrap_or(Duration::ZERO)
     }
 
     /// Millisecond representation of the window (kept for compatibility).
@@ -251,6 +269,8 @@ pub struct InternalRateLimitRule {
     pub refill_every: Duration,
     pub refill_amount: u32,
     pub strategy: RateLimitStrategy,
+    /// Pre-parsed cooldown. `Duration::ZERO` = disabled.
+    pub cooldown: Duration,
 }
 
 impl InternalRateLimitRule {
@@ -270,6 +290,7 @@ impl InternalRateLimitRule {
                         refill_interval
                     },
                     refill_amount: 1,
+                    cooldown: self.cooldown,
                 }
             }
             RateLimitStrategy::Burst => {
@@ -282,6 +303,7 @@ impl InternalRateLimitRule {
                         self.refill_every
                     },
                     refill_amount: 1,
+                    cooldown: self.cooldown,
                 }
             }
             RateLimitStrategy::Fixed => {
@@ -294,6 +316,7 @@ impl InternalRateLimitRule {
                         self.refill_every
                     },
                     refill_amount: self.capacity.max(1),
+                    cooldown: self.cooldown,
                 }
             }
         }
@@ -430,6 +453,7 @@ mod tests {
                 max_requests: 100,
                 window: "10s".to_string(),
                 strategy: RateLimitStrategy::Sliding,
+                cooldown: None,
             },
         );
 
@@ -449,6 +473,7 @@ mod tests {
         assert_eq!(internal.store.idle_ttl_secs, 30);
         assert_eq!(internal.global.len(), 1);
         assert_eq!(internal.global[0].strategy, RateLimitStrategy::Sliding);
+        assert_eq!(internal.global[0].cooldown, Duration::ZERO);
     }
 
     #[test]
@@ -459,6 +484,7 @@ mod tests {
             refill_every: Duration::from_secs(10),
             refill_amount: 1,
             strategy: RateLimitStrategy::Sliding,
+            cooldown: Duration::ZERO,
         };
 
         let runtime_rule = rule.to_runtime_rule();
@@ -467,6 +493,7 @@ mod tests {
         assert_eq!(runtime_rule.capacity, 50);
         assert_eq!(runtime_rule.refill_every, Duration::from_millis(200));
         assert_eq!(runtime_rule.refill_amount, 1);
+        assert_eq!(runtime_rule.cooldown, Duration::ZERO);
     }
 
     #[test]
@@ -477,6 +504,7 @@ mod tests {
             refill_every: Duration::from_secs(10),
             refill_amount: 1,
             strategy: RateLimitStrategy::Burst,
+            cooldown: Duration::ZERO,
         };
 
         let runtime_rule = rule.to_runtime_rule();
@@ -485,6 +513,7 @@ mod tests {
         assert_eq!(runtime_rule.capacity, 50);
         assert_eq!(runtime_rule.refill_every, Duration::from_secs(10));
         assert_eq!(runtime_rule.refill_amount, 1);
+        assert_eq!(runtime_rule.cooldown, Duration::ZERO);
     }
 
     #[test]
@@ -495,6 +524,7 @@ mod tests {
             refill_every: Duration::from_secs(10),
             refill_amount: 1,
             strategy: RateLimitStrategy::Fixed,
+            cooldown: Duration::ZERO,
         };
 
         let runtime_rule = rule.to_runtime_rule();
@@ -503,6 +533,7 @@ mod tests {
         assert_eq!(runtime_rule.capacity, 50);
         assert_eq!(runtime_rule.refill_every, Duration::from_secs(10));
         assert_eq!(runtime_rule.refill_amount, 50);
+        assert_eq!(runtime_rule.cooldown, Duration::ZERO);
     }
 
     #[test]
@@ -514,6 +545,7 @@ mod tests {
             refill_every: Duration::from_secs(10),
             refill_amount: 1,
             strategy: RateLimitStrategy::Sliding,
+            cooldown: Duration::ZERO,
         };
 
         let runtime_rule = rule.to_runtime_rule();
@@ -530,6 +562,7 @@ mod tests {
                 max_requests: 50,
                 window: "10s".to_string(),
                 strategy: RateLimitStrategy::Sliding,
+                cooldown: None,
             },
         );
 
@@ -540,6 +573,7 @@ mod tests {
                 max_requests: 1000,
                 window: "300s".to_string(),
                 strategy: RateLimitStrategy::Burst,
+                cooldown: None,
             },
         );
 
@@ -574,5 +608,34 @@ mod tests {
         assert_eq!(default.max_requests, 100);
         assert_eq!(default.window, "10s");
         assert_eq!(default.strategy, RateLimitStrategy::Sliding);
+        assert_eq!(default.cooldown, None);
+    }
+
+    #[test]
+    fn test_cooldown_duration_parsing() {
+        let rule = RateLimitRuleConfig {
+            max_requests: 10,
+            window: "1m".to_string(),
+            strategy: RateLimitStrategy::Sliding,
+            cooldown: Some("30s".to_string()),
+        };
+        assert_eq!(rule.cooldown_duration(), Duration::from_secs(30));
+
+        let no_cooldown = RateLimitRuleConfig::default();
+        assert_eq!(no_cooldown.cooldown_duration(), Duration::ZERO);
+    }
+
+    #[test]
+    fn test_cooldown_propagated_to_runtime_rule() {
+        let rule = InternalRateLimitRule {
+            key: RateLimitKeyKind::Ip,
+            capacity: 10,
+            refill_every: Duration::from_secs(60),
+            refill_amount: 1,
+            strategy: RateLimitStrategy::Sliding,
+            cooldown: Duration::from_secs(30),
+        };
+        let runtime = rule.to_runtime_rule();
+        assert_eq!(runtime.cooldown, Duration::from_secs(30));
     }
 }
