@@ -221,7 +221,13 @@ impl TokenBucket {
     /// If `cooldown` is non-zero and all tokens are exhausted, the cooldown timer
     /// is (re)started for exactly `cooldown` duration on every blocked request.
     /// Once the timer expires the bucket refills normally again.
-    fn consume(&mut self, capacity: u32, refill_every: Duration, refill_amount: u32, cooldown: Duration) -> bool {
+    fn consume(
+        &mut self,
+        capacity: u32,
+        refill_every: Duration,
+        refill_amount: u32,
+        cooldown: Duration,
+    ) -> bool {
         self.touch();
 
         // Block immediately while cooldown is active — tokens don't matter.
@@ -306,8 +312,12 @@ impl RateLimiter {
             // If expired, recreate
             if bucket.expired(self.idle_ttl) {
                 let mut new_bucket = TokenBucket::new(rule.capacity);
-                let allowed =
-                    new_bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount, rule.cooldown);
+                let allowed = new_bucket.consume(
+                    rule.capacity,
+                    rule.refill_every,
+                    rule.refill_amount,
+                    rule.cooldown,
+                );
                 self.buckets.insert(key.clone(), new_bucket);
                 return if allowed {
                     RateLimitCheckStatus::Allow
@@ -316,7 +326,12 @@ impl RateLimiter {
                 };
             }
 
-            let allowed = bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount, rule.cooldown);
+            let allowed = bucket.consume(
+                rule.capacity,
+                rule.refill_every,
+                rule.refill_amount,
+                rule.cooldown,
+            );
             return if allowed {
                 RateLimitCheckStatus::Allow
             } else {
@@ -331,7 +346,12 @@ impl RateLimiter {
         }
 
         let mut bucket = TokenBucket::new(rule.capacity);
-        let allowed = bucket.consume(rule.capacity, rule.refill_every, rule.refill_amount, rule.cooldown);
+        let allowed = bucket.consume(
+            rule.capacity,
+            rule.refill_every,
+            rule.refill_amount,
+            rule.cooldown,
+        );
         self.buckets.insert(key.clone(), bucket);
 
         if allowed {
@@ -466,10 +486,7 @@ impl RateLimiter {
     pub fn restore_tokens(&mut self, kind: RateLimitKeyKind, scope: RateLimitScope, value: &str) {
         let key = self.make_key(kind.clone(), scope.clone(), value);
         let rule_id = RuleId { kind, scope };
-        if let (Some(bucket), Some(rule)) = (
-            self.buckets.get_mut(&key),
-            self.rules.get(&rule_id),
-        ) {
+        if let (Some(bucket), Some(rule)) = (self.buckets.get_mut(&key), self.rules.get(&rule_id)) {
             bucket.restore_tokens(rule.capacity);
         }
     }
