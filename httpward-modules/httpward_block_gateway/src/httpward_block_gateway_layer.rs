@@ -131,7 +131,7 @@ impl HttpWardMiddleware for HttpWardBlockGatewayLayer {
     fn optional_dependencies(&self) -> Vec<&'static str> {
         vec!["httpward_rate_limit_module"]
     }
-    
+
     fn name(&self) -> Option<&'static str> {
         Some(env!("CARGO_PKG_NAME"))
     }

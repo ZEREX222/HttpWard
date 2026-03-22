@@ -252,9 +252,15 @@ mod user_scenario_test {
             .config_as_json()
             .unwrap();
 
-        assert_eq!(rate_limit["current_site_rules"][0]["ip"]["max_requests"], 20);
+        assert_eq!(
+            rate_limit["current_site_rules"][0]["ip"]["max_requests"],
+            20
+        );
         assert_eq!(rate_limit["current_site_rules"][0]["ip"]["window"], "1m");
-        assert_eq!(rate_limit["current_site_rules"][1]["ja4"]["max_requests"], 100);
+        assert_eq!(
+            rate_limit["current_site_rules"][1]["ja4"]["max_requests"],
+            100
+        );
         assert_eq!(rate_limit["current_site_rules"][1]["ja4"]["window"], "10s");
     }
 }
