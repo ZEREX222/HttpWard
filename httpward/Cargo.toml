@@ -36,7 +36,10 @@ httpward_rate_limit_module = { workspace = true, optional = true }
 httpward_block_gateway = { workspace = true, optional = true }
 
 [dev-dependencies]
-cargo-husky = "1.5"
+cargo-husky = { version = "1.5", default-features = false, features = ["user-hooks"] }
+
+[lints]
+workspace = true
 
 [features]
 default = []

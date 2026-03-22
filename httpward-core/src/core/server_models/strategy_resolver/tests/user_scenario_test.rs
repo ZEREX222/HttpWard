@@ -169,4 +169,92 @@ mod user_scenario_test {
 
         println!("✅ StrategyResolver keeps 'on' middleware with empty config");
     }
+
+    #[test]
+    fn test_route_override_preserves_default2_order() {
+        let global = GlobalConfig {
+            domain: "global.local".to_string(),
+            domains: vec![],
+            listeners: vec![],
+            routes: vec![],
+            log: crate::config::global::LogConfig::default(),
+            proxy_id: "httpward".to_string(),
+            sites_enabled: PathBuf::from("./sites-enabled"),
+            strategy: Some(StrategyRef::Named("default2".to_string())),
+            strategies: {
+                let mut strategies = std::collections::HashMap::new();
+                strategies.insert(
+                    "default2".to_string(),
+                    vec![
+                        MiddlewareConfig::new_named_json(
+                            "httpward_log_module".to_string(),
+                            json!({"show_request": true}),
+                        ),
+                        MiddlewareConfig::new_named_json(
+                            "httpward_rate_limit_module".to_string(),
+                            json!({
+                                "global_rules": [{"ip": {"max_requests": 100, "window": "10s"}}],
+                                "current_site_rules": [{"ip": {"max_requests": 5, "window": "1m"}}]
+                            }),
+                        ),
+                        MiddlewareConfig::new_on("httpward_block_gateway".to_string()),
+                    ],
+                );
+                strategies
+            },
+        };
+
+        let site = SiteConfig {
+            domain: "test.local".to_string(),
+            domains: vec!["test.local".to_string()],
+            listeners: vec![],
+            routes: vec![Route::Proxy {
+                r#match: Match {
+                    path: Some("/my/{request}".to_string()),
+                    path_regex: None,
+                },
+                backend: "https://www.google.com/search?q={request}".to_string(),
+                strategy: Some(StrategyRef::InlineMiddleware(vec![
+                    MiddlewareConfig::new_named_json(
+                        "httpward_rate_limit_module".to_string(),
+                        json!({
+                            "current_site_rules": [
+                                {"ip": {"max_requests": 20, "window": "1m"}},
+                                {"ja4": {"max_requests": 100, "window": "10s"}}
+                            ]
+                        }),
+                    ),
+                ])),
+                strategies: None,
+            }],
+            strategy: Some(StrategyRef::Named("default2".to_string())),
+            strategies: Default::default(),
+        };
+
+        let resolver = StrategyResolver::new(&site, &global).unwrap();
+        let strategy = resolver.resolve_for_route(0).unwrap();
+
+        let names: Vec<&str> = strategy.middleware.iter().map(|m| m.name()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "httpward_log_module",
+                "httpward_rate_limit_module",
+                "httpward_block_gateway"
+            ]
+        );
+
+        let rate_limit = strategy
+            .middleware
+            .iter()
+            .find(|m| m.name() == "httpward_rate_limit_module")
+            .unwrap()
+            .config_as_json()
+            .unwrap();
+
+        assert_eq!(rate_limit["current_site_rules"][0]["ip"]["max_requests"], 20);
+        assert_eq!(rate_limit["current_site_rules"][0]["ip"]["window"], "1m");
+        assert_eq!(rate_limit["current_site_rules"][1]["ja4"]["max_requests"], 100);
+        assert_eq!(rate_limit["current_site_rules"][1]["ja4"]["window"], "10s");
+    }
 }

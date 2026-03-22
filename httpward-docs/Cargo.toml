@@ -13,4 +13,8 @@ schemars= { workspace = true }
 httpward-core = { path = "../httpward-core" }
 
 [dev-dependencies]
-cargo-husky = "1.5"
+cargo-husky = { version = "1.5", default-features = false, features = ["user-hooks"] }
+
+[lints]
+workspace = true
+

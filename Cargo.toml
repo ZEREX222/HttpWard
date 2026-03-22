@@ -26,5 +26,8 @@ httpward_log_module = { version = "0.0.1-alpha.1", path = "./httpward-modules/ht
 httpward_rate_limit_module = { version = "0.0.1-alpha.1", path = "./httpward-modules/httpward_rate_limit_module" }
 httpward_block_gateway = { version = "0.0.1-alpha.1", path = "./httpward-modules/httpward_block_gateway" }
 
+[workspace.lints.rust]
+unused-crate-dependencies = "allow"
+
 [profile.dev]
 debug = true

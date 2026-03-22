@@ -264,24 +264,24 @@ pub fn supplement_middleware(
     current: &mut Vec<MiddlewareConfig>,
     incoming: &[MiddlewareConfig],
 ) -> Result<()> {
-    // Build index: middleware name -> position
-    let mut index = HashMap::new();
-
+    // Build index: middleware name -> position in child strategy.
+    let mut child_index = HashMap::new();
     for (i, m) in current.iter().enumerate() {
-        let name = m.name();
-        index.insert(name.to_string(), i);
+        child_index.insert(m.name().to_string(), i);
     }
 
-    // Collect inherited middleware missing in `current` and prepend once at the end.
-    // This keeps inheritance order as parent -> child without O(n^2) front inserts.
-    let mut inherited_prefix: Vec<MiddlewareConfig> = Vec::new();
+    // Merge onto parent's order first: child entries with same name override in place.
+    let mut merged = Vec::with_capacity(current.len().max(incoming.len()));
+    let mut parent_names = std::collections::HashSet::with_capacity(incoming.len());
 
-    for new_middleware in incoming {
-        let name = new_middleware.name();
+    for parent_middleware in incoming {
+        let name = parent_middleware.name();
+        parent_names.insert(name.to_string());
 
-        if let Some(&pos) = index.get(name) {
-            // Middleware exists - check if we should merge or handle disabled state
-            match (&mut current[pos], new_middleware) {
+        if let Some(&pos) = child_index.get(name) {
+            let mut effective = current[pos].clone();
+
+            match (&mut effective, parent_middleware) {
                 (
                     MiddlewareConfig::Named {
                         config: existing_config,
@@ -289,15 +289,15 @@ pub fn supplement_middleware(
                     },
                     MiddlewareConfig::Named { config, .. },
                 ) => {
-                    // Both are enabled - merge configurations
+                    // Child keeps precedence, parent fills only missing config keys.
                     merge_universal_missing_only(existing_config, config.clone())?;
                 }
                 (
-                    current_on @ MiddlewareConfig::On { .. },
+                    effective_on @ MiddlewareConfig::On { .. },
                     MiddlewareConfig::Named { name, config },
                 ) => {
-                    // Explicitly enabled without config - inherit missing config from parent.
-                    *current_on = MiddlewareConfig::Named {
+                    // Child enables middleware, parent contributes full base config.
+                    *effective_on = MiddlewareConfig::Named {
                         name: name.clone(),
                         config: config.clone(),
                     };
@@ -306,42 +306,40 @@ pub fn supplement_middleware(
                     MiddlewareConfig::Off { .. },
                     MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. },
                 ) => {
-                    // Current is disabled but incoming is enabled - DON'T enable it
-                    // Current (inline/off) takes precedence over incoming (site/global)
-                    // Do nothing - keep it disabled
+                    // Child explicit Off wins over parent enabled state.
                 }
                 (
                     MiddlewareConfig::Named { .. } | MiddlewareConfig::On { .. },
                     MiddlewareConfig::Off { .. },
                 ) => {
-                    // Current is enabled but incoming is disabled - keep current enabled (takes precedence)
-                    // Do nothing
+                    // Child enabled state wins over parent Off.
                 }
                 (MiddlewareConfig::Off { .. }, MiddlewareConfig::Off { .. }) => {
-                    // Both are disabled - keep disabled
-                    // Do nothing
+                    // Both Off - keep Off.
                 }
                 (MiddlewareConfig::Named { .. }, MiddlewareConfig::On { .. }) => {
-                    // Current already has explicit config - keep it as-is.
+                    // Child already has explicit config.
                 }
                 (MiddlewareConfig::On { .. }, MiddlewareConfig::On { .. }) => {
-                    // Already explicitly enabled without config.
+                    // Child already has explicit On.
                 }
             }
-        } else {
-            // Middleware doesn't exist in current - inherit if not disabled.
-            if !new_middleware.is_off() {
-                inherited_prefix.push(new_middleware.clone());
-            }
+
+            merged.push(effective);
+        } else if !parent_middleware.is_off() {
+            // Missing in child: inherit enabled parent middleware at parent's position.
+            merged.push(parent_middleware.clone());
         }
     }
 
-    if !inherited_prefix.is_empty() {
-        let mut merged = Vec::with_capacity(inherited_prefix.len() + current.len());
-        merged.extend(inherited_prefix);
-        merged.append(current);
-        *current = merged;
+    // Append child-only middleware (not present in parent) in original child order.
+    for child_middleware in current.iter() {
+        if !parent_names.contains(child_middleware.name()) {
+            merged.push(child_middleware.clone());
+        }
     }
+
+    *current = merged;
 
     Ok(())
 }
@@ -978,9 +976,10 @@ middleware:
 
         supplement_middleware(&mut current, &incoming).unwrap();
 
-        assert_eq!(current.len(), 3); // cors (inherited), rate_limit, logging
+        assert_eq!(current.len(), 3); // rate_limit, cors (inherited), logging
 
-        assert_eq!(current[0].name(), "cors");
+        assert_eq!(current[0].name(), "rate_limit");
+        assert_eq!(current[1].name(), "cors");
 
         // Check rate_limit was supplemented (not merged)
         let rate_limit = current.iter().find(|m| m.name() == "rate_limit").unwrap();
@@ -998,7 +997,7 @@ middleware:
         assert_eq!(config["level"], "info");
         assert_eq!(config["format"], "text");
 
-        // Check cors was inherited and prepended
+        // Check cors was inherited at parent-defined position
         let cors = current.iter().find(|m| m.name() == "cors").unwrap();
         assert_eq!(cors.name(), "cors");
         let config = cors.config_as_json().unwrap();
@@ -1051,9 +1050,10 @@ middleware:
         assert_eq!(config["timeout"], 300); // Added (was missing)
         assert_eq!(config["max_attempts"], 5); // Added (was missing)
 
-        // Check rate_limit was inherited and prepended
-        assert_eq!(strategy.middleware[0].name(), "rate_limit");
-        let rate_limit = &strategy.middleware[0];
+        // Check rate_limit was inherited following stable parent order
+        assert_eq!(strategy.middleware[0].name(), "auth");
+        assert_eq!(strategy.middleware[1].name(), "rate_limit");
+        let rate_limit = &strategy.middleware[1];
         assert_eq!(rate_limit.name(), "rate_limit");
         let config = rate_limit.config_as_json().unwrap();
         assert_eq!(config["requests"], 100);
