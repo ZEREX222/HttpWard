@@ -14,3 +14,39 @@ pub use core::httpward_rate_limit_config::InternalRateLimitRule;
 
 // Name is taken automatically from CARGO_PKG_NAME ("httpward_rate_limit_module")
 httpward_core::export_middleware_module!(HttpWardRateLimitLayer);
+
+// ─── Typed accessor ───────────────────────────────────────────────────────────
+//
+// The downcast MUST happen here — inside the rate-limit DLL binary — so that
+// the `TypeId` for `RateLimitManager` matches the one used when the `Arc` was
+// stored.  Calling `downcast` on the raw `Arc<dyn Any>` from a different DLL
+// binary would always fail due to per-binary `TypeId` instability.
+
+use std::sync::Arc;
+use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
+
+/// Retrieve the `Arc<RateLimitManager>` that was registered in `ctx` by
+/// `HttpWardRateLimitLayer::handle()`.
+///
+/// Returns `Some` only when `HttpWardRateLimitLayer` appears **before** the
+/// calling middleware in the same pipeline (it registers the manager into the
+/// context before invoking `next`).
+///
+/// # Example — inside another middleware
+/// ```rust,ignore
+/// use httpward_rate_limit_module::get_manager_from_context;
+///
+/// async fn handle(&self, ctx: &mut HttpwardMiddlewareContext, req, next) {
+///     if let Some(manager) = get_manager_from_context(ctx) {
+///         let stats = manager.stats().await?;
+///         let allowed = manager.check(kind, scope, &ip).await?;
+///     }
+///     next.run(ctx, req).await
+/// }
+/// ```
+pub fn get_manager_from_context(
+    ctx: &HttpwardMiddlewareContext,
+) -> Option<Arc<core::rate_limit_manager::RateLimitManager>> {
+    ctx.get_service_raw(core::rate_limit_manager::SERVICE_KEY)
+        .and_then(|arc| arc.downcast::<core::rate_limit_manager::RateLimitManager>().ok())
+}

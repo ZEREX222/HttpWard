@@ -241,14 +241,29 @@ pub struct RateLimiterStats {
     pub global_rules_initialized: bool,
 }
 
-static RATE_LIMIT_MANAGER: OnceLock<RateLimitManager> = OnceLock::new();
+/// Context key under which `RateLimitManager` is registered in
+/// `HttpwardMiddlewareContext::services` during every request.
+///
+/// Use `httpward_rate_limit_module::get_manager_from_context` to retrieve a
+/// typed `Arc<RateLimitManager>` — do not downcast the raw service directly
+/// from another DLL binary.
+pub const SERVICE_KEY: &'static str = "httpward_rate_limit::manager";
 
-pub fn init_global_manager() -> &'static RateLimitManager {
-    RATE_LIMIT_MANAGER.get_or_init(RateLimitManager::new)
+static RATE_LIMIT_MANAGER: OnceLock<Arc<RateLimitManager>> = OnceLock::new();
+
+/// Initialise (once) and return a clone of the global `Arc<RateLimitManager>`.
+///
+/// Cheap to call repeatedly — `OnceLock` guarantees single initialisation and
+/// `Arc::clone` is just an atomic increment.
+pub fn init_global_manager() -> Arc<RateLimitManager> {
+    RATE_LIMIT_MANAGER
+        .get_or_init(|| Arc::new(RateLimitManager::new()))
+        .clone()
 }
 
-pub fn get_global_manager() -> Option<&'static RateLimitManager> {
-    RATE_LIMIT_MANAGER.get()
+/// Return a clone of the global manager if it has already been initialised.
+pub fn get_global_manager() -> Option<Arc<RateLimitManager>> {
+    RATE_LIMIT_MANAGER.get().cloned()
 }
 
 #[cfg(test)]

@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use crate::core::{
     HttpWardRateLimitConfig, HttpWardRateLimitContext, RateLimitKeyKind, RateLimitScope,
-    RouteScopeKey, init_global_manager,
+    RouteScopeKey, init_global_manager, SERVICE_KEY,
 };
 
 /// Extract header fingerprint from specific headers
@@ -133,7 +133,7 @@ fn load_config_from_context(
 #[async_trait]
 impl HttpWardMiddleware for HttpWardRateLimitLayer {
     fn init(&self, server_instance: &Arc<ServerInstance>) -> Result<(), BoxError> {
-        let manager = init_global_manager();
+        let manager = init_global_manager(); // Arc<RateLimitManager>
 
         for site_manager in &server_instance.site_managers {
             let site_name = site_manager.site_domains();
@@ -177,12 +177,19 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
         req: Request<Body>,
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError> {
+        let manager = init_global_manager(); // Arc<RateLimitManager>
+
+        // ── Register manager in context so downstream middleware can access it ──
+        // Must happen before any immutable borrow of ctx (e.g. get_httpward_context).
+        ctx.set_service(SERVICE_KEY, manager.clone());
+        // ─────────────────────────────────────────────────────────────────────────
+
         let httpward_ctx = ctx.get_httpward_context();
 
         let route_key = httpward_ctx.and_then(matched_route_key);
         let route_scope = httpward_ctx.and_then(matched_route_label);
-        let manager = init_global_manager();
 
+        // Convert YAML config to internal format
         let config = if let Some(httpward_ctx) = httpward_ctx {
             load_config_from_context(httpward_ctx)
         } else {
@@ -190,7 +197,6 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
             std::sync::Arc::new(HttpWardRateLimitConfig::default())
         };
 
-        // Convert YAML config to internal format
         let internal_config = config.to_internal();
 
         let mut ja4_fp = None;

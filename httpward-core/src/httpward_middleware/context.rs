@@ -5,8 +5,10 @@ use rama::net::tls::SecureTransport;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use std::any::Any;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 /// Host-owned request middleware context.
 ///
@@ -22,6 +24,13 @@ pub struct HttpwardMiddlewareContext {
     socket_address: Option<SocketAddress>,
     std_socket_addr: Option<SocketAddr>,
     shared: HashMap<String, Value>,
+    /// Generic per-request service registry.
+    ///
+    /// Modules store `Arc<T>` here during `handle()` so that downstream
+    /// middleware in the same pipeline can access live service objects.
+    /// Retrieval must go through the owning module's typed accessor to keep
+    /// the downcast inside the correct DLL binary (where `TypeId` is stable).
+    services: HashMap<&'static str, Arc<dyn Any + Send + Sync>>,
 }
 
 impl HttpwardMiddlewareContext {
@@ -39,6 +48,7 @@ impl HttpwardMiddlewareContext {
             socket_address,
             std_socket_addr,
             shared: HashMap::new(),
+            services: HashMap::new(),
         }
     }
 
@@ -154,5 +164,50 @@ impl HttpwardMiddlewareContext {
         self.rama_context
             .take()
             .expect("HttpwardMiddlewareContext already consumed")
+    }
+
+    // ─── Service registry ─────────────────────────────────────────────────
+
+    /// Register a typed service for the duration of this request.
+    ///
+    /// The `Arc<T>` is stored under a static string key and is available to
+    /// every subsequent middleware in the same pipeline.  Overwrites any
+    /// previously registered value under the same key.
+    ///
+    /// # DLL boundary note
+    /// Retrieval via [`get_service_raw`] returns `Arc<dyn Any + Send + Sync>`.
+    /// **Do not call `downcast` on it from a different DLL** — `TypeId` is
+    /// per-binary and will not match.  Use the owning module's typed accessor
+    /// instead (it performs the downcast inside the correct binary).
+    pub fn set_service<T: Any + Send + Sync + 'static>(
+        &mut self,
+        key: &'static str,
+        svc: Arc<T>,
+    ) {
+        self.services.insert(key, svc as Arc<dyn Any + Send + Sync>);
+    }
+
+    /// Retrieve a raw `Arc<dyn Any + Send + Sync>` by key without downcasting.
+    ///
+    /// Prefer the owning module's typed accessor over calling `downcast` here
+    /// directly (see [`set_service`] for the DLL boundary caveat).
+    pub fn get_service_raw(
+        &self,
+        key: &'static str,
+    ) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.services.get(key).cloned()
+    }
+
+    /// Returns `true` if a service is registered under the given key.
+    pub fn has_service(&self, key: &'static str) -> bool {
+        self.services.contains_key(key)
+    }
+
+    /// Remove and return the service registered under the given key.
+    pub fn remove_service(
+        &mut self,
+        key: &'static str,
+    ) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.services.remove(key)
     }
 }
