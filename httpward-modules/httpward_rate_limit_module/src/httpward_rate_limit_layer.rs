@@ -18,16 +18,14 @@ use async_trait::async_trait;
 use httpward_core::core::HttpWardContext;
 use httpward_core::core::server_models::server_instance::ServerInstance;
 use httpward_core::error::ErrorHandler;
+use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
 use httpward_core::httpward_middleware::next::Next;
 use httpward_core::httpward_middleware::{BoxError, HttpWardMiddleware};
 use httpward_core::module_logging::ModuleLogger;
 use httpward_core::{module_log_debug, module_log_error, module_log_info, module_log_warn};
+use rama::http::{Body, HeaderMap, Request, Response, StatusCode};
 use rama::net::fingerprint::Ja4;
-use rama::net::tls::{ProtocolVersion, SecureTransport};
-use rama::{
-    Context,
-    http::{Body, HeaderMap, Request, Response, StatusCode},
-};
+use rama::net::tls::ProtocolVersion;
 use std::sync::Arc;
 
 use crate::core::{
@@ -178,11 +176,11 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
 
     async fn handle(
         &self,
-        mut ctx: Context<()>,
+        ctx: &mut HttpwardMiddlewareContext,
         req: Request<Body>,
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError> {
-        let httpward_ctx = ctx.get::<HttpWardContext>();
+        let httpward_ctx = ctx.get_httpward_context();
 
         let site_name = httpward_ctx
             .and_then(|c| c.site_domains())
@@ -209,7 +207,7 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
             .map(|context| context.client_ip.to_string())
             .unwrap_or_else(|| "unknown".to_string());
 
-        if let Some(st) = ctx.get::<SecureTransport>()
+        if let Some(st) = ctx.get_secure_transport()
             && let Some(client_hello) = st.client_hello()
         {
             let pv = client_hello.protocol_version();
@@ -247,7 +245,15 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
             rate_limit_context = rate_limit_context.with_ja4_fp(ja4_fp);
         }
 
-        ctx.insert(rate_limit_context);
+        // Cross-DLL storage: available to subsequent dynamic middlewares.
+        if let Err(e) = ctx.insert_shared("httpward_rate_limit.context", &rate_limit_context) {
+            module_log_warn!("Failed to write shared rate-limit context: {}", e);
+        }
+
+        // Best effort for static middleware that still reads typed Rama extensions.
+        if let Some(rama_ctx) = ctx.rama_context_mut() {
+            rama_ctx.insert(rate_limit_context);
+        }
 
         module_log_info!(
             "HttpWardRateLimitLayer: Starting rate-limit check for site '{}' and scope {:?}",

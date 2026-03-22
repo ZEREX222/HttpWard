@@ -1,5 +1,6 @@
 // File: httpward-core/src/httpward_middleware/pipe.rs
 
+use crate::httpward_middleware::context::HttpwardMiddlewareContext;
 use crate::httpward_middleware::dependency_error::DependencyError;
 use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use crate::httpward_middleware::next::Next;
@@ -246,8 +247,9 @@ impl HttpWardMiddlewarePipe {
         let boxed_service = crate::httpward_middleware::adapter::box_service_from(inner);
 
         let next = Next::new(slice, &boxed_service);
+        let mut middleware_ctx = HttpwardMiddlewareContext::from_rama_context(ctx);
 
-        next.run(ctx, req).await
+        next.run(&mut middleware_ctx, req).await
     }
 }
 
@@ -261,10 +263,10 @@ pub struct MiddlewareFatPtr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::httpward_middleware::context::HttpwardMiddlewareContext;
     use crate::httpward_middleware::next::Next;
     use crate::httpward_middleware::types::BoxError;
     use async_trait::async_trait;
-    use rama::Context;
     use rama::http::{Body, Request, Response};
 
     // Minimal test middleware to verify plumbing.
@@ -273,7 +275,7 @@ mod tests {
     impl HttpWardMiddleware for DummyMw {
         async fn handle(
             &self,
-            ctx: Context<()>,
+            ctx: &mut HttpwardMiddlewareContext,
             req: Request<Body>,
             next: Next<'_>,
         ) -> Result<Response<Body>, BoxError> {
@@ -290,7 +292,7 @@ mod tests {
     impl HttpWardMiddleware for DependentMw {
         async fn handle(
             &self,
-            ctx: Context<()>,
+            ctx: &mut HttpwardMiddlewareContext,
             req: Request<Body>,
             next: Next<'_>,
         ) -> Result<Response<Body>, BoxError> {
@@ -310,7 +312,7 @@ mod tests {
     impl HttpWardMiddleware for NamedMw {
         async fn handle(
             &self,
-            ctx: Context<()>,
+            ctx: &mut HttpwardMiddlewareContext,
             req: Request<Body>,
             next: Next<'_>,
         ) -> Result<Response<Body>, BoxError> {
@@ -326,7 +328,7 @@ mod tests {
     impl HttpWardMiddleware for OptionalDependentMw {
         async fn handle(
             &self,
-            ctx: Context<()>,
+            ctx: &mut HttpwardMiddlewareContext,
             req: Request<Body>,
             next: Next<'_>,
         ) -> Result<Response<Body>, BoxError> {

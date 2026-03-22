@@ -1,13 +1,12 @@
 // File: httpward-modules/httpward_log_module/src/httpward_log_layer
 
 use async_trait::async_trait;
-use httpward_core::core::HttpWardContext;
+use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use httpward_core::httpward_middleware::next::Next;
 use httpward_core::httpward_middleware::types::BoxError;
 use httpward_core::module_logging::ModuleLogger;
 use httpward_core::{module_log_debug, module_log_error, module_log_info, module_log_warn};
-use rama::Context;
 use rama::http::{Body, Request, Response};
 use std::fmt::Debug;
 
@@ -94,13 +93,13 @@ impl HttpWardLogLayer {
 impl HttpWardMiddleware for HttpWardLogLayer {
     async fn handle(
         &self,
-        ctx: Context<()>,
+        ctx: &mut HttpwardMiddlewareContext,
         req: Request<Body>,
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError> {
         module_log_debug!("HttpWardLogLayer.handle called");
 
-        let httpward_ctx = ctx.get::<HttpWardContext>();
+        let httpward_ctx = ctx.get_httpward_context();
         let matched_for_logging = httpward_ctx.and_then(|c| c.matched_route.clone());
         let request_path = req.uri().path();
 

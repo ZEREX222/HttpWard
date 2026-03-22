@@ -1,9 +1,9 @@
 // httpward-core/src/httpward_middleware/next.rs
 
+use crate::httpward_middleware::context::HttpwardMiddlewareContext;
 use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use crate::httpward_middleware::types::BoxError;
 use crate::httpward_middleware::types::BoxService;
-use rama::Context;
 use rama::http::{Body, Request, Response};
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ impl<'a> Next<'a> {
 
     pub async fn run(
         self,
-        ctx: Context<()>,
+        ctx: &mut HttpwardMiddlewareContext,
         req: Request<Body>,
     ) -> Result<Response<Body>, BoxError> {
         if let Some(mw_box) = self.middlewares.get(self.index) {
@@ -42,7 +42,8 @@ impl<'a> Next<'a> {
             middleware.handle(ctx, req, next).await
         } else {
             // Call the inner service as a function since BoxService is a Fn
-            (self.inner)(ctx, req).await
+            let rama_ctx = ctx.take_rama_context_from_chain();
+            (self.inner)(rama_ctx, req).await
         }
     }
 }

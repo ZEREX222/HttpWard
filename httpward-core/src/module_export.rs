@@ -84,6 +84,7 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 /// ## 1. Automatic module name (recommended)
 /// ```rust
 /// use httpward_core::export_middleware_module;
+/// use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
 /// use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 /// use httpward_core::httpward_middleware::next::Next;
 /// use rama::{Context, http::{Body, Request, Response}};
@@ -100,7 +101,7 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 ///
 ///     async fn handle(
 ///         &self,
-///         _ctx: Context<()>,
+///         _ctx: &mut HttpwardMiddlewareContext,
 ///         request: Request<Body>,
 ///         next: Next<'_>,
 ///     ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
@@ -114,6 +115,7 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 /// ## 2. Custom module name
 /// ```rust
 /// use httpward_core::export_middleware_module;
+/// use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
 /// use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 /// use httpward_core::httpward_middleware::next::Next;
 /// use rama::{Context, http::{Body, Request, Response}};
@@ -130,7 +132,7 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 ///
 ///     async fn handle(
 ///         &self,
-///         _ctx: Context<()>,
+///         _ctx: &mut HttpwardMiddlewareContext,
 ///         request: Request<Body>,
 ///         next: Next<'_>,
 ///     ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
@@ -144,6 +146,7 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 /// ## 3. Environment variable name (example with literal)
 /// ```rust
 /// use httpward_core::export_middleware_module;
+/// use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
 /// use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 /// use httpward_core::httpward_middleware::next::Next;
 /// use rama::{Context, http::{Body, Request, Response}};
@@ -160,7 +163,7 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 ///
 ///     async fn handle(
 ///         &self,
-///         _ctx: Context<()>,
+///         _ctx: &mut HttpwardMiddlewareContext,
 ///         request: Request<Body>,
 ///         next: Next<'_>,
 ///     ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
@@ -317,9 +320,9 @@ where
 mod tests {
     use super::*;
     use crate::httpward_middleware::BoxError;
+    use crate::httpward_middleware::context::HttpwardMiddlewareContext;
     use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
     use crate::httpward_middleware::next::Next;
-    use rama::Context;
     use rama::http::{Body, Request, Response};
 
     // Test middleware for testing purposes
@@ -334,7 +337,7 @@ mod tests {
 
         async fn handle(
             &self,
-            ctx: Context<()>,
+            ctx: &mut HttpwardMiddlewareContext,
             request: Request<Body>,
             next: Next<'_>,
         ) -> Result<Response<Body>, BoxError> {

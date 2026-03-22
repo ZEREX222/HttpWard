@@ -2,14 +2,12 @@
 #[allow(clippy::module_inception)]
 mod tests {
     use crate::httpward_middleware::HttpWardMiddlewarePipe;
+    use crate::httpward_middleware::context::HttpwardMiddlewareContext;
     use crate::httpward_middleware::middleware_trait::HttpWardMiddleware;
     use crate::httpward_middleware::next::Next;
     use crate::httpward_middleware::types::BoxError;
     use async_trait::async_trait;
-    use rama::{
-        Context,
-        http::{Body, Request, Response},
-    };
+    use rama::http::{Body, Request, Response};
     use std::fmt::Debug;
 
     // Simple test middleware for testing purposes
@@ -20,7 +18,7 @@ mod tests {
     impl HttpWardMiddleware for TestMiddleware {
         async fn handle(
             &self,
-            _ctx: Context<()>,
+            _ctx: &mut HttpwardMiddlewareContext,
             _req: Request<Body>,
             next: Next<'_>,
         ) -> Result<Response<Body>, BoxError> {

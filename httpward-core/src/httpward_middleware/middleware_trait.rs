@@ -1,10 +1,10 @@
 // File: httpward-core/src/httpward_middleware/middleware_trait.rs
 
 use crate::core::server_models::server_instance::ServerInstance;
+use crate::httpward_middleware::context::HttpwardMiddlewareContext;
 use crate::httpward_middleware::next::Next;
 use crate::httpward_middleware::types::BoxError;
 use async_trait::async_trait;
-use rama::Context;
 use rama::http::{Body, Request, Response};
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ pub trait HttpWardMiddleware: Send + Sync + 'static {
     /// - The `next` value owns or references the remaining chain and the inner `BoxService`.
     async fn handle(
         &self,
-        ctx: Context<()>,
+        ctx: &mut HttpwardMiddlewareContext,
         req: Request<Body>,
         next: Next<'_>,
     ) -> Result<Response<Body>, BoxError>;

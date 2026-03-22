@@ -7,11 +7,13 @@ mod server;
 use httpward_core::config::load;
 use std::env;
 use std::path::Path;
+#[cfg(feature = "static_modules")]
 use std::sync::Arc;
 
 use crate::core::middleware::basic::MiddlewareModuleLoadManager;
 use crate::server::manager::HttpWardServerManager;
 use httpward_core::core::server_models::server_instance::ServerInstance;
+#[cfg(feature = "static_modules")]
 use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 use runtime::server_plan::build_server_plan;
 use server::http_server::HttpWardServer;
