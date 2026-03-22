@@ -230,15 +230,19 @@ impl TokenBucket {
     ) -> bool {
         self.touch();
 
-        // Block immediately while cooldown is active — tokens don't matter.
+        // Always check cooldown first, but restart timer if this is another violation
         if self.is_cooling_down() {
+            // Restart cooldown timer on repeated violations during cooldown period
+            if self.tokens == 0 && !cooldown.is_zero() {
+                self.cooldown_until = Some(Instant::now() + cooldown);
+            }
             return false;
         }
 
         self.refill(capacity, refill_every, refill_amount);
 
         if self.tokens == 0 {
-            // (Re)start the fixed cooldown timer on every violation.
+            // Start cooldown timer on first violation
             if !cooldown.is_zero() {
                 self.cooldown_until = Some(Instant::now() + cooldown);
             }
@@ -683,6 +687,80 @@ mod tests {
 
         thread::sleep(Duration::from_millis(5)); // let token refill
         assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "9.9.9.9"));
+    }
+
+    /// Cooldown timer restarts on repeated violations during cooldown period.
+    /// This prevents clients from "waiting out" the cooldown by making repeated requests.
+    #[test]
+    fn test_cooldown_restarts_on_repeated_violations() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 1,
+                refill_every: Duration::from_millis(1),
+                refill_amount: 1,
+                cooldown: Duration::from_secs(2), // 2 seconds for fast test
+            },
+        );
+
+        // 1. Exhaust the token - cooldown starts
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1")); // cooldown activated
+
+        // 2. Wait 1 second (half of cooldown period)
+        thread::sleep(Duration::from_secs(1));
+        
+        // 3. Make another request during cooldown - this should restart the timer
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1")); // cooldown restarted
+
+        // 4. Wait another 1 second (would have been enough for original cooldown)
+        thread::sleep(Duration::from_secs(1));
+        
+        // 5. Should still be blocked because cooldown was restarted
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1"));
+
+        // 6. Wait full 2 seconds after the restart
+        thread::sleep(Duration::from_secs(2));
+        
+        // 7. Now should be allowed
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1"));
+    }
+
+    /// Cooldown timer restarts multiple times on multiple violations during cooldown.
+    #[test]
+    fn test_cooldown_restarts_multiple_times() {
+        let mut limiter = RateLimiter::new(100, Duration::from_secs(60), Duration::from_secs(10));
+
+        limiter.add_rule(
+            RateLimitKeyKind::Ip,
+            RateLimitScope::Global,
+            RateLimitRule {
+                capacity: 1,
+                refill_every: Duration::from_millis(1),
+                refill_amount: 1,
+                cooldown: Duration::from_millis(500), // 0.5 seconds for fast test
+            },
+        );
+
+        // Exhaust token
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"));
+        assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1")); // cooldown starts
+
+        // Make multiple requests during cooldown, each should restart the timer
+        for i in 0..5 {
+            thread::sleep(Duration::from_millis(100)); // Wait 100ms
+            assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"), 
+                    "Request {} should be blocked (cooldown restarted)", i + 1);
+        }
+
+        // After 5 restarts, we need to wait full cooldown period from the last restart
+        thread::sleep(Duration::from_millis(500));
+        
+        // Now should be allowed
+        assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"));
     }
 
     /// reset_cooldown must NOT restore tokens — only the timer is cleared.
