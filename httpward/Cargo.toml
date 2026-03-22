@@ -33,12 +33,13 @@ tokio-tungstenite = { version = "0.24", features = ["connect", "rustls-tls-webpk
 libloading = "0.9"
 httpward_log_module = { workspace = true, optional = true }
 httpward_rate_limit_module = { workspace = true, optional = true }
+httpward_block_gateway = { workspace = true, optional = true }
 
 [dev-dependencies]
 cargo-husky = "1.5"
 
 [features]
 default = []
-static_modules = ["httpward_log_module", "httpward_rate_limit_module"]
+static_modules = ["httpward_log_module", "httpward_rate_limit_module", "httpward_block_gateway"]
 dynamic_modules = []
 

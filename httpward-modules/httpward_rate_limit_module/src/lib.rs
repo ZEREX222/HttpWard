@@ -15,7 +15,7 @@ pub use core::httpward_rate_limit_config::InternalRateLimitRule;
 // Name is taken automatically from CARGO_PKG_NAME ("httpward_rate_limit_module")
 httpward_core::export_middleware_module!(HttpWardRateLimitLayer);
 
-// ─── Typed accessor ───────────────────────────────────────────────────────────
+// ─── Typed accessors ─────────────────────────────────────────────────────────
 //
 // The downcast MUST happen here — inside the rate-limit DLL binary — so that
 // the `TypeId` for `RateLimitManager` matches the one used when the `Arc` was
@@ -39,7 +39,6 @@ use std::sync::Arc;
 /// async fn handle(&self, ctx: &mut HttpwardMiddlewareContext, req, next) {
 ///     if let Some(manager) = get_manager_from_context(ctx) {
 ///         let stats = manager.stats().await?;
-///         let allowed = manager.check(kind, scope, &ip).await?;
 ///     }
 ///     next.run(ctx, req).await
 /// }
@@ -52,4 +51,33 @@ pub fn get_manager_from_context(
             arc.downcast::<core::rate_limit_manager::RateLimitManager>()
                 .ok()
         })
+}
+
+/// Retrieve the [`HttpWardRateLimitContext`] stored by `HttpWardRateLimitLayer`
+/// in shared middleware context storage.
+///
+/// Returns `Some` only when `HttpWardRateLimitLayer` has already run for this
+/// request (i.e. it is positioned **before** the calling middleware in the
+/// pipeline).
+///
+/// Internally this deserialises from the JSON blob stored under
+/// `"httpward_rate_limit.context"` — safe to call across DLL boundaries.
+///
+/// # Example
+/// ```rust,ignore
+/// use httpward_rate_limit_module::get_rate_limit_context_from_context;
+///
+/// async fn handle(&self, ctx: &mut HttpwardMiddlewareContext, req, next) {
+///     if let Some(rl_ctx) = get_rate_limit_context_from_context(ctx) {
+///         if rl_ctx.is_rate_limited() {
+///             // block or log
+///         }
+///     }
+///     next.run(ctx, req).await
+/// }
+/// ```
+pub fn get_rate_limit_context_from_context(
+    ctx: &HttpwardMiddlewareContext,
+) -> Option<core::httpward_rate_limit_context::HttpWardRateLimitContext> {
+    ctx.get_shared_typed("httpward_rate_limit.context")
 }

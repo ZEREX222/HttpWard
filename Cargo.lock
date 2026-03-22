@@ -998,6 +998,7 @@ dependencies = [
  "futures-util",
  "http",
  "httpward-core",
+ "httpward_block_gateway",
  "httpward_log_module",
  "httpward_rate_limit_module",
  "libloading 0.9.0",
@@ -1044,6 +1045,18 @@ dependencies = [
  "httpward-core",
  "schemars",
  "serde_json",
+]
+
+[[package]]
+name = "httpward_block_gateway"
+version = "0.0.1-alpha.1"
+dependencies = [
+ "async-trait",
+ "cargo-husky",
+ "httpward-core",
+ "httpward_rate_limit_module",
+ "rama",
+ "serde",
 ]
 
 [[package]]

@@ -5,7 +5,8 @@ members = [
     "httpward-docs",
     "httpward-core",
     "httpward-modules/httpward_log_module",
-    "httpward-modules/httpward_rate_limit_module"
+    "httpward-modules/httpward_rate_limit_module",
+    "httpward-modules/httpward_block_gateway"
 ]
 
 [workspace.dependencies]
@@ -23,6 +24,7 @@ resolver = "0.1.3"
 httpward-core = { version = "0.0.1-alpha.1", path = "./httpward-core" }
 httpward_log_module = { version = "0.0.1-alpha.1", path = "./httpward-modules/httpward_log_module" }
 httpward_rate_limit_module = { version = "0.0.1-alpha.1", path = "./httpward-modules/httpward_rate_limit_module" }
+httpward_block_gateway = { version = "0.0.1-alpha.1", path = "./httpward-modules/httpward_block_gateway" }
 
 [profile.dev]
 debug = true

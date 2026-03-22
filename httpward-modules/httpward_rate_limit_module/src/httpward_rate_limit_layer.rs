@@ -14,13 +14,12 @@
 use async_trait::async_trait;
 use httpward_core::core::HttpWardContext;
 use httpward_core::core::server_models::server_instance::ServerInstance;
-use httpward_core::error::ErrorHandler;
 use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
 use httpward_core::httpward_middleware::next::Next;
 use httpward_core::httpward_middleware::{BoxError, HttpWardMiddleware};
 use httpward_core::module_logging::ModuleLogger;
 use httpward_core::{module_log_debug, module_log_error, module_log_info, module_log_warn};
-use rama::http::{Body, HeaderMap, Request, Response, StatusCode};
+use rama::http::{Body, HeaderMap, Request, Response};
 use rama::net::fingerprint::Ja4;
 use rama::net::tls::ProtocolVersion;
 use std::sync::Arc;
@@ -104,32 +103,6 @@ fn matched_route_label(httpward_ctx: &HttpWardContext) -> Option<String> {
     None
 }
 
-fn status_code_or_default(status_code: u16) -> StatusCode {
-    StatusCode::from_u16(status_code).unwrap_or(StatusCode::TOO_MANY_REQUESTS)
-}
-
-/// Try to load rate limit config from matched route.
-fn load_config_from_context(
-    httpward_ctx: &HttpWardContext,
-) -> std::sync::Arc<HttpWardRateLimitConfig> {
-    match httpward_ctx.middleware_config_typed_from_matched_route::<HttpWardRateLimitConfig>(env!(
-        "CARGO_PKG_NAME"
-    )) {
-        Ok(Some(config)) => {
-            module_log_debug!("Loaded rate-limit config from matched route");
-            config
-        }
-        Ok(None) => {
-            module_log_debug!("No rate-limit config in matched route, using defaults");
-            std::sync::Arc::new(HttpWardRateLimitConfig::default())
-        }
-        Err(e) => {
-            module_log_warn!("Failed to parse rate-limit config: {}", e);
-            std::sync::Arc::new(HttpWardRateLimitConfig::default())
-        }
-    }
-}
-
 #[async_trait]
 impl HttpWardMiddleware for HttpWardRateLimitLayer {
     fn init(&self, server_instance: &Arc<ServerInstance>) -> Result<(), BoxError> {
@@ -189,16 +162,6 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
         let route_key = httpward_ctx.and_then(matched_route_key);
         let route_scope = httpward_ctx.and_then(matched_route_label);
 
-        // Convert YAML config to internal format
-        let config = if let Some(httpward_ctx) = httpward_ctx {
-            load_config_from_context(httpward_ctx)
-        } else {
-            module_log_warn!("HttpWardContext not found, rate limiter will use default scope");
-            std::sync::Arc::new(HttpWardRateLimitConfig::default())
-        };
-
-        let internal_config = config.to_internal();
-
         let mut ja4_fp = None;
         let client_ip = httpward_ctx
             .map(|context| context.client_ip.to_string())
@@ -226,12 +189,7 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
 
         let header_fp = extract_header_fingerprint(req.headers());
 
-        let mut rate_limit_context =
-            HttpWardRateLimitContext::new().with_client_ip(client_ip.clone());
-
-        if let Some(route_scope) = route_scope.clone() {
-            rate_limit_context = rate_limit_context.with_matched_route_scope(route_scope);
-        }
+        let mut rate_limit_context = HttpWardRateLimitContext::new();
 
         if let Some(header_fp) = header_fp.clone() {
             rate_limit_context = rate_limit_context.with_header_fp(header_fp);
@@ -239,16 +197,6 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
 
         if let Some(ja4_fp) = ja4_fp.clone() {
             rate_limit_context = rate_limit_context.with_ja4_fp(ja4_fp);
-        }
-
-        // Cross-DLL storage: available to subsequent dynamic middlewares.
-        if let Err(e) = ctx.insert_shared("httpward_rate_limit.context", &rate_limit_context) {
-            module_log_warn!("Failed to write shared rate-limit context: {}", e);
-        }
-
-        // Best effort for static middleware that still reads typed Rama extensions.
-        if let Some(rama_ctx) = ctx.rama_context_mut() {
-            rama_ctx.insert(rate_limit_context);
         }
 
         module_log_info!(
@@ -298,38 +246,38 @@ impl HttpWardMiddleware for HttpWardRateLimitLayer {
             }
         }
 
-        if checks.is_empty() {
+        if !checks.is_empty() {
+            match manager.check_all_with_results(&checks).await {
+                Ok(results) => {
+                    module_log_debug!(
+                        "HttpWardRateLimitLayer: check_all_with_results — allowed={}, checks={}",
+                        results.allowed,
+                        results.checks.len(),
+                    );
+                    rate_limit_context = rate_limit_context.with_check_results(results);
+                }
+                Err(error) => {
+                    module_log_error!(
+                        "HttpWardRateLimitLayer: Error checking rate limits: {}",
+                        error
+                    );
+                }
+            }
+        } else {
             module_log_debug!(
                 "HttpWardRateLimitLayer: No active rules, skipping rate-limit checks"
             );
-            return next.run(ctx, req).await;
         }
 
-        match manager.check_all(&checks).await {
-            Ok(allowed) => {
-                if !allowed {
-                    module_log_warn!(
-                        "HttpWardRateLimitLayer: Request rate limited, scope {:?}, IP: {}",
-                        route_scope,
-                        client_ip
-                    );
+        // Cross-DLL storage: available to subsequent dynamic middlewares.
+        // Inserted after checks so results are included.
+        if let Err(e) = ctx.insert_shared("httpward_rate_limit.context", &rate_limit_context) {
+            module_log_warn!("Failed to write shared rate-limit context: {}", e);
+        }
 
-                    let error_handler = ErrorHandler::default();
-                    let status = status_code_or_default(internal_config.response.status_code);
-                    match error_handler.create_error_response_with_code(status) {
-                        Ok(response) => return Ok(response),
-                        Err(e) => {
-                            return Err(format!("Failed to create error response: {}", e).into());
-                        }
-                    }
-                }
-            }
-            Err(error) => {
-                module_log_error!(
-                    "HttpWardRateLimitLayer: Error checking rate limits: {}",
-                    error
-                );
-            }
+        // Best effort for static middleware that still reads typed Rama extensions.
+        if let Some(rama_ctx) = ctx.rama_context_mut() {
+            rama_ctx.insert(rate_limit_context);
         }
 
         module_log_debug!("HttpWardRateLimitLayer: Request allowed, proceeding to next middleware");

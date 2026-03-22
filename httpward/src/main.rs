@@ -23,6 +23,8 @@ use tracing_subscriber::EnvFilter;
 // !!! STATIC MODULES ONLY FOR DEBUG!!!
 // Import static modules ONLY FOR DEBUG
 #[cfg(feature = "static_modules")]
+use httpward_block_gateway::HttpWardBlockGatewayLayer;
+#[cfg(feature = "static_modules")]
 use httpward_log_module::HttpWardLogLayer;
 #[cfg(feature = "static_modules")]
 use httpward_rate_limit_module::HttpWardRateLimitLayer;
@@ -45,6 +47,12 @@ fn load_middleware_manager(
             (
                 "httpward_rate_limit_module",
                 Arc::new(HttpWardRateLimitLayer::new())
+                    as Arc<dyn HttpWardMiddleware + Send + Sync>,
+            ),
+            #[cfg(feature = "static_modules")]
+            (
+                "httpward_block_gateway",
+                Arc::new(HttpWardBlockGatewayLayer::new())
                     as Arc<dyn HttpWardMiddleware + Send + Sync>,
             ),
         ];
