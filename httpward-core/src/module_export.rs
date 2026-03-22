@@ -76,18 +76,17 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
     logger.info("destroyed middleware");
 }
 
-/// Macro to generate all required module export functions
-/// This eliminates boilerplate code for new modules
+/// Generates all required FFI export functions for an HttpWard middleware module.
 ///
-/// # Usage Options
+/// # Usage
 ///
-/// ## 1. Automatic module name (recommended)
+/// ## Automatic name from `Cargo.toml` (recommended)
 /// ```rust
 /// use httpward_core::export_middleware_module;
 /// use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
 /// use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 /// use httpward_core::httpward_middleware::next::Next;
-/// use rama::{Context, http::{Body, Request, Response}};
+/// use rama::http::{Body, Request, Response};
 /// use async_trait::async_trait;
 ///
 /// #[derive(Default)]
@@ -95,30 +94,25 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 ///
 /// #[async_trait]
 /// impl HttpWardMiddleware for MyMiddleware {
-///     fn name(&self) -> Option<&'static str> {
-///         Some("my_middleware")
-///     }
-///
+///     fn name(&self) -> Option<&'static str> { Some("my_middleware") }
 ///     async fn handle(
-///         &self,
-///         _ctx: &mut HttpwardMiddlewareContext,
-///         request: Request<Body>,
-///         next: Next<'_>,
+///         &self, _ctx: &mut HttpwardMiddlewareContext,
+///         request: Request<Body>, next: Next<'_>,
 ///     ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
 ///         next.run(_ctx, request).await
 ///     }
 /// }
 ///
-/// export_middleware_module!("my_module", MyMiddleware);  // Use explicit name for doctest
+/// export_middleware_module!(MyMiddleware);
 /// ```
 ///
-/// ## 2. Custom module name
+/// ## Explicit name
 /// ```rust
 /// use httpward_core::export_middleware_module;
 /// use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
 /// use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
 /// use httpward_core::httpward_middleware::next::Next;
-/// use rama::{Context, http::{Body, Request, Response}};
+/// use rama::http::{Body, Request, Response};
 /// use async_trait::async_trait;
 ///
 /// #[derive(Default)]
@@ -126,15 +120,10 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 ///
 /// #[async_trait]
 /// impl HttpWardMiddleware for MyMiddleware {
-///     fn name(&self) -> Option<&'static str> {
-///         Some("my_middleware")
-///     }
-///
+///     fn name(&self) -> Option<&'static str> { Some("my_middleware") }
 ///     async fn handle(
-///         &self,
-///         _ctx: &mut HttpwardMiddlewareContext,
-///         request: Request<Body>,
-///         next: Next<'_>,
+///         &self, _ctx: &mut HttpwardMiddlewareContext,
+///         request: Request<Body>, next: Next<'_>,
 ///     ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
 ///         next.run(_ctx, request).await
 ///     }
@@ -143,57 +132,18 @@ pub unsafe extern "C" fn generic_destroy_middleware(ptr: MiddlewareFatPtr) {
 /// export_middleware_module!("custom_name", MyMiddleware);
 /// ```
 ///
-/// ## 3. Environment variable name (example with literal)
-/// ```rust
-/// use httpward_core::export_middleware_module;
-/// use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
-/// use httpward_core::httpward_middleware::middleware_trait::HttpWardMiddleware;
-/// use httpward_core::httpward_middleware::next::Next;
-/// use rama::{Context, http::{Body, Request, Response}};
-/// use async_trait::async_trait;
-///
-/// #[derive(Default)]
-/// struct MyMiddleware;
-///
-/// #[async_trait]
-/// impl HttpWardMiddleware for MyMiddleware {
-///     fn name(&self) -> Option<&'static str> {
-///         Some("my_middleware")
-///     }
-///
-///     async fn handle(
-///         &self,
-///         _ctx: &mut HttpwardMiddlewareContext,
-///         request: Request<Body>,
-///         next: Next<'_>,
-///     ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
-///         next.run(_ctx, request).await
-///     }
-/// }
-///
-/// export_middleware_module!("my_module_name", MyMiddleware);
-/// ```
-///
-/// # Generated Functions
-/// - `module_set_logger` - Sets up module logger with the given name
-/// - `create_middleware` - Creates middleware instance of type T
-/// - `destroy_middleware` - Destroys middleware instance
+/// # Generated FFI functions
+/// - `{name}_module_set_logger` — registers host log callbacks
+/// - `{name}_create_middleware` — allocates a middleware instance
+/// - `{name}_destroy_middleware` — deallocates a middleware instance
 #[macro_export]
 macro_rules! export_middleware_module {
-    // Case 1: Only middleware type - auto-detect name from Cargo.toml
+    // Only middleware type — name taken from CARGO_PKG_NAME at compile time
     ($middleware_type:ty) => {
-        $crate::export_middleware_module!(env: "CARGO_PKG_NAME", $middleware_type);
+        $crate::export_middleware_module!(env!("CARGO_PKG_NAME"), $middleware_type);
     };
 
-    // Case 2: Environment variable + middleware type
-    (env: $env_var:literal, $middleware_type:ty) => {
-        $crate::export_middleware_module!(
-            env!($env_var),
-            $middleware_type
-        );
-    };
-
-    // Case 3: Explicit name + middleware type
+    // Explicit name + middleware type
     ($module_name:expr, $middleware_type:ty) => {
         $crate::paste::paste! {
             #[unsafe(no_mangle)]
@@ -231,46 +181,33 @@ macro_rules! export_middleware_module {
     };
 }
 
-/// Alternative macro for modules that need custom middleware creation logic
-/// This provides the logger setup but allows custom create/destroy functions
+/// Generates only the `{name}_module_set_logger` FFI export for modules that
+/// need custom `create_middleware` / `destroy_middleware` implementations.
 ///
-/// # Usage Options
+/// # Usage
 ///
-/// ## 1. Automatic module name (recommended)
+/// ## Automatic name from `Cargo.toml` (recommended)
 /// ```rust
 /// use httpward_core::export_module_with_custom_middleware;
-///
-/// export_module_with_custom_middleware!("my_module");  // Use explicit name for doctest
+/// export_module_with_custom_middleware!();
 /// ```
 ///
-/// ## 2. Custom module name
+/// ## Explicit name
 /// ```rust
 /// use httpward_core::export_module_with_custom_middleware;
-///
 /// export_module_with_custom_middleware!("custom_name");
 /// ```
 ///
-/// ## 3. Environment variable name (example with literal)
-/// ```rust
-/// use httpward_core::export_module_with_custom_middleware;
-///
-/// export_module_with_custom_middleware!("my_module_name");
-/// ```
+/// You must still provide `{name}_create_middleware` and `{name}_destroy_middleware`
+/// as `#[no_mangle] pub extern "C"` functions.
 #[macro_export]
 macro_rules! export_module_with_custom_middleware {
-    // Case 1: No arguments - auto-detect name from Cargo.toml
+    // No arguments — name taken from CARGO_PKG_NAME at compile time
     () => {
-        $crate::export_module_with_custom_middleware!(env: "CARGO_PKG_NAME");
+        $crate::export_module_with_custom_middleware!(env!("CARGO_PKG_NAME"));
     };
 
-    // Case 2: Environment variable
-    (env: $env_var:literal) => {
-        $crate::export_module_with_custom_middleware!(
-            env!($env_var)
-        );
-    };
-
-    // Case 3: Explicit name
+    // Explicit name
     ($module_name:expr) => {
         $crate::paste::paste! {
             #[unsafe(no_mangle)]
@@ -294,26 +231,6 @@ macro_rules! export_module_with_custom_middleware {
             // Note: You must provide your own [<$module_name _create_middleware>] and [<$module_name _destroy_middleware>] functions
         }
     };
-}
-
-/// Helper trait for middleware that can be created with default constructor
-/// This is used by the generic_create_middleware function
-pub trait DefaultMiddleware: HttpWardMiddleware + Send + Sync + 'static {
-    fn create_default() -> Self
-    where
-        Self: Sized;
-}
-
-impl<T> DefaultMiddleware for T
-where
-    T: HttpWardMiddleware + Send + Sync + 'static + Default,
-{
-    fn create_default() -> Self
-    where
-        Self: Sized,
-    {
-        T::default()
-    }
 }
 
 #[cfg(test)]
