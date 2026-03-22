@@ -179,11 +179,7 @@ impl HttpwardMiddlewareContext {
     /// **Do not call `downcast` on it from a different DLL** — `TypeId` is
     /// per-binary and will not match.  Use the owning module's typed accessor
     /// instead (it performs the downcast inside the correct binary).
-    pub fn set_service<T: Any + Send + Sync + 'static>(
-        &mut self,
-        key: &'static str,
-        svc: Arc<T>,
-    ) {
+    pub fn set_service<T: Any + Send + Sync + 'static>(&mut self, key: &'static str, svc: Arc<T>) {
         self.services.insert(key, svc as Arc<dyn Any + Send + Sync>);
     }
 
@@ -191,10 +187,7 @@ impl HttpwardMiddlewareContext {
     ///
     /// Prefer the owning module's typed accessor over calling `downcast` here
     /// directly (see [`set_service`] for the DLL boundary caveat).
-    pub fn get_service_raw(
-        &self,
-        key: &'static str,
-    ) -> Option<Arc<dyn Any + Send + Sync>> {
+    pub fn get_service_raw(&self, key: &'static str) -> Option<Arc<dyn Any + Send + Sync>> {
         self.services.get(key).cloned()
     }
 
@@ -204,10 +197,7 @@ impl HttpwardMiddlewareContext {
     }
 
     /// Remove and return the service registered under the given key.
-    pub fn remove_service(
-        &mut self,
-        key: &'static str,
-    ) -> Option<Arc<dyn Any + Send + Sync>> {
+    pub fn remove_service(&mut self, key: &'static str) -> Option<Arc<dyn Any + Send + Sync>> {
         self.services.remove(key)
     }
 }

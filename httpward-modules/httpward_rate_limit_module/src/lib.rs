@@ -22,8 +22,8 @@ httpward_core::export_middleware_module!(HttpWardRateLimitLayer);
 // stored.  Calling `downcast` on the raw `Arc<dyn Any>` from a different DLL
 // binary would always fail due to per-binary `TypeId` instability.
 
-use std::sync::Arc;
 use httpward_core::httpward_middleware::context::HttpwardMiddlewareContext;
+use std::sync::Arc;
 
 /// Retrieve the `Arc<RateLimitManager>` that was registered in `ctx` by
 /// `HttpWardRateLimitLayer::handle()`.
@@ -48,5 +48,8 @@ pub fn get_manager_from_context(
     ctx: &HttpwardMiddlewareContext,
 ) -> Option<Arc<core::rate_limit_manager::RateLimitManager>> {
     ctx.get_service_raw(core::rate_limit_manager::SERVICE_KEY)
-        .and_then(|arc| arc.downcast::<core::rate_limit_manager::RateLimitManager>().ok())
+        .and_then(|arc| {
+            arc.downcast::<core::rate_limit_manager::RateLimitManager>()
+                .ok()
+        })
 }

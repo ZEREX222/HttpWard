@@ -247,7 +247,7 @@ pub struct RateLimiterStats {
 /// Use `httpward_rate_limit_module::get_manager_from_context` to retrieve a
 /// typed `Arc<RateLimitManager>` — do not downcast the raw service directly
 /// from another DLL binary.
-pub const SERVICE_KEY: &'static str = "httpward_rate_limit::manager";
+pub const SERVICE_KEY: &str = "httpward_rate_limit::manager";
 
 static RATE_LIMIT_MANAGER: OnceLock<Arc<RateLimitManager>> = OnceLock::new();
 

@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use crate::core::{
     HttpWardRateLimitConfig, HttpWardRateLimitContext, RateLimitKeyKind, RateLimitScope,
-    RouteScopeKey, init_global_manager, SERVICE_KEY,
+    RouteScopeKey, SERVICE_KEY, init_global_manager,
 };
 
 /// Extract header fingerprint from specific headers
