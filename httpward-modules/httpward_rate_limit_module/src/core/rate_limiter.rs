@@ -712,19 +712,19 @@ mod tests {
 
         // 2. Wait 1 second (half of cooldown period)
         thread::sleep(Duration::from_secs(1));
-        
+
         // 3. Make another request during cooldown - this should restart the timer
         assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1")); // cooldown restarted
 
         // 4. Wait another 1 second (would have been enough for original cooldown)
         thread::sleep(Duration::from_secs(1));
-        
+
         // 5. Should still be blocked because cooldown was restarted
         assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1"));
 
         // 6. Wait full 2 seconds after the restart
         thread::sleep(Duration::from_secs(2));
-        
+
         // 7. Now should be allowed
         assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "192.168.1.1"));
     }
@@ -752,13 +752,16 @@ mod tests {
         // Make multiple requests during cooldown, each should restart the timer
         for i in 0..5 {
             thread::sleep(Duration::from_millis(100)); // Wait 100ms
-            assert!(!limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"), 
-                    "Request {} should be blocked (cooldown restarted)", i + 1);
+            assert!(
+                !limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"),
+                "Request {} should be blocked (cooldown restarted)",
+                i + 1
+            );
         }
 
         // After 5 restarts, we need to wait full cooldown period from the last restart
         thread::sleep(Duration::from_millis(500));
-        
+
         // Now should be allowed
         assert!(limiter.check(RateLimitKeyKind::Ip, RateLimitScope::Global, "10.0.0.1"));
     }
